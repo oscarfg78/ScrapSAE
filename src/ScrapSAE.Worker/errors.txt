@@ -1,0 +1,42 @@
+  Determining projects to restore...
+  Todos los proyectos están actualizados para la restauración.
+  ScrapSAE.Core -> C:\Proyectos\ScrapSAE\src\ScrapSAE.Core\bin\Debug\net8.0\ScrapSAE.Core.dll
+C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\Data\SupabaseServices.cs(173,9): error CS0103: El nombre '_logger' no existe en el contexto actual [C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\ScrapSAE.Infrastructure.csproj]
+C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\Data\SupabaseServices.cs(179,9): error CS0103: El nombre '_httpClient' no existe en el contexto actual [C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\ScrapSAE.Infrastructure.csproj]
+C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\Data\SupabaseServices.cs(180,9): error CS0103: El nombre '_httpClient' no existe en el contexto actual [C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\ScrapSAE.Infrastructure.csproj]
+C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\Data\SupabaseServices.cs(181,9): error CS0103: El nombre '_httpClient' no existe en el contexto actual [C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\ScrapSAE.Infrastructure.csproj]
+C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\Data\SupabaseServices.cs(239,9): error CS0103: El nombre '_logger' no existe en el contexto actual [C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\ScrapSAE.Infrastructure.csproj]
+C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\Data\SupabaseServices.cs(245,9): error CS0103: El nombre '_httpClient' no existe en el contexto actual [C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\ScrapSAE.Infrastructure.csproj]
+C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\Data\SupabaseServices.cs(246,9): error CS0103: El nombre '_httpClient' no existe en el contexto actual [C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\ScrapSAE.Infrastructure.csproj]
+C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\Data\SupabaseServices.cs(247,9): error CS0103: El nombre '_httpClient' no existe en el contexto actual [C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\ScrapSAE.Infrastructure.csproj]
+C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\Data\SupabaseServices.cs(196,34): error CS0103: El nombre '_httpClient' no existe en el contexto actual [C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\ScrapSAE.Infrastructure.csproj]
+C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\Data\SupabaseServices.cs(204,13): error CS0103: El nombre '_logger' no existe en el contexto actual [C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\ScrapSAE.Infrastructure.csproj]
+C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\Data\SupabaseServices.cs(262,34): error CS0103: El nombre '_httpClient' no existe en el contexto actual [C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\ScrapSAE.Infrastructure.csproj]
+C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\Data\SupabaseServices.cs(270,13): error CS0103: El nombre '_logger' no existe en el contexto actual [C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\ScrapSAE.Infrastructure.csproj]
+C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\Data\SupabaseServices.cs(213,34): error CS0103: El nombre '_httpClient' no existe en el contexto actual [C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\ScrapSAE.Infrastructure.csproj]
+C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\Data\SupabaseServices.cs(223,13): error CS0103: El nombre '_logger' no existe en el contexto actual [C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\ScrapSAE.Infrastructure.csproj]
+C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\Data\SupabaseServices.cs(279,34): error CS0103: El nombre '_httpClient' no existe en el contexto actual [C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\ScrapSAE.Infrastructure.csproj]
+C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\Data\SupabaseServices.cs(289,13): error CS0103: El nombre '_logger' no existe en el contexto actual [C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\ScrapSAE.Infrastructure.csproj]
+
+ERROR al compilar.
+
+C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\Data\SupabaseServices.cs(173,9): error CS0103: El nombre '_logger' no existe en el contexto actual [C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\ScrapSAE.Infrastructure.csproj]
+C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\Data\SupabaseServices.cs(179,9): error CS0103: El nombre '_httpClient' no existe en el contexto actual [C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\ScrapSAE.Infrastructure.csproj]
+C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\Data\SupabaseServices.cs(180,9): error CS0103: El nombre '_httpClient' no existe en el contexto actual [C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\ScrapSAE.Infrastructure.csproj]
+C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\Data\SupabaseServices.cs(181,9): error CS0103: El nombre '_httpClient' no existe en el contexto actual [C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\ScrapSAE.Infrastructure.csproj]
+C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\Data\SupabaseServices.cs(239,9): error CS0103: El nombre '_logger' no existe en el contexto actual [C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\ScrapSAE.Infrastructure.csproj]
+C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\Data\SupabaseServices.cs(245,9): error CS0103: El nombre '_httpClient' no existe en el contexto actual [C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\ScrapSAE.Infrastructure.csproj]
+C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\Data\SupabaseServices.cs(246,9): error CS0103: El nombre '_httpClient' no existe en el contexto actual [C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\ScrapSAE.Infrastructure.csproj]
+C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\Data\SupabaseServices.cs(247,9): error CS0103: El nombre '_httpClient' no existe en el contexto actual [C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\ScrapSAE.Infrastructure.csproj]
+C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\Data\SupabaseServices.cs(196,34): error CS0103: El nombre '_httpClient' no existe en el contexto actual [C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\ScrapSAE.Infrastructure.csproj]
+C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\Data\SupabaseServices.cs(204,13): error CS0103: El nombre '_logger' no existe en el contexto actual [C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\ScrapSAE.Infrastructure.csproj]
+C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\Data\SupabaseServices.cs(262,34): error CS0103: El nombre '_httpClient' no existe en el contexto actual [C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\ScrapSAE.Infrastructure.csproj]
+C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\Data\SupabaseServices.cs(270,13): error CS0103: El nombre '_logger' no existe en el contexto actual [C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\ScrapSAE.Infrastructure.csproj]
+C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\Data\SupabaseServices.cs(213,34): error CS0103: El nombre '_httpClient' no existe en el contexto actual [C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\ScrapSAE.Infrastructure.csproj]
+C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\Data\SupabaseServices.cs(223,13): error CS0103: El nombre '_logger' no existe en el contexto actual [C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\ScrapSAE.Infrastructure.csproj]
+C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\Data\SupabaseServices.cs(279,34): error CS0103: El nombre '_httpClient' no existe en el contexto actual [C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\ScrapSAE.Infrastructure.csproj]
+C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\Data\SupabaseServices.cs(289,13): error CS0103: El nombre '_logger' no existe en el contexto actual [C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\ScrapSAE.Infrastructure.csproj]
+    0 Advertencia(s)
+    16 Errores
+
+Tiempo transcurrido 00:00:01.21
