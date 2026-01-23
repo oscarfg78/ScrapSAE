@@ -36,7 +36,8 @@ public class SupabaseStagingService : IStagingService
         
         _jsonOptions = new JsonSerializerOptions
         {
-            PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower
+            PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+            PropertyNameCaseInsensitive = true
         };
     }
 
@@ -50,9 +51,16 @@ public class SupabaseStagingService : IStagingService
             
             var response = await _httpClient.PostAsJsonAsync(
                 $"{_baseUrl}/rest/v1/staging_products", 
-                product);
-            
-            response.EnsureSuccessStatusCode();
+                product,
+                _jsonOptions);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var error = await response.Content.ReadAsStringAsync();
+                _logger.LogError("Error creating staging product. Status: {Status}. Response: {Response}",
+                    response.StatusCode, error);
+                response.EnsureSuccessStatusCode();
+            }
             
             var result = await response.Content.ReadFromJsonAsync<StagingProduct[]>(_jsonOptions);
             return result?.FirstOrDefault() ?? product;
@@ -184,7 +192,8 @@ public class SupabaseSyncLogService : ISyncLogService
         
         _jsonOptions = new JsonSerializerOptions
         {
-            PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower
+            PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+            PropertyNameCaseInsensitive = true
         };
     }
 
@@ -252,7 +261,8 @@ public class SupabaseExecutionReportService : IExecutionReportService
         
         _jsonOptions = new JsonSerializerOptions
         {
-            PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower
+            PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+            PropertyNameCaseInsensitive = true
         };
     }
 

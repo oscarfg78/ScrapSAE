@@ -14,11 +14,13 @@ CREATE TABLE IF NOT EXISTS config_sites (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(100) NOT NULL,
     base_url VARCHAR(500) NOT NULL,
+    login_url VARCHAR(1000),
     selectors JSONB NOT NULL DEFAULT '{}',
     cron_expression VARCHAR(50),
     requires_login BOOLEAN DEFAULT FALSE,
     credentials_encrypted TEXT,
     is_active BOOLEAN DEFAULT TRUE,
+    max_products_per_scrape INT DEFAULT 0,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -27,6 +29,7 @@ COMMENT ON TABLE config_sites IS 'Configuración de sitios proveedores para scra
 COMMENT ON COLUMN config_sites.selectors IS 'JSON con selectores CSS/XPath para extracción';
 COMMENT ON COLUMN config_sites.cron_expression IS 'Expresión cron para programación (ej: 0 3 * * 1)';
 COMMENT ON COLUMN config_sites.credentials_encrypted IS 'Credenciales encriptadas AES-256 si requiere login';
+COMMENT ON COLUMN config_sites.login_url IS 'URL de inicio de sesiÃ³n si el sitio requiere login';
 
 -- ============================================
 

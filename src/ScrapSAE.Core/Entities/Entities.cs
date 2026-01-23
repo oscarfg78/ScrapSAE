@@ -8,11 +8,13 @@ public class SiteProfile
     public Guid Id { get; set; }
     public string Name { get; set; } = string.Empty;
     public string BaseUrl { get; set; } = string.Empty;
+    public string? LoginUrl { get; set; }
     public object? Selectors { get; set; } // JSONB from Supabase
     public string? CronExpression { get; set; }
     public bool RequiresLogin { get; set; }
     public string? CredentialsEncrypted { get; set; }
     public bool IsActive { get; set; } = true;
+    public int MaxProductsPerScrape { get; set; } = 0; // 0 = unlimited
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 }
