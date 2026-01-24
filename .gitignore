@@ -110,3 +110,7 @@ dist/
 
 # Word document extracted content
 *_content.txt
+.playwright-profile/Default
+.playwright-profile/GraphiteDawnCache
+.playwright-profile/GrShaderCache
+.playwright-profile/ShaderCache

@@ -1,0 +1,283 @@
+<Window x:Class="ScrapSAE.Desktop.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="ScrapSAE - Consola"
+        Height="900"
+        Width="1300"
+        WindowStartupLocation="CenterScreen">
+    <Grid Background="#F6F7FB">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Border Background="#1F2937" Padding="16">
+            <DockPanel>
+                <TextBlock Text="ScrapSAE Console" Foreground="White" FontSize="20" FontWeight="SemiBold" />
+                <Button DockPanel.Dock="Right"
+                        Content="Refrescar"
+                        Command="{Binding LoadAllCommand}"
+                        Padding="12,6"
+                        Background="#F59E0B"
+                        Foreground="White"
+                        BorderThickness="0"
+                        Margin="12,0,0,0" />
+            </DockPanel>
+        </Border>
+
+        <TabControl Grid.Row="1" Margin="16">
+            <TabItem Header="Health">
+                <Grid Margin="12">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                        <Button Content="Probar Backend" Command="{Binding TestBackendCommand}" Margin="0,0,8,0" />
+                        <Button Content="Ejecutar Diagnóstico" Command="{Binding RunDiagnosticsCommand}" />
+                    </StackPanel>
+                    <Grid Grid.Row="1">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Border Grid.Column="0" Background="White" Padding="12" Margin="0,0,8,0">
+                            <StackPanel>
+                                <TextBlock Text="Estado Backend" FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding BackendStatus}" FontSize="16" />
+                                <TextBlock Text="Supabase" FontWeight="SemiBold" Margin="0,12,0,0" />
+                                <TextBlock Text="{Binding SupabaseStatus}" FontSize="16" />
+                                <TextBlock Text="SAE SDK" FontWeight="SemiBold" Margin="0,12,0,0" />
+                                <TextBlock Text="{Binding SaeStatus}" FontSize="16" />
+                                <TextBlock Text="Base de datos" FontWeight="SemiBold" Margin="0,12,0,0" />
+                                <TextBlock Text="{Binding DatabaseStatus}" FontSize="16" />
+                            </StackPanel>
+                        </Border>
+                        <Border Grid.Column="1" Background="White" Padding="12" Margin="8,0,0,0">
+                            <StackPanel>
+                                <TextBlock Text="Detalles" FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding DiagnosticsResult.SupabaseMessage}" TextWrapping="Wrap" Margin="0,8,0,0" />
+                                <TextBlock Text="{Binding DiagnosticsResult.SaeMessage}" TextWrapping="Wrap" Margin="0,8,0,0" />
+                                <TextBlock Text="Última verificación (UTC)" FontWeight="SemiBold" Margin="0,12,0,0" />
+                                <TextBlock Text="{Binding DiagnosticsResult.CheckedAtUtc}" />
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="Configuración">
+                <Grid Margin="12">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                        <Button Content="Cargar" Command="{Binding LoadSettingsCommand}" Margin="0,0,8,0" />
+                        <Button Content="Guardar" Command="{Binding SaveSettingsCommand}" Margin="0,0,8,0" />
+                        <Button Content="Diagnóstico" Command="{Binding RunDiagnosticsCommand}" />
+                    </StackPanel>
+                    <Grid Grid.Row="1">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Border Grid.Column="0" Background="White" Padding="12" Margin="0,0,8,0">
+                            <StackPanel>
+                                <TextBlock Text="Supabase URL" FontWeight="SemiBold" />
+                                <TextBox Text="{Binding SupabaseUrl}" Margin="0,6,0,12" />
+                                <TextBlock Text="Supabase Service Key" FontWeight="SemiBold" />
+                                <TextBox Text="{Binding SupabaseServiceKey}" Margin="0,6,0,12" />
+                                <TextBlock Text="SAE SDK Path" FontWeight="SemiBold" />
+                                <TextBox Text="{Binding SaeSdkPath}" Margin="0,6,0,12" />
+                            </StackPanel>
+                        </Border>
+                        <Border Grid.Column="1" Background="White" Padding="12" Margin="8,0,0,0">
+                            <StackPanel>
+                                <TextBlock Text="Usuario SAE" FontWeight="SemiBold" />
+                                <TextBox Text="{Binding SaeUser}" Margin="0,6,0,12" />
+                                <TextBlock Text="Password SAE" FontWeight="SemiBold" />
+                                <TextBox Text="{Binding SaePassword}" Margin="0,6,0,12" />
+                                <TextBlock Text="Nota" FontWeight="SemiBold" Margin="0,12,0,0" />
+                                <TextBlock Text="Guarda la configuración y reinicia el backend para aplicar cambios." TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+                </Grid>
+            </TabItem>
+            <TabItem Header="Proveedores">
+                <Grid Margin="8">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                        <Button Content="Crear" Command="{Binding CreateSiteCommand}" Margin="0,0,8,0" />
+                        <Button Content="Actualizar" Command="{Binding UpdateSiteCommand}" Margin="0,0,8,0" />
+                        <Button Content="Eliminar" Command="{Binding DeleteSiteCommand}" />
+                    </StackPanel>
+                    <DataGrid Grid.Row="1"
+                              ItemsSource="{Binding Sites}"
+                              SelectedItem="{Binding SelectedSite}"
+                              AutoGenerateColumns="True"
+                              IsReadOnly="False"
+                              CanUserAddRows="False" />
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="Staging Productos">
+                <Grid Margin="8">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                        <Button Content="Crear" Command="{Binding CreateStagingCommand}" Margin="0,0,8,0" />
+                        <Button Content="Actualizar" Command="{Binding UpdateStagingCommand}" Margin="0,0,8,0" />
+                        <Button Content="Eliminar" Command="{Binding DeleteStagingCommand}" />
+                    </StackPanel>
+                    <DataGrid Grid.Row="1"
+                              ItemsSource="{Binding StagingProducts}"
+                              SelectedItem="{Binding SelectedStagingProduct}"
+                              AutoGenerateColumns="True"
+                              IsReadOnly="False"
+                              CanUserAddRows="False" />
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="Mapeo Categorías">
+                <Grid Margin="8">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                        <Button Content="Crear" Command="{Binding CreateCategoryCommand}" Margin="0,0,8,0" />
+                        <Button Content="Actualizar" Command="{Binding UpdateCategoryCommand}" Margin="0,0,8,0" />
+                        <Button Content="Eliminar" Command="{Binding DeleteCategoryCommand}" />
+                    </StackPanel>
+                    <DataGrid Grid.Row="1"
+                              ItemsSource="{Binding CategoryMappings}"
+                              SelectedItem="{Binding SelectedCategoryMapping}"
+                              AutoGenerateColumns="True"
+                              IsReadOnly="False"
+                              CanUserAddRows="False" />
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="Logs">
+                <Grid Margin="8">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                        <Button Content="Crear" Command="{Binding CreateSyncLogCommand}" Margin="0,0,8,0" />
+                        <Button Content="Actualizar" Command="{Binding UpdateSyncLogCommand}" Margin="0,0,8,0" />
+                        <Button Content="Eliminar" Command="{Binding DeleteSyncLogCommand}" />
+                    </StackPanel>
+                    <DataGrid Grid.Row="1"
+                              ItemsSource="{Binding SyncLogs}"
+                              SelectedItem="{Binding SelectedSyncLog}"
+                              AutoGenerateColumns="True"
+                              IsReadOnly="False"
+                              CanUserAddRows="False" />
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="Reportes">
+                <Grid Margin="8">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                        <Button Content="Crear" Command="{Binding CreateReportCommand}" Margin="0,0,8,0" />
+                        <Button Content="Actualizar" Command="{Binding UpdateReportCommand}" Margin="0,0,8,0" />
+                        <Button Content="Eliminar" Command="{Binding DeleteReportCommand}" />
+                    </StackPanel>
+                    <DataGrid Grid.Row="1"
+                              ItemsSource="{Binding ExecutionReports}"
+                              SelectedItem="{Binding SelectedExecutionReport}"
+                              AutoGenerateColumns="True"
+                              IsReadOnly="False"
+                              CanUserAddRows="False" />
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="Scraping">
+                <Grid Margin="8">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                        <TextBlock Text="Proveedor:" VerticalAlignment="Center" Margin="0,0,8,0" />
+                        <ComboBox ItemsSource="{Binding Sites}"
+                                  SelectedItem="{Binding SelectedSite}"
+                                  DisplayMemberPath="Name"
+                                  Width="260"
+                                  Margin="0,0,12,0" />
+                        <Button Content="Ejecutar Scraping" Command="{Binding RunScrapingCommand}" />
+                    </StackPanel>
+                    <Border Grid.Row="1" Background="#E5E7EB" Padding="12" CornerRadius="6">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="Encontrados:" FontWeight="SemiBold" Margin="0,0,6,0" />
+                            <TextBlock Text="{Binding ScrapeResult.ProductsFound}" Margin="0,0,16,0" />
+                            <TextBlock Text="Creados:" FontWeight="SemiBold" Margin="0,0,6,0" />
+                            <TextBlock Text="{Binding ScrapeResult.ProductsCreated}" Margin="0,0,16,0" />
+                            <TextBlock Text="Actualizados:" FontWeight="SemiBold" Margin="0,0,6,0" />
+                            <TextBlock Text="{Binding ScrapeResult.ProductsUpdated}" Margin="0,0,16,0" />
+                            <TextBlock Text="Omitidos:" FontWeight="SemiBold" Margin="0,0,6,0" />
+                            <TextBlock Text="{Binding ScrapeResult.ProductsSkipped}" Margin="0,0,16,0" />
+                            <TextBlock Text="Duración(ms):" FontWeight="SemiBold" Margin="0,0,6,0" />
+                            <TextBlock Text="{Binding ScrapeResult.DurationMs}" />
+                        </StackPanel>
+                    </Border>
+                    <DataGrid Grid.Row="2"
+                              ItemsSource="{Binding StagingProducts}"
+                              SelectedItem="{Binding SelectedStagingProduct}"
+                              AutoGenerateColumns="True"
+                              IsReadOnly="False"
+                              CanUserAddRows="False"
+                              Margin="0,12,0,0" />
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="SAE">
+                <Grid Margin="8">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                        <Button Content="Enviar seleccionado" Command="{Binding SendSelectedToSaeCommand}" Margin="0,0,8,0" />
+                        <Button Content="Enviar pendientes" Command="{Binding SendPendingToSaeCommand}" Margin="0,0,8,0" />
+                        <CheckBox Content="Programar envío"
+                                  IsChecked="{Binding SaeScheduleEnabled}"
+                                  Margin="12,0,8,0" />
+                        <TextBlock Text="Cada (min):" VerticalAlignment="Center" />
+                        <TextBox Text="{Binding SaeScheduleMinutes}" Width="60" Margin="6,0,0,0" />
+                    </StackPanel>
+                    <DataGrid Grid.Row="1"
+                              ItemsSource="{Binding StagingProducts}"
+                              SelectedItem="{Binding SelectedStagingProduct}"
+                              AutoGenerateColumns="True"
+                              IsReadOnly="False"
+                              CanUserAddRows="False" />
+                </Grid>
+            </TabItem>
+        </TabControl>
+
+        <StatusBar Grid.Row="2" Background="#111827">
+            <StatusBarItem>
+                <TextBlock Text="{Binding StatusMessage}" Foreground="White" />
+            </StatusBarItem>
+        </StatusBar>
+    </Grid>
+</Window>

@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS staging_products (
     raw_data TEXT,
     ai_processed_json JSONB,
     status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'validated', 'synced', 'error', 'discontinued')),
+    exclude_from_sae BOOLEAN DEFAULT FALSE,
     validation_notes TEXT,
     attempts INT DEFAULT 0,
     last_seen_at TIMESTAMPTZ,
@@ -55,6 +56,7 @@ COMMENT ON COLUMN staging_products.sku_sae IS 'SKU asignado/encontrado en SAE';
 COMMENT ON COLUMN staging_products.raw_data IS 'HTML/texto crudo extraído del scraping';
 COMMENT ON COLUMN staging_products.ai_processed_json IS 'Datos estructurados procesados por IA';
 COMMENT ON COLUMN staging_products.status IS 'Estado: pending, validated, synced, error, discontinued';
+COMMENT ON COLUMN staging_products.exclude_from_sae IS 'Exclude from SAE sync';
 
 -- ============================================
 

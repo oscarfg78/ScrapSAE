@@ -78,13 +78,23 @@ public class SupabaseServicesTests
     public void StagingProduct_StatusValues_ShouldBeValid()
     {
         // Arrange
-        var validStatuses = new[] { "pending", "validated", "synced", "error" };
+        var validStatuses = new[] { "pending", "validated", "synced", "error", "discontinued" };
         
         // Act
         var product = new StagingProduct { Status = "pending" };
         
         // Assert
         validStatuses.Should().Contain(product.Status);
+    }
+
+    [Fact]
+    public void StagingProduct_ExcludeFromSae_Default_ShouldBeFalse()
+    {
+        // Arrange & Act
+        var product = new StagingProduct();
+
+        // Assert
+        product.ExcludeFromSae.Should().BeFalse();
     }
 
     [Fact]

@@ -16,6 +16,7 @@ public class EntitiesTests
         // Assert
         product.Status.Should().Be("pending");
         product.Attempts.Should().Be(0);
+        product.ExcludeFromSae.Should().BeFalse();
     }
 
     [Fact]

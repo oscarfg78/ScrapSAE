@@ -1,5 +1,7 @@
 namespace ScrapSAE.Core.Entities;
 
+using System.Text.Json.Serialization;
+
 /// <summary>
 /// Configuración de un sitio proveedor para scraping
 /// </summary>
@@ -31,6 +33,7 @@ public class StagingProduct
     public string? RawData { get; set; }
     public string? AIProcessedJson { get; set; }
     public string Status { get; set; } = "pending";
+    public bool ExcludeFromSae { get; set; }
     public string? ValidationNotes { get; set; }
     public int Attempts { get; set; }
     public DateTime? LastSeenAt { get; set; }
@@ -38,6 +41,7 @@ public class StagingProduct
     public DateTime UpdatedAt { get; set; }
     
     // Navigation
+    [JsonIgnore]
     public virtual SiteProfile? Site { get; set; }
 }
 

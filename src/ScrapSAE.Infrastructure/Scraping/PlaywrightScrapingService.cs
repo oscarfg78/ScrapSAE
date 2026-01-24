@@ -16,6 +16,8 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
     private readonly ILogger<PlaywrightScrapingService> _logger;
     private IPlaywright? _playwright;
     private IBrowser? _browser;
+    private IBrowserContext? _context;
+    private bool _isPersistentContext;
     private readonly Random _random = new();
 
     public PlaywrightScrapingService(ILogger<PlaywrightScrapingService> logger)
@@ -23,23 +25,51 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
         _logger = logger;
     }
 
+    private async Task<IBrowserContext> GetContextAsync()
+    {
+        if (_context != null)
+        {
+            return _context;
+        }
+
+        _playwright = await Playwright.CreateAsync();
+        var headless = true;
+        var headlessEnv = Environment.GetEnvironmentVariable("SCRAPSAE_HEADLESS");
+        if (!string.IsNullOrWhiteSpace(headlessEnv) &&
+            bool.TryParse(headlessEnv, out var parsedHeadless))
+        {
+            headless = parsedHeadless;
+        }
+
+        var userDataDir = Environment.GetEnvironmentVariable("SCRAPSAE_PROFILE_DIR");
+        if (!string.IsNullOrWhiteSpace(userDataDir))
+        {
+            _context = await _playwright.Chromium.LaunchPersistentContextAsync(
+                userDataDir,
+                new BrowserTypeLaunchPersistentContextOptions
+                {
+                    Headless = headless
+                });
+            _isPersistentContext = true;
+            return _context;
+        }
+
+        _browser = await _playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+        {
+            Headless = headless
+        });
+
+        _context = await _browser.NewContextAsync();
+        _isPersistentContext = false;
+        return _context;
+    }
+
     private async Task<IBrowser> GetBrowserAsync()
     {
         if (_browser == null)
         {
-            _playwright = await Playwright.CreateAsync();
-            var headless = true;
-            var headlessEnv = Environment.GetEnvironmentVariable("SCRAPSAE_HEADLESS");
-            if (!string.IsNullOrWhiteSpace(headlessEnv) &&
-                bool.TryParse(headlessEnv, out var parsedHeadless))
-            {
-                headless = parsedHeadless;
-            }
-
-            _browser = await _playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
-            {
-                Headless = headless
-            });
+            var context = await GetContextAsync();
+            _browser = context.Browser;
         }
         return _browser;
     }
@@ -76,8 +106,7 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
                 return products;
             }
 
-            var browser = await GetBrowserAsync();
-            var context = await browser.NewContextAsync();
+            var context = await GetContextAsync();
             var page = await context.NewPageAsync();
 
             var initialUrl = site.BaseUrl;
@@ -98,8 +127,22 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
             // Handle login if required
             if (site.RequiresLogin && !string.IsNullOrEmpty(site.CredentialsEncrypted))
             {
-                _logger.LogInformation("Site {SiteName} requires login. Attempting to authenticate...", site.Name);
-                await HandleLoginAsync(page, site, cancellationToken);
+                var skipLoginEnv = Environment.GetEnvironmentVariable("SCRAPSAE_SKIP_LOGIN");
+                if (!string.IsNullOrWhiteSpace(skipLoginEnv) &&
+                    bool.TryParse(skipLoginEnv, out var skipLogin) &&
+                    skipLogin)
+                {
+                    _logger.LogInformation("Skipping login for site {SiteName} due to SCRAPSAE_SKIP_LOGIN", site.Name);
+                }
+                else if (!await IsLoggedInAsync(page))
+                {
+                    _logger.LogInformation("Site {SiteName} requires login. Attempting to authenticate...", site.Name);
+                    await HandleLoginAsync(page, site, cancellationToken);
+                }
+                else
+                {
+                    _logger.LogInformation("Detected existing login session for site {SiteName}", site.Name);
+                }
             }
             
             if (site.RequiresLogin && !string.IsNullOrEmpty(site.LoginUrl))
@@ -113,6 +156,21 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
                     });
                     await AcceptCookiesAsync(page, cancellationToken);
                     await SaveDebugScreenshotAsync(page, $"{site.Name}_post_login");
+                }
+            }
+
+            var startUrl = Environment.GetEnvironmentVariable("SCRAPSAE_START_URL");
+            if (!string.IsNullOrWhiteSpace(startUrl))
+            {
+                _logger.LogInformation("Using start URL override: {StartUrl}", startUrl);
+                var startProducts = await TryScrapeProductDetailWithVariationsAsync(
+                    page,
+                    startUrl,
+                    selectors,
+                    cancellationToken);
+                if (startProducts.Count > 0)
+                {
+                    return startProducts;
                 }
             }
 
@@ -203,7 +261,10 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
                 }
             }
 
-            await context.CloseAsync();
+            if (!_isPersistentContext)
+            {
+                await context.CloseAsync();
+            }
             
             _logger.LogInformation("Scraped {Count} products from {Site}", products.Count, site.Name);
         }
@@ -237,6 +298,17 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
             var password = credentials[1].Trim();
 
             _logger.LogInformation("Logging in to {SiteName} as {Email}", site.Name, email);
+
+            var manualLogin = Environment.GetEnvironmentVariable("SCRAPSAE_MANUAL_LOGIN");
+            if (!string.IsNullOrWhiteSpace(manualLogin) &&
+                bool.TryParse(manualLogin, out var useManual) &&
+                useManual)
+            {
+                _logger.LogInformation("Manual login enabled. Complete login in the browser window.");
+                await WaitForManualLoginAsync(page, site, cancellationToken);
+                _logger.LogInformation("Manual login completed.");
+                return;
+            }
 
             // Handle Festo-specific login
             if (site.Name.Equals("Festo", StringComparison.OrdinalIgnoreCase))
@@ -630,6 +702,10 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        if (_context != null)
+        {
+            await _context.CloseAsync();
+        }
         if (_browser != null)
         {
             await _browser.CloseAsync();
@@ -857,6 +933,343 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
         }
     }
 
+    private async Task<bool> IsLoggedInAsync(IPage page)
+    {
+        try
+        {
+            if (page.Url.Contains("auth.festo.com", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            var loginLink = page.Locator("[data-testid='navigation-login-link'], button:has-text('Inicio de sesión'), a:has-text('Inicio de sesión')");
+            if (await loginLink.CountAsync() > 0)
+            {
+                return false;
+            }
+
+            var userMenu = page.Locator(".js-account-widget, .account-menu, [data-testid='user-menu']");
+            if (await userMenu.CountAsync() > 0)
+            {
+                return true;
+            }
+        }
+        catch
+        {
+            // Ignore and fallback below.
+        }
+
+        return page.Url.Contains("festo.com/mx/es", StringComparison.OrdinalIgnoreCase) &&
+            !page.Url.Contains("loginError", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task<List<ScrapedProduct>> TryScrapeProductDetailWithVariationsAsync(
+        IPage page,
+        string startUrl,
+        SiteSelectors selectors,
+        CancellationToken cancellationToken)
+    {
+        var products = new List<ScrapedProduct>();
+        var seenProducts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        await page.GotoAsync(startUrl, new PageGotoOptions
+        {
+            WaitUntil = WaitUntilState.DOMContentLoaded,
+            Timeout = 90000
+        });
+        await AcceptCookiesAsync(page, cancellationToken);
+
+        var rootProduct = await ExtractProductFromDetailPageAsync(page, selectors, new List<string>());
+        if (rootProduct != null && seenProducts.Add(GetProductKey(rootProduct)))
+        {
+            products.Add(rootProduct);
+        }
+
+        await ClickVariationsTabAsync(page, cancellationToken);
+        var variationLinks = await FindVariationLinksAsync(page);
+        foreach (var link in variationLinks)
+        {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+
+            await page.GotoAsync(link, new PageGotoOptions
+            {
+                WaitUntil = WaitUntilState.DOMContentLoaded,
+                Timeout = 90000
+            });
+            await AcceptCookiesAsync(page, cancellationToken);
+            var variationProduct = await ExtractProductFromDetailPageAsync(page, selectors, new List<string>());
+            if (variationProduct != null && seenProducts.Add(GetProductKey(variationProduct)))
+            {
+                products.Add(variationProduct);
+            }
+        }
+
+        return products;
+    }
+
+    private async Task ClickVariationsTabAsync(IPage page, CancellationToken cancellationToken)
+    {
+        var candidates = page.Locator("button:has-text('Variantes'), a:has-text('Variantes'), button:has-text('Variaciones'), a:has-text('Variaciones')");
+        if (await candidates.CountAsync() > 0)
+        {
+            await candidates.First.ClickAsync();
+            await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+            await Task.Delay(500, cancellationToken);
+        }
+    }
+
+    private async Task<List<string>> FindVariationLinksAsync(IPage page)
+    {
+        var links = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        try
+        {
+            var scoped = await page.EvaluateAsync<string[]>(
+                """
+                () => {
+                    const keywords = ['Variantes', 'Variaciones', 'Variants', 'Varianten'];
+                    const anchors = Array.from(document.querySelectorAll('a[href*="/p/"], a[href*="/a/"]'));
+                    const isInVariantSection = (el) => {
+                        let node = el;
+                        for (let i = 0; i < 6 && node; i++, node = node.parentElement) {
+                            const text = (node.textContent || '');
+                            if (keywords.some(k => text.includes(k))) {
+                                return true;
+                            }
+                        }
+                        return false;
+                    };
+                    return anchors.filter(a => isInVariantSection(a)).map(a => a.href);
+                }
+                """);
+            foreach (var link in scoped)
+            {
+                links.Add(link);
+            }
+        }
+        catch
+        {
+            // Ignore and fallback to other selectors.
+        }
+
+        try
+        {
+            var fallback = page.Locator("a[href*='/p/'], a[href*='/a/']");
+            var count = await fallback.CountAsync();
+            for (var i = 0; i < count; i++)
+            {
+                var href = await fallback.Nth(i).GetAttributeAsync("href");
+                if (!string.IsNullOrWhiteSpace(href))
+                {
+                    links.Add(href);
+                }
+            }
+        }
+        catch
+        {
+            // Ignore.
+        }
+
+        return links.ToList();
+    }
+
+    private static string GetProductKey(ScrapedProduct product)
+    {
+        if (!string.IsNullOrWhiteSpace(product.SkuSource))
+        {
+            return product.SkuSource.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(product.Title))
+        {
+            return product.Title.Trim();
+        }
+
+        return Guid.NewGuid().ToString();
+    }
+
+    private async Task WaitForProductDetailsAsync(IPage page)
+    {
+        var selectors = new[]
+        {
+            "h1",
+            ".price-display-text--u5EEm",
+            "text=Precio unitario",
+            "text=Código de barras"
+        };
+
+        foreach (var selector in selectors)
+        {
+            try
+            {
+                await page.WaitForSelectorAsync(selector, new() { Timeout = 10000 });
+                return;
+            }
+            catch
+            {
+                // Try next selector.
+            }
+        }
+    }
+
+    private async Task<string?> TryExtractBarcodeAsync(IPage page)
+    {
+        try
+        {
+            var label = page.GetByText("Código de barras", new() { Exact = false });
+            if (await label.CountAsync() > 0)
+            {
+                var container = label.First.Locator("xpath=ancestor::div[1]");
+                if (await container.CountAsync() > 0)
+                {
+                    var text = await container.First.InnerTextAsync();
+                    var match = System.Text.RegularExpressions.Regex.Match(text, "\\b\\d{8,14}\\b");
+                    if (match.Success)
+                    {
+                        return match.Value;
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // Ignore and fallback to content scan.
+        }
+
+        try
+        {
+            var content = await page.ContentAsync();
+            var match = System.Text.RegularExpressions.Regex.Match(content, "\\b\\d{8,14}\\b");
+            return match.Success ? match.Value : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private async Task<List<string>> TryExtractBreadcrumbAsync(IPage page)
+    {
+        var crumbs = new List<string>();
+        try
+        {
+            var items = page.Locator("nav ol li, .breadcrumb li, .breadcrumb-item");
+            var count = await items.CountAsync();
+            for (var i = 0; i < count; i++)
+            {
+                var text = await items.Nth(i).InnerTextAsync();
+                if (!string.IsNullOrWhiteSpace(text))
+                {
+                    crumbs.Add(text.Trim());
+                }
+            }
+        }
+        catch
+        {
+            // Ignore and fallback.
+        }
+
+        return crumbs;
+    }
+
+    private static async Task<string?> GetDetailHrefFromCardAsync(ILocator card)
+    {
+        try
+        {
+            var link = card.Locator("a[href*='/p/'], a[href*='/a/']");
+            if (await link.CountAsync() > 0)
+            {
+                return await link.First.GetAttributeAsync("href");
+            }
+        }
+        catch
+        {
+            // Ignore and return null.
+        }
+
+        return null;
+    }
+
+    private async Task EnsureProductsLandingAsync(IPage page, SiteProfile site, CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(site.BaseUrl) &&
+            !page.Url.StartsWith(site.BaseUrl, StringComparison.OrdinalIgnoreCase))
+        {
+            await page.GotoAsync(site.BaseUrl, new PageGotoOptions
+            {
+                WaitUntil = WaitUntilState.DOMContentLoaded,
+                Timeout = 90000
+            });
+            await AcceptCookiesAsync(page, cancellationToken);
+        }
+
+        var productsLink = page.Locator("a:has-text('Productos')");
+        if (await productsLink.CountAsync() > 0)
+        {
+            await productsLink.First.ClickAsync();
+            await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+            await AcceptCookiesAsync(page, cancellationToken);
+        }
+    }
+
+    private async Task WaitForCategoryOrProductListAsync(IPage page, CancellationToken cancellationToken)
+    {
+        var selectors = new[]
+        {
+            "a[data-testid='category-tile']",
+            ".single-product-container--oWOit",
+            ".single-product-container",
+            "h1"
+        };
+
+        for (var attempt = 0; attempt < 5 && !cancellationToken.IsCancellationRequested; attempt++)
+        {
+            foreach (var selector in selectors)
+            {
+                if (await page.Locator(selector).CountAsync() > 0)
+                {
+                    return;
+                }
+            }
+
+            try
+            {
+                await page.Mouse.WheelAsync(0, 800);
+                await Task.Delay(1000, cancellationToken);
+                await page.Mouse.WheelAsync(0, -800);
+            }
+            catch
+            {
+                await Task.Delay(1000, cancellationToken);
+            }
+        }
+    }
+
+    private async Task WaitForManualLoginAsync(IPage page, SiteProfile site, CancellationToken cancellationToken)
+    {
+        var deadline = DateTime.UtcNow.AddMinutes(5);
+        while (DateTime.UtcNow < deadline && !cancellationToken.IsCancellationRequested)
+        {
+            var url = page.Url ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(site.BaseUrl) &&
+                url.StartsWith(site.BaseUrl, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            if (url.Contains("festo.com/mx/es", StringComparison.OrdinalIgnoreCase) &&
+                !url.Contains("auth.festo.com", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            await Task.Delay(1000, cancellationToken);
+        }
+    }
+
     private async Task<List<ScrapedProduct>> TryScrapeCategoriesAsync(
         IPage page,
         SiteProfile site,
@@ -864,16 +1277,49 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
         CancellationToken cancellationToken)
     {
         var products = new List<ScrapedProduct>();
+        await WaitForCategoryOrProductListAsync(page, cancellationToken);
         var categoryTiles = await page.QuerySelectorAllAsync("a[data-testid='category-tile']");
         if (categoryTiles.Count == 0)
         {
-            return products;
+            var productListFound = await page.QuerySelectorAsync(".single-product-container--oWOit, .single-product-container");
+            if (productListFound != null)
+            {
+                var localSeenProducts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var localMaxProducts = site.MaxProductsPerScrape > 0 ? site.MaxProductsPerScrape : int.MaxValue;
+                await CollectProductsFromListAsync(
+                    page,
+                    selectors,
+                    products,
+                    localSeenProducts,
+                    localMaxProducts,
+                    new List<string>(),
+                    cancellationToken);
+                return products;
+            }
+
+            await EnsureProductsLandingAsync(page, site, cancellationToken);
+            await WaitForCategoryOrProductListAsync(page, cancellationToken);
+            categoryTiles = await page.QuerySelectorAllAsync("a[data-testid='category-tile']");
+            if (categoryTiles.Count == 0)
+            {
+                return products;
+            }
         }
 
         var maxProducts = site.MaxProductsPerScrape > 0 ? site.MaxProductsPerScrape : int.MaxValue;
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seenProducts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        await TraverseCategoryPageAsync(page, selectors, products, visited, maxProducts, 0, cancellationToken);
+        await TraverseCategoryPageAsync(
+            page,
+            selectors,
+            products,
+            visited,
+            seenProducts,
+            maxProducts,
+            0,
+            new List<string>(),
+            cancellationToken);
         return products;
     }
 
@@ -882,8 +1328,10 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
         SiteSelectors selectors,
         List<ScrapedProduct> products,
         HashSet<string> visited,
+        HashSet<string> seenProducts,
         int maxProducts,
         int depth,
+        List<string> categoryPath,
         CancellationToken cancellationToken)
     {
         if (depth > 4 || products.Count >= maxProducts || cancellationToken.IsCancellationRequested)
@@ -892,24 +1340,44 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
         }
 
         await AcceptCookiesAsync(page, cancellationToken);
+        await WaitForCategoryOrProductListAsync(page, cancellationToken);
 
         var productListFound = await page.QuerySelectorAsync(".single-product-container--oWOit, .single-product-container");
         if (productListFound != null)
         {
-            await CollectProductsFromListAsync(page, selectors, products, maxProducts, cancellationToken);
+            await CollectProductsFromListAsync(
+                page,
+                selectors,
+                products,
+                seenProducts,
+                maxProducts,
+                categoryPath,
+                cancellationToken);
             return;
         }
 
         var categoryLinks = await page.QuerySelectorAllAsync("a[data-testid='category-tile']");
+        var links = new List<(string Href, string? Name)>();
         foreach (var link in categoryLinks)
+        {
+            var href = await link.GetAttributeAsync("href");
+            if (string.IsNullOrWhiteSpace(href))
+            {
+                continue;
+            }
+
+            var name = await GetCategoryNameAsync(link);
+            links.Add((href, name));
+        }
+
+        foreach (var (href, name) in links)
         {
             if (products.Count >= maxProducts || cancellationToken.IsCancellationRequested)
             {
                 break;
             }
 
-            var href = await link.GetAttributeAsync("href");
-            if (string.IsNullOrWhiteSpace(href) || !visited.Add(href))
+            if (!visited.Add(href))
             {
                 continue;
             }
@@ -919,8 +1387,23 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
                 WaitUntil = WaitUntilState.DOMContentLoaded,
                 Timeout = 90000
             });
+            await AcceptCookiesAsync(page, cancellationToken);
 
-            await TraverseCategoryPageAsync(page, selectors, products, visited, maxProducts, depth + 1, cancellationToken);
+            var nextPath = new List<string>(categoryPath);
+            if (!string.IsNullOrWhiteSpace(name))
+            {
+                nextPath.Add(name);
+            }
+            await TraverseCategoryPageAsync(
+                page,
+                selectors,
+                products,
+                visited,
+                seenProducts,
+                maxProducts,
+                depth + 1,
+                nextPath,
+                cancellationToken);
         }
     }
 
@@ -928,7 +1411,9 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
         IPage page,
         SiteSelectors selectors,
         List<ScrapedProduct> products,
+        HashSet<string> seenProducts,
         int maxProducts,
+        List<string> categoryPath,
         CancellationToken cancellationToken)
     {
         var cards = page.Locator(".single-product-container--oWOit, .single-product-container");
@@ -939,14 +1424,33 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
             var detailButton = card.Locator("button.product-details-link--vVn1R, button:has-text('Detalles')");
             if (await detailButton.CountAsync() > 0)
             {
+                var previousUrl = page.Url;
                 await detailButton.First.ClickAsync();
                 await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
                 await AcceptCookiesAsync(page, cancellationToken);
 
-                var product = await ExtractProductFromDetailPageAsync(page, selectors);
+                if (page.Url == previousUrl)
+                {
+                    var detailHref = await GetDetailHrefFromCardAsync(card);
+                    if (!string.IsNullOrWhiteSpace(detailHref))
+                    {
+                        await page.GotoAsync(detailHref, new PageGotoOptions
+                        {
+                            WaitUntil = WaitUntilState.DOMContentLoaded,
+                            Timeout = 90000
+                        });
+                        await AcceptCookiesAsync(page, cancellationToken);
+                    }
+                }
+
+                var product = await ExtractProductFromDetailPageAsync(page, selectors, categoryPath);
                 if (product != null)
                 {
-                    products.Add(product);
+                    var key = GetProductKey(product);
+                    if (seenProducts.Add(key))
+                    {
+                        products.Add(product);
+                    }
                 }
 
                 await page.GoBackAsync(new() { WaitUntil = WaitUntilState.DOMContentLoaded });
@@ -967,10 +1471,14 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
                         Timeout = 90000
                     });
                     await AcceptCookiesAsync(detailPage, cancellationToken);
-                    var product = await ExtractProductFromDetailPageAsync(detailPage, selectors);
+                    var product = await ExtractProductFromDetailPageAsync(detailPage, selectors, categoryPath);
                     if (product != null)
                     {
-                        products.Add(product);
+                        var key = GetProductKey(product);
+                        if (seenProducts.Add(key))
+                        {
+                            products.Add(product);
+                        }
                     }
                     await detailPage.CloseAsync();
                 }
@@ -978,10 +1486,16 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
         }
     }
 
-    private async Task<ScrapedProduct?> ExtractProductFromDetailPageAsync(IPage page, SiteSelectors selectors)
+    private async Task<ScrapedProduct?> ExtractProductFromDetailPageAsync(
+        IPage page,
+        SiteSelectors selectors,
+        List<string> categoryPath)
     {
         try
         {
+            await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+            await WaitForProductDetailsAsync(page);
+
             var product = new ScrapedProduct
             {
                 RawHtml = await page.ContentAsync(),
@@ -993,6 +1507,7 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
             {
                 product.Title = (await titleLocator.First.InnerTextAsync())?.Trim();
             }
+            product.Attributes["product_url"] = page.Url;
 
             var skuSelector = selectors.SkuSelector ?? ".part-number, .sku, [data-testid*='sku']";
             var skuEl = await page.QuerySelectorAsync(skuSelector);
@@ -1001,12 +1516,60 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
                 product.SkuSource = (await skuEl.InnerTextAsync())?.Trim();
             }
 
-            var priceSelector = selectors.PriceSelector ?? ".price, .price-value, .product-price";
+            var gtinEl = await page.QuerySelectorAsync("[class*='gtin--']");
+            if (gtinEl != null)
+            {
+                var gtinText = (await gtinEl.InnerTextAsync())?.Trim();
+                if (!string.IsNullOrWhiteSpace(gtinText))
+                {
+                    product.SkuSource = gtinText;
+                }
+            }
+
+            var priceSelector = selectors.PriceSelector ?? ".price-display-text--u5EEm, .price-display-text, .price, .price-value, .product-price";
             var priceEl = await page.QuerySelectorAsync(priceSelector);
             if (priceEl != null)
             {
                 var priceText = await priceEl.InnerTextAsync();
                 product.Price = ParsePrice(priceText);
+            }
+
+            var orderCodeEl = await page.QuerySelectorAsync("[class*='order-code--']");
+            var codeEl = await page.QuerySelectorAsync("[class*='code--']");
+            var descriptionParts = new List<string>();
+            if (orderCodeEl != null)
+            {
+                var orderCodeText = (await orderCodeEl.InnerTextAsync())?.Trim();
+                if (!string.IsNullOrWhiteSpace(orderCodeText))
+                {
+                    descriptionParts.Add($"order-code: {orderCodeText}");
+                }
+            }
+            if (codeEl != null)
+            {
+                var codeText = (await codeEl.InnerTextAsync())?.Trim();
+                if (!string.IsNullOrWhiteSpace(codeText))
+                {
+                    descriptionParts.Add($"code: {codeText}");
+                }
+            }
+            if (descriptionParts.Count > 0)
+            {
+                product.Description = string.Join(" | ", descriptionParts);
+            }
+
+            var barcode = await TryExtractBarcodeAsync(page);
+            if (!string.IsNullOrWhiteSpace(barcode))
+            {
+                product.Attributes["barcode"] = barcode;
+                if (string.IsNullOrWhiteSpace(product.SkuSource))
+                {
+                    product.SkuSource = barcode;
+                }
+            }
+            if (string.IsNullOrWhiteSpace(product.SkuSource))
+            {
+                product.SkuSource = page.Url;
             }
 
             var imageEl = await page.QuerySelectorAsync("img");
@@ -1015,7 +1578,46 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
                 product.ImageUrl = await imageEl.GetAttributeAsync("src");
             }
 
+            var breadcrumb = await TryExtractBreadcrumbAsync(page);
+            if (breadcrumb.Count > 0)
+            {
+                categoryPath = breadcrumb;
+            }
+
+            if (categoryPath.Count > 0)
+            {
+                var pathText = string.Join(" > ", categoryPath);
+                product.Category = pathText;
+                product.Attributes["category_path"] = pathText;
+            }
+
+            var hasBarcode = product.Attributes.TryGetValue("barcode", out var barcodeValue) &&
+                !string.IsNullOrWhiteSpace(barcodeValue);
+            if (!product.Price.HasValue && !hasBarcode)
+            {
+                return null;
+            }
+
             return product;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static async Task<string?> GetCategoryNameAsync(IElementHandle link)
+    {
+        try
+        {
+            var name = await link.QuerySelectorAsync(".category-tile-details-name--UDx87");
+            if (name != null)
+            {
+                return (await name.InnerTextAsync())?.Trim();
+            }
+
+            var fallback = await link.InnerTextAsync();
+            return string.IsNullOrWhiteSpace(fallback) ? null : fallback.Trim();
         }
         catch
         {
