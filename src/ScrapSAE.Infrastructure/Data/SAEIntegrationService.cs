@@ -1,5 +1,5 @@
 using System.Data;
-using System.Data.Odbc;
+using FirebirdSql.Data.FirebirdClient;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Dapper;
@@ -9,7 +9,7 @@ using ScrapSAE.Core.Interfaces;
 namespace ScrapSAE.Infrastructure.Data;
 
 /// <summary>
-/// Servicio de integración con Aspel SAE vía ODBC
+/// Servicio de integración con Aspel SAE vía Firebird
 /// </summary>
 public class SAEIntegrationService : ISAEIntegrationService
 {
@@ -19,15 +19,14 @@ public class SAEIntegrationService : ISAEIntegrationService
 
     public SAEIntegrationService(IConfiguration configuration, ILogger<SAEIntegrationService> logger)
     {
-        _connectionString = configuration["SAE:ConnectionString"] 
-            ?? throw new ArgumentNullException("SAE:ConnectionString not configured");
-        _timeout = configuration.GetValue<int>("SAE:Timeout", 30);
+        _connectionString = BuildConnectionString(configuration);
+        _timeout = configuration.GetValue<int>("SAE:TimeoutSeconds", 30);
         _logger = logger;
     }
 
     private IDbConnection CreateConnection()
     {
-        var connection = new OdbcConnection(_connectionString);
+        var connection = new FbConnection(_connectionString);
         connection.Open();
         return connection;
     }
@@ -37,7 +36,7 @@ public class SAEIntegrationService : ISAEIntegrationService
         try
         {
             using var connection = CreateConnection();
-            var result = await connection.ExecuteScalarAsync<int>("SELECT 1");
+            var result = await connection.ExecuteScalarAsync<int>("SELECT 1 FROM RDB$DATABASE");
             return result == 1;
         }
         catch (Exception ex)
@@ -78,7 +77,7 @@ public class SAEIntegrationService : ISAEIntegrationService
                        ULT_COSTO, CTRL_ALM, STATUS, FCH_ULTCOM, FCH_ULTVTA,
                        CAMPO_LIBRE1, CAMPO_LIBRE2, CAMPO_LIBRE3
                 FROM INVE01
-                WHERE CVE_ART = ?";
+                WHERE CVE_ART = @sku";
             
             return await connection.QueryFirstOrDefaultAsync<ProductSAE>(sql, new { sku }, commandTimeout: _timeout);
         }
@@ -112,8 +111,8 @@ public class SAEIntegrationService : ISAEIntegrationService
             using var connection = CreateConnection();
             const string sql = @"
                 UPDATE INVE01 
-                SET DESCR = ?, EXIST = ?, PREC_X_MAY = ?, PREC_X_MEN = ?
-                WHERE CVE_ART = ?";
+                SET DESCR = @DESCR, EXIST = @EXIST, PREC_X_MAY = @PREC_X_MAY, PREC_X_MEN = @PREC_X_MEN
+                WHERE CVE_ART = @CVE_ART";
             
             var affected = await connection.ExecuteAsync(sql, new 
             { 
@@ -140,7 +139,7 @@ public class SAEIntegrationService : ISAEIntegrationService
             using var connection = CreateConnection();
             const string sql = @"
                 INSERT INTO INVE01 (CVE_ART, DESCR, LIN_PROD, EXIST, PREC_X_MAY, PREC_X_MEN, ULT_COSTO, STATUS)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'A')";
+                VALUES (@CVE_ART, @DESCR, @LIN_PROD, @EXIST, @PREC_X_MAY, @PREC_X_MEN, @ULT_COSTO, 'A')";
             
             var affected = await connection.ExecuteAsync(sql, new 
             { 
@@ -167,7 +166,7 @@ public class SAEIntegrationService : ISAEIntegrationService
         try
         {
             using var connection = CreateConnection();
-            const string sql = "UPDATE INVE01 SET EXIST = ? WHERE CVE_ART = ?";
+            const string sql = "UPDATE INVE01 SET EXIST = @quantity WHERE CVE_ART = @sku";
             
             var affected = await connection.ExecuteAsync(sql, new { quantity, sku }, commandTimeout: _timeout);
             return affected > 0;
@@ -184,7 +183,7 @@ public class SAEIntegrationService : ISAEIntegrationService
         try
         {
             using var connection = CreateConnection();
-            const string sql = "UPDATE INVE01 SET PREC_X_MEN = ? WHERE CVE_ART = ?";
+            const string sql = "UPDATE INVE01 SET PREC_X_MEN = @price WHERE CVE_ART = @sku";
             
             var affected = await connection.ExecuteAsync(sql, new { price, sku }, commandTimeout: _timeout);
             return affected > 0;
@@ -201,7 +200,7 @@ public class SAEIntegrationService : ISAEIntegrationService
         try
         {
             using var connection = CreateConnection();
-            const string sql = "SELECT COUNT(*) FROM INVE01 WHERE CVE_ART = ?";
+            const string sql = "SELECT COUNT(*) FROM INVE01 WHERE CVE_ART = @sku";
             
             var count = await connection.ExecuteScalarAsync<int>(sql, new { sku }, commandTimeout: _timeout);
             return count > 0;
@@ -211,5 +210,40 @@ public class SAEIntegrationService : ISAEIntegrationService
             _logger.LogError(ex, "Error validating SKU {Sku} in SAE", sku);
             throw;
         }
+    }
+
+    private static string BuildConnectionString(IConfiguration configuration)
+    {
+        var configured = configuration["SAE:ConnectionString"];
+        if (!string.IsNullOrWhiteSpace(configured))
+        {
+            return configured;
+        }
+
+        var database = configuration["SAE:DbPath"];
+        if (string.IsNullOrWhiteSpace(database))
+        {
+            throw new ArgumentNullException("SAE:DbPath not configured");
+        }
+
+        var builder = new FbConnectionStringBuilder
+        {
+            Database = database,
+            DataSource = configuration["SAE:DbHost"] ?? "localhost",
+            UserID = configuration["SAE:DbUser"] ?? "SYSDBA",
+            Password = configuration["SAE:DbPassword"] ?? "masterkey",
+            Port = configuration.GetValue("SAE:DbPort", 3050),
+            Dialect = configuration.GetValue("SAE:DbDialect", 3),
+            Charset = configuration["SAE:DbCharset"] ?? "ISO8859_1",
+            Pooling = true
+        };
+
+        var timeoutSeconds = configuration.GetValue("SAE:TimeoutSeconds", 30);
+        if (timeoutSeconds > 0)
+        {
+            builder.ConnectionTimeout = timeoutSeconds;
+        }
+
+        return builder.ToString();
     }
 }

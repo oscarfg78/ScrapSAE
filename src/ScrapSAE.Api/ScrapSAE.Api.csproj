@@ -16,4 +16,8 @@
     <ProjectReference Include="..\ScrapSAE.Infrastructure\ScrapSAE.Infrastructure.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="FirebirdSql.Data.FirebirdClient" Version="9.1.0" />
+  </ItemGroup>
+
 </Project>

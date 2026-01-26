@@ -25,6 +25,14 @@ public sealed class MainViewModel : ViewModelBase
     private string _saeSdkPath = string.Empty;
     private string _saeUser = string.Empty;
     private string _saePassword = string.Empty;
+    private string _saeDbHost = string.Empty;
+    private string _saeDbPath = string.Empty;
+    private string _saeDbUser = string.Empty;
+    private string _saeDbPassword = string.Empty;
+    private int _saeDbPort = 3050;
+    private string _saeDbCharset = "ISO8859_1";
+    private int _saeDbDialect = 3;
+    private string _saeDefaultLineCode = "LINEA";
     private string _backendStatus = "Sin validar";
     private string _supabaseStatus = "Sin validar";
     private string _saeStatus = "Sin validar";
@@ -157,6 +165,54 @@ public sealed class MainViewModel : ViewModelBase
     {
         get => _saePassword;
         set => SetField(ref _saePassword, value);
+    }
+
+    public string SaeDbHost
+    {
+        get => _saeDbHost;
+        set => SetField(ref _saeDbHost, value);
+    }
+
+    public string SaeDbPath
+    {
+        get => _saeDbPath;
+        set => SetField(ref _saeDbPath, value);
+    }
+
+    public string SaeDbUser
+    {
+        get => _saeDbUser;
+        set => SetField(ref _saeDbUser, value);
+    }
+
+    public string SaeDbPassword
+    {
+        get => _saeDbPassword;
+        set => SetField(ref _saeDbPassword, value);
+    }
+
+    public int SaeDbPort
+    {
+        get => _saeDbPort;
+        set => SetField(ref _saeDbPort, value);
+    }
+
+    public string SaeDbCharset
+    {
+        get => _saeDbCharset;
+        set => SetField(ref _saeDbCharset, value);
+    }
+
+    public int SaeDbDialect
+    {
+        get => _saeDbDialect;
+        set => SetField(ref _saeDbDialect, value);
+    }
+
+    public string SaeDefaultLineCode
+    {
+        get => _saeDefaultLineCode;
+        set => SetField(ref _saeDefaultLineCode, value);
     }
 
     public string BackendStatus
@@ -546,6 +602,14 @@ public sealed class MainViewModel : ViewModelBase
             SaeSdkPath = settings.SaeSdkPath ?? string.Empty;
             SaeUser = settings.SaeUser ?? string.Empty;
             SaePassword = settings.SaePassword ?? string.Empty;
+            SaeDbHost = settings.SaeDbHost ?? string.Empty;
+            SaeDbPath = settings.SaeDbPath ?? string.Empty;
+            SaeDbUser = settings.SaeDbUser ?? string.Empty;
+            SaeDbPassword = settings.SaeDbPassword ?? string.Empty;
+            SaeDbPort = settings.SaeDbPort ?? 3050;
+            SaeDbCharset = settings.SaeDbCharset ?? "ISO8859_1";
+            SaeDbDialect = settings.SaeDbDialect ?? 3;
+            SaeDefaultLineCode = settings.SaeDefaultLineCode ?? "LINEA";
             StatusMessage = "Configuración cargada.";
         }
         catch (Exception ex)
@@ -564,7 +628,15 @@ public sealed class MainViewModel : ViewModelBase
                 SupabaseServiceKey = SupabaseServiceKey,
                 SaeSdkPath = SaeSdkPath,
                 SaeUser = SaeUser,
-                SaePassword = SaePassword
+                SaePassword = SaePassword,
+                SaeDbHost = SaeDbHost,
+                SaeDbPath = SaeDbPath,
+                SaeDbUser = SaeDbUser,
+                SaeDbPassword = SaeDbPassword,
+                SaeDbPort = SaeDbPort,
+                SaeDbCharset = SaeDbCharset,
+                SaeDbDialect = SaeDbDialect,
+                SaeDefaultLineCode = SaeDefaultLineCode
             };
 
             await _apiClient.SaveSettingsAsync(settings);

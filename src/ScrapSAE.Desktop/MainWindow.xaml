@@ -94,6 +94,18 @@
                                 <TextBox Text="{Binding SupabaseServiceKey}" Margin="0,6,0,12" />
                                 <TextBlock Text="SAE SDK Path" FontWeight="SemiBold" />
                                 <TextBox Text="{Binding SaeSdkPath}" Margin="0,6,0,12" />
+                                <TextBlock Text="SAE DB Host" FontWeight="SemiBold" />
+                                <TextBox Text="{Binding SaeDbHost}" Margin="0,6,0,12" />
+                                <TextBlock Text="SAE DB Path (FDB)" FontWeight="SemiBold" />
+                                <TextBox Text="{Binding SaeDbPath}" Margin="0,6,0,12" AutomationProperties.AutomationId="SaeDbPath" AutomationProperties.Name="SaeDbPath" />
+                                <TextBlock Text="SAE DB Port" FontWeight="SemiBold" />
+                                <TextBox Text="{Binding SaeDbPort}" Margin="0,6,0,12" />
+                                <TextBlock Text="SAE DB Charset" FontWeight="SemiBold" />
+                                <TextBox Text="{Binding SaeDbCharset}" Margin="0,6,0,12" />
+                                <TextBlock Text="SAE DB Dialect" FontWeight="SemiBold" />
+                                <TextBox Text="{Binding SaeDbDialect}" Margin="0,6,0,12" />
+                                <TextBlock Text="SAE Default Line Code" FontWeight="SemiBold" />
+                                <TextBox Text="{Binding SaeDefaultLineCode}" Margin="0,6,0,12" />
                             </StackPanel>
                         </Border>
                         <Border Grid.Column="1" Background="White" Padding="12" Margin="8,0,0,0">
@@ -102,6 +114,10 @@
                                 <TextBox Text="{Binding SaeUser}" Margin="0,6,0,12" />
                                 <TextBlock Text="Password SAE" FontWeight="SemiBold" />
                                 <TextBox Text="{Binding SaePassword}" Margin="0,6,0,12" />
+                                <TextBlock Text="Usuario DB" FontWeight="SemiBold" />
+                                <TextBox Text="{Binding SaeDbUser}" Margin="0,6,0,12" />
+                                <TextBlock Text="Password DB" FontWeight="SemiBold" />
+                                <TextBox Text="{Binding SaeDbPassword}" Margin="0,6,0,12" />
                                 <TextBlock Text="Nota" FontWeight="SemiBold" Margin="0,12,0,0" />
                                 <TextBlock Text="Guarda la configuración y reinicia el backend para aplicar cambios." TextWrapping="Wrap" />
                             </StackPanel>

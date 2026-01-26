@@ -102,4 +102,36 @@ public class ApiE2eTests : IClassFixture<ApiTestFactory>
         body!["total"].Should().Be(1);
         body["sent"].Should().Be(1);
     }
+
+    [Fact]
+    public async Task Settings_ShouldPersistAndReturnValues()
+    {
+        var client = _factory.CreateClient();
+
+        var payload = new
+        {
+            supabaseUrl = "https://example.supabase.co",
+            supabaseServiceKey = "test-key",
+            saeDbPath = @"C:\Temp\SAE90EMPRE01.FDB",
+            saeDbHost = "localhost",
+            saeDbUser = "SYSDBA",
+            saeDbPassword = "masterkey",
+            saeDbPort = 3050,
+            saeDbCharset = "ISO8859_1",
+            saeDbDialect = 3,
+            saeDefaultLineCode = "LINEA"
+        };
+
+        var saveResponse = await client.PostAsJsonAsync("/api/settings", payload);
+        saveResponse.EnsureSuccessStatusCode();
+
+        var settingsResponse = await client.GetAsync("/api/settings");
+        settingsResponse.EnsureSuccessStatusCode();
+
+        var json = await settingsResponse.Content.ReadAsStringAsync();
+        using var document = System.Text.Json.JsonDocument.Parse(json);
+        var root = document.RootElement;
+        root.GetProperty("supabaseUrl").GetString().Should().Be(payload.supabaseUrl);
+        root.GetProperty("saeDbPath").GetString().Should().Be(payload.saeDbPath);
+    }
 }

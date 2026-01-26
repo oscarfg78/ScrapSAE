@@ -22,7 +22,15 @@ builder.Services.AddSingleton(sp => new SupabaseTableService<ExecutionReport>(sp
 
 builder.Services.AddSingleton<IScrapingService, PlaywrightScrapingService>();
 builder.Services.AddSingleton<ScrapingRunner>();
-builder.Services.AddSingleton<ISaeSdkService, StubSaeSdkService>();
+var saeProvider = builder.Configuration["SAE:Provider"] ?? "firebird";
+if (string.Equals(saeProvider, "firebird", StringComparison.OrdinalIgnoreCase))
+{
+    builder.Services.AddSingleton<ISaeSdkService, FirebirdSaeSdkService>();
+}
+else
+{
+    builder.Services.AddSingleton<ISaeSdkService, AspelSaeSdkService>();
+}
 
 var app = builder.Build();
 
