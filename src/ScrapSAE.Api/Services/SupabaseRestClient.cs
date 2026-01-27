@@ -9,11 +9,16 @@ public sealed class SupabaseRestClient : ISupabaseRestClient
     private readonly string _baseUrl;
     private readonly JsonSerializerOptions _jsonOptions;
 
-    public SupabaseRestClient(IConfiguration configuration)
+    public SupabaseRestClient(IConfiguration configuration, SettingsStore settingsStore)
     {
-        var url = configuration["Supabase:Url"]
+        var stored = settingsStore.Get();
+        var url = stored?.SupabaseUrl
+            ?? configuration["Supabase:Url"]
+            ?? configuration["supabaseUrl"]
             ?? throw new ArgumentNullException("Supabase:Url not configured");
-        var key = configuration["Supabase:ServiceKey"]
+        var key = stored?.SupabaseServiceKey
+            ?? configuration["Supabase:ServiceKey"]
+            ?? configuration["supabaseServiceKey"]
             ?? throw new ArgumentNullException("Supabase:ServiceKey not configured");
 
         _baseUrl = url.TrimEnd('/');

@@ -30,6 +30,8 @@ public class ProcessedProduct
     public List<string> Features { get; set; } = new();
     public Dictionary<string, string> Specifications { get; set; } = new();
     public string? SuggestedCategory { get; set; }
+    public string? LineCode { get; set; }
+    public decimal? Price { get; set; }
     public decimal? ConfidenceScore { get; set; }
     public string? OriginalRawData { get; set; }
 }
@@ -65,6 +67,8 @@ public class ProductWebhookPayload
 public class SiteSelectors
 {
     public string? ProductListSelector { get; set; }
+    public string? ProductListClassPrefix { get; set; }
+    public string? ProductCardClassPrefix { get; set; }
     public string? ProductLinkSelector { get; set; }
     public string? TitleSelector { get; set; }
     public string? PriceSelector { get; set; }
@@ -74,8 +78,33 @@ public class SiteSelectors
     public string? CategorySelector { get; set; }
     public string? BrandSelector { get; set; }
     public string? NextPageSelector { get; set; }
+    public string? DetailButtonText { get; set; }
+    public string? DetailButtonClassPrefix { get; set; }
     public bool UsesInfiniteScroll { get; set; }
     public int MaxPages { get; set; } = 10;
+}
+
+public class SelectorAnalysisRequest
+{
+    public string? Url { get; set; }
+    public string? HtmlSnippet { get; set; }
+    public List<string> ImagesBase64 { get; set; } = new();
+    public string? Notes { get; set; }
+}
+
+public class SelectorSuggestion
+{
+    public string? ProductListClassPrefix { get; set; }
+    public string? ProductCardClassPrefix { get; set; }
+    public string? DetailButtonText { get; set; }
+    public string? DetailButtonClassPrefix { get; set; }
+    public string? TitleSelector { get; set; }
+    public string? PriceSelector { get; set; }
+    public string? SkuSelector { get; set; }
+    public string? ImageSelector { get; set; }
+    public string? NextPageSelector { get; set; }
+    public decimal? ConfidenceScore { get; set; }
+    public string? Reasoning { get; set; }
 }
 
 /// <summary>

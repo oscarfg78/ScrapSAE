@@ -1,5 +1,6 @@
 using System.Windows;
 using Microsoft.Extensions.Configuration;
+using ScrapSAE.Desktop.Infrastructure;
 using ScrapSAE.Desktop.Services;
 using ScrapSAE.Desktop.ViewModels;
 
@@ -14,12 +15,18 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
+        DispatcherUnhandledException += (_, args) =>
+        {
+            AppLogger.Error("Unhandled UI exception.", args.Exception);
+            args.Handled = true;
+        };
+
         var configuration = new ConfigurationBuilder()
             .SetBasePath(AppContext.BaseDirectory)
             .AddJsonFile("appsettings.json", optional: true)
             .Build();
 
-        var baseUrl = configuration["Api:BaseUrl"] ?? "https://localhost:5001";
+        var baseUrl = configuration["Api:BaseUrl"] ?? "http://localhost:5244";
         var apiClient = new ApiClient(baseUrl);
         var viewModel = new MainViewModel(apiClient);
 

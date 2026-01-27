@@ -1,5 +1,12 @@
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Linq;
+using System.IO;
+using System.Text.Json;
+using System.Windows;
 using System.Windows.Threading;
+using Microsoft.Win32;
+using ScrapSAE.Core.DTOs;
 using ScrapSAE.Core.Entities;
 using ScrapSAE.Desktop.Infrastructure;
 using ScrapSAE.Desktop.Models;
@@ -11,6 +18,8 @@ public sealed class MainViewModel : ViewModelBase
 {
     private readonly ApiClient _apiClient;
     private readonly DispatcherTimer _saeTimer;
+    private readonly DispatcherTimer _logTimer;
+    private readonly DispatcherTimer _statusTimer;
     private SiteProfile? _selectedSite;
     private StagingProduct? _selectedStagingProduct;
     private CategoryMapping? _selectedCategoryMapping;
@@ -39,49 +48,76 @@ public sealed class MainViewModel : ViewModelBase
     private string _databaseStatus = "Sin validar";
     private int? _supabaseSampleCount;
     private DiagnosticsResult? _diagnosticsResult;
+    private bool _hasSites;
+    private bool _manualLoginEnabled;
+    private bool _headlessEnabled = true;
+    private bool _isScraping;
+    private string _scrapeStatusText = "Idle";
+    private int _selectedTabIndex;
+    private string _selectorAnalysisResult = string.Empty;
 
     public MainViewModel(ApiClient apiClient)
     {
         _apiClient = apiClient;
         _saeTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(_saeScheduleMinutes) };
         _saeTimer.Tick += async (_, _) => await SendPendingToSaeAsync();
+        _logTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(4) };
+        _logTimer.Tick += async (_, _) => await RefreshLogsAsync();
+        _statusTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+        _statusTimer.Tick += async (_, _) => await RefreshScrapeStatusAsync();
 
-        LoadAllCommand = new AsyncCommand(LoadAllAsync);
-        CreateSiteCommand = new AsyncCommand(CreateSiteAsync);
-        UpdateSiteCommand = new AsyncCommand(UpdateSiteAsync);
-        DeleteSiteCommand = new AsyncCommand(DeleteSiteAsync);
+        LoadAllCommand = new AsyncCommand(() => SafeExecuteAsync(LoadAllAsync, "Cargar datos"));
+        CreateSiteCommand = new AsyncCommand(() => SafeExecuteAsync(CreateSiteAsync, "Crear proveedor"));
+        UpdateSiteCommand = new AsyncCommand(() => SafeExecuteAsync(UpdateSiteAsync, "Actualizar proveedor"));
+        DeleteSiteCommand = new AsyncCommand(() => SafeExecuteAsync(DeleteSiteAsync, "Eliminar proveedor"));
 
-        CreateStagingCommand = new AsyncCommand(CreateStagingAsync);
-        UpdateStagingCommand = new AsyncCommand(UpdateStagingAsync);
-        DeleteStagingCommand = new AsyncCommand(DeleteStagingAsync);
+        CreateStagingCommand = new AsyncCommand(() => SafeExecuteAsync(CreateStagingAsync, "Crear staging"));
+        UpdateStagingCommand = new AsyncCommand(() => SafeExecuteAsync(UpdateStagingAsync, "Actualizar staging"));
+        DeleteStagingCommand = new AsyncCommand(() => SafeExecuteAsync(DeleteStagingAsync, "Eliminar staging"));
 
-        CreateCategoryCommand = new AsyncCommand(CreateCategoryAsync);
-        UpdateCategoryCommand = new AsyncCommand(UpdateCategoryAsync);
-        DeleteCategoryCommand = new AsyncCommand(DeleteCategoryAsync);
+        CreateCategoryCommand = new AsyncCommand(() => SafeExecuteAsync(CreateCategoryAsync, "Crear categor�a"));
+        UpdateCategoryCommand = new AsyncCommand(() => SafeExecuteAsync(UpdateCategoryAsync, "Actualizar categor�a"));
+        DeleteCategoryCommand = new AsyncCommand(() => SafeExecuteAsync(DeleteCategoryAsync, "Eliminar categor�a"));
 
-        CreateSyncLogCommand = new AsyncCommand(CreateSyncLogAsync);
-        UpdateSyncLogCommand = new AsyncCommand(UpdateSyncLogAsync);
-        DeleteSyncLogCommand = new AsyncCommand(DeleteSyncLogAsync);
+        CreateSyncLogCommand = new AsyncCommand(() => SafeExecuteAsync(CreateSyncLogAsync, "Crear log"));
+        UpdateSyncLogCommand = new AsyncCommand(() => SafeExecuteAsync(UpdateSyncLogAsync, "Actualizar log"));
+        DeleteSyncLogCommand = new AsyncCommand(() => SafeExecuteAsync(DeleteSyncLogAsync, "Eliminar log"));
 
-        CreateReportCommand = new AsyncCommand(CreateReportAsync);
-        UpdateReportCommand = new AsyncCommand(UpdateReportAsync);
-        DeleteReportCommand = new AsyncCommand(DeleteReportAsync);
+        CreateReportCommand = new AsyncCommand(() => SafeExecuteAsync(CreateReportAsync, "Crear reporte"));
+        UpdateReportCommand = new AsyncCommand(() => SafeExecuteAsync(UpdateReportAsync, "Actualizar reporte"));
+        DeleteReportCommand = new AsyncCommand(() => SafeExecuteAsync(DeleteReportAsync, "Eliminar reporte"));
 
-        RunScrapingCommand = new AsyncCommand(RunScrapingAsync, () => SelectedSite != null);
-        SendSelectedToSaeCommand = new AsyncCommand(SendSelectedToSaeAsync, () => SelectedStagingProduct != null);
-        SendPendingToSaeCommand = new AsyncCommand(SendPendingToSaeAsync);
+        RunScrapingCommand = new AsyncCommand(() => SafeExecuteAsync(RunScrapingAsync, "Ejecutar scraping"), () => SelectedSite != null);
+        SendSelectedToSaeCommand = new AsyncCommand(() => SafeExecuteAsync(SendSelectedToSaeAsync, "Enviar seleccionado a SAE"), () => SelectedStagingProduct != null);
+        SendPendingToSaeCommand = new AsyncCommand(() => SafeExecuteAsync(SendPendingToSaeAsync, "Enviar pendientes a SAE"));
 
-        LoadSettingsCommand = new AsyncCommand(LoadSettingsAsync);
-        SaveSettingsCommand = new AsyncCommand(SaveSettingsAsync);
-        RunDiagnosticsCommand = new AsyncCommand(RunDiagnosticsAsync);
-        TestBackendCommand = new AsyncCommand(TestBackendAsync);
+        LoadSettingsCommand = new AsyncCommand(() => SafeExecuteAsync(LoadSettingsAsync, "Cargar configuraci�n"));
+        SaveSettingsCommand = new AsyncCommand(() => SafeExecuteAsync(SaveSettingsAsync, "Guardar configuraci�n"));
+        RunDiagnosticsCommand = new AsyncCommand(() => SafeExecuteAsync(RunDiagnosticsAsync, "Ejecutar diagn�stico"));
+        TestBackendCommand = new AsyncCommand(() => SafeExecuteAsync(TestBackendAsync, "Probar backend"));
+        ExitCommand = new RelayCommand(() => Application.Current.Shutdown());
+        RefreshLogsCommand = new AsyncCommand(() => SafeExecuteAsync(RefreshLogsAsync, "Refrescar logs"));
+        RefreshAppLogsCommand = new AsyncCommand(() => SafeExecuteAsync(RefreshAppLogsAsync, "Refrescar logs app"));
+        PauseScrapingCommand = new AsyncCommand(() => SafeExecuteAsync(PauseScrapingAsync, "Pausar scraping"), () => SelectedSite != null);
+        ResumeScrapingCommand = new AsyncCommand(() => SafeExecuteAsync(ResumeScrapingAsync, "Reanudar scraping"), () => SelectedSite != null);
+        StopScrapingCommand = new AsyncCommand(() => SafeExecuteAsync(StopScrapingAsync, "Detener scraping"), () => SelectedSite != null);
+        AnalyzeSelectorsCommand = new AsyncCommand(() => SafeExecuteAsync(AnalyzeSelectorsAsync, "Analizar selectores"));
     }
 
     public ObservableCollection<SiteProfile> Sites { get; } = new();
     public ObservableCollection<StagingProduct> StagingProducts { get; } = new();
     public ObservableCollection<CategoryMapping> CategoryMappings { get; } = new();
     public ObservableCollection<SyncLog> SyncLogs { get; } = new();
+    public ObservableCollection<SyncLog> RecentSyncLogs { get; } = new();
     public ObservableCollection<ExecutionReport> ExecutionReports { get; } = new();
+    public ObservableCollection<string> AppLogs { get; } = new();
+    public string AppLogPath => AppLogger.GetLogPath();
+
+    public int SelectedTabIndex
+    {
+        get => _selectedTabIndex;
+        set => SetField(ref _selectedTabIndex, value);
+    }
 
     public SiteProfile? SelectedSite
     {
@@ -91,6 +127,11 @@ public sealed class MainViewModel : ViewModelBase
             if (SetField(ref _selectedSite, value))
             {
                 ((AsyncCommand)RunScrapingCommand).RaiseCanExecuteChanged();
+                ((AsyncCommand)PauseScrapingCommand).RaiseCanExecuteChanged();
+                ((AsyncCommand)ResumeScrapingCommand).RaiseCanExecuteChanged();
+                ((AsyncCommand)StopScrapingCommand).RaiseCanExecuteChanged();
+                UpdateRecentSyncLogs();
+                _ = SafeExecuteAsync(RefreshScrapeStatusAsync, "Estado scraping");
             }
         }
     }
@@ -251,6 +292,77 @@ public sealed class MainViewModel : ViewModelBase
         set => SetField(ref _diagnosticsResult, value);
     }
 
+    public bool HasSites
+    {
+        get => _hasSites;
+        private set
+        {
+            if (SetField(ref _hasSites, value))
+            {
+                OnPropertyChanged(nameof(NoSites));
+            }
+        }
+    }
+
+    public bool NoSites => !HasSites;
+
+    public bool ManualLoginEnabled
+    {
+        get => _manualLoginEnabled;
+        set
+        {
+            if (SetField(ref _manualLoginEnabled, value) && value)
+            {
+                HeadlessEnabled = false;
+            }
+        }
+    }
+
+    public bool HeadlessEnabled
+    {
+        get => _headlessEnabled;
+        set => SetField(ref _headlessEnabled, value);
+    }
+
+    public bool IsScraping
+    {
+        get => _isScraping;
+        set
+        {
+            if (SetField(ref _isScraping, value))
+            {
+                if (value)
+                {
+                    if (!_logTimer.IsEnabled)
+                    {
+                        _logTimer.Start();
+                    }
+                    if (!_statusTimer.IsEnabled)
+                    {
+                        _statusTimer.Start();
+                    }
+                }
+                else
+                {
+                    _logTimer.Stop();
+                    _statusTimer.Stop();
+                }
+            }
+        }
+    }
+
+    public string ScrapeStatusText
+    {
+        get => _scrapeStatusText;
+        set => SetField(ref _scrapeStatusText, value);
+    }
+
+    public string SelectorAnalysisResult
+    {
+        get => _selectorAnalysisResult;
+        set => SetField(ref _selectorAnalysisResult, value);
+    }
+
     public bool SaeScheduleEnabled
     {
         get => _saeScheduleEnabled;
@@ -303,6 +415,13 @@ public sealed class MainViewModel : ViewModelBase
     public AsyncCommand SaveSettingsCommand { get; }
     public AsyncCommand RunDiagnosticsCommand { get; }
     public AsyncCommand TestBackendCommand { get; }
+    public RelayCommand ExitCommand { get; }
+    public AsyncCommand RefreshLogsCommand { get; }
+    public AsyncCommand RefreshAppLogsCommand { get; }
+    public AsyncCommand PauseScrapingCommand { get; }
+    public AsyncCommand ResumeScrapingCommand { get; }
+    public AsyncCommand StopScrapingCommand { get; }
+    public AsyncCommand AnalyzeSelectorsCommand { get; }
 
     public async Task LoadAllAsync()
     {
@@ -314,6 +433,8 @@ public sealed class MainViewModel : ViewModelBase
             {
                 Sites.Add(site);
             }
+            HasSites = Sites.Count > 0;
+            AppLogger.Info($"Sites loaded: {Sites.Count}");
 
             StagingProducts.Clear();
             foreach (var item in await _apiClient.GetStagingProductsAsync())
@@ -332,6 +453,7 @@ public sealed class MainViewModel : ViewModelBase
             {
                 SyncLogs.Add(item);
             }
+            UpdateRecentSyncLogs();
 
             ExecutionReports.Clear();
             foreach (var item in await _apiClient.GetExecutionReportsAsync())
@@ -340,21 +462,27 @@ public sealed class MainViewModel : ViewModelBase
             }
 
             StatusMessage = "Listo";
+            await RefreshAppLogsAsync();
         }
         catch (Exception ex)
         {
             StatusMessage = $"Error al cargar datos: {ex.Message}";
+            HasSites = false;
+            AppLogger.Error("LoadAllAsync failed.", ex);
         }
     }
 
     private async Task CreateSiteAsync()
     {
+        AppLogger.Info("CreateSite clicked.");
         var site = SelectedSite ?? new SiteProfile { Name = "Nuevo", BaseUrl = "https://", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow };
         var created = await _apiClient.CreateSiteAsync(site);
         if (created != null)
         {
             Sites.Add(created);
             SelectedSite = created;
+            HasSites = Sites.Count > 0;
+            AppLogger.Info($"Site created: {created.Name} ({created.Id}).");
         }
     }
 
@@ -382,6 +510,7 @@ public sealed class MainViewModel : ViewModelBase
         await _apiClient.DeleteSiteAsync(SelectedSite.Id);
         Sites.Remove(SelectedSite);
         SelectedSite = null;
+        HasSites = Sites.Count > 0;
     }
 
     private async Task CreateStagingAsync()
@@ -546,9 +675,55 @@ public sealed class MainViewModel : ViewModelBase
         }
 
         StatusMessage = "Ejecutando scraping...";
-        ScrapeResult = await _apiClient.RunScrapingAsync(SelectedSite.Id);
+        IsScraping = true;
+        try
+        {
+            await RefreshLogsAsync();
+            await RefreshScrapeStatusAsync();
+            ScrapeResult = await _apiClient.RunScrapingAsync(SelectedSite.Id, ManualLoginEnabled, HeadlessEnabled);
+            await RefreshLogsAsync();
+            await RefreshScrapeStatusAsync();
+        }
+        finally
+        {
+            IsScraping = false;
+        }
         StatusMessage = "Scraping finalizado.";
         await LoadAllAsync();
+    }
+
+    private async Task PauseScrapingAsync()
+    {
+        if (SelectedSite == null)
+        {
+            return;
+        }
+
+        await _apiClient.PauseScrapingAsync(SelectedSite.Id);
+        await RefreshScrapeStatusAsync();
+    }
+
+    private async Task ResumeScrapingAsync()
+    {
+        if (SelectedSite == null)
+        {
+            return;
+        }
+
+        await _apiClient.ResumeScrapingAsync(SelectedSite.Id);
+        await RefreshScrapeStatusAsync();
+    }
+
+    private async Task StopScrapingAsync()
+    {
+        if (SelectedSite == null)
+        {
+            return;
+        }
+
+        await _apiClient.StopScrapingAsync(SelectedSite.Id);
+        await RefreshScrapeStatusAsync();
+        IsScraping = false;
     }
 
     private async Task SendSelectedToSaeAsync()
@@ -559,7 +734,7 @@ public sealed class MainViewModel : ViewModelBase
         }
 
         var ok = await _apiClient.SendToSaeAsync(SelectedStagingProduct.Id);
-        StatusMessage = ok ? "Envío a SAE realizado." : "SAE SDK no configurado.";
+        StatusMessage = ok ? "Env�o a SAE realizado." : "SAE SDK no configurado.";
         await LoadAllAsync();
     }
 
@@ -593,7 +768,7 @@ public sealed class MainViewModel : ViewModelBase
             var settings = await _apiClient.GetSettingsAsync();
             if (settings == null)
             {
-                StatusMessage = "No hay configuración guardada.";
+                StatusMessage = "No hay configuraci�n guardada.";
                 return;
             }
 
@@ -610,11 +785,11 @@ public sealed class MainViewModel : ViewModelBase
             SaeDbCharset = settings.SaeDbCharset ?? "ISO8859_1";
             SaeDbDialect = settings.SaeDbDialect ?? 3;
             SaeDefaultLineCode = settings.SaeDefaultLineCode ?? "LINEA";
-            StatusMessage = "Configuración cargada.";
+            StatusMessage = "Configuraci�n cargada.";
         }
         catch (Exception ex)
         {
-            StatusMessage = $"Error al cargar configuración: {ex.Message}";
+            StatusMessage = $"Error al cargar configuraci�n: {ex.Message}";
         }
     }
 
@@ -640,11 +815,11 @@ public sealed class MainViewModel : ViewModelBase
             };
 
             await _apiClient.SaveSettingsAsync(settings);
-            StatusMessage = "Configuración guardada. Reinicia el backend si estaba corriendo.";
+            StatusMessage = "Configuraci�n guardada. Reinicia el backend si estaba corriendo.";
         }
         catch (Exception ex)
         {
-            StatusMessage = $"Error al guardar configuración: {ex.Message}";
+            StatusMessage = $"Error al guardar configuraci�n: {ex.Message}";
         }
     }
 
@@ -655,7 +830,7 @@ public sealed class MainViewModel : ViewModelBase
             DiagnosticsResult = await _apiClient.GetDiagnosticsAsync();
             if (DiagnosticsResult == null)
             {
-                StatusMessage = "No se pudo obtener diagnóstico.";
+                StatusMessage = "No se pudo obtener diagn�stico.";
                 return;
             }
 
@@ -664,10 +839,10 @@ public sealed class MainViewModel : ViewModelBase
             SaeStatus = DiagnosticsResult.SaeSdkOk ? "OK" : "Error";
             SupabaseSampleCount = DiagnosticsResult.SupabaseSampleCount;
             DatabaseStatus = DiagnosticsResult.SupabaseOk
-                ? $"OK ({SupabaseSampleCount ?? 0} registros leídos)"
+                ? $"OK ({SupabaseSampleCount ?? 0} registros le�dos)"
                 : "Error";
 
-            StatusMessage = "Diagnóstico completado.";
+            StatusMessage = "Diagn�stico completado.";
         }
         catch (Exception ex)
         {
@@ -687,6 +862,169 @@ public sealed class MainViewModel : ViewModelBase
         {
             BackendStatus = "Error";
             StatusMessage = $"Error al conectar backend: {ex.Message}";
+        }
+    }
+
+    private async Task RefreshLogsAsync()
+    {
+        try
+        {
+            var logs = await _apiClient.GetSyncLogsAsync();
+            SyncLogs.Clear();
+            foreach (var item in logs)
+            {
+                SyncLogs.Add(item);
+            }
+            UpdateRecentSyncLogs();
+            await RefreshAppLogsAsync();
+        }
+        catch
+        {
+            // Ignore log refresh errors to avoid UI flicker.
+        }
+    }
+
+    private async Task RefreshScrapeStatusAsync()
+    {
+        try
+        {
+            if (SelectedSite == null)
+            {
+                ScrapeStatusText = "Idle";
+                IsScraping = false;
+                return;
+            }
+
+            var status = await _apiClient.GetScrapeStatusAsync(SelectedSite.Id);
+            if (status == null)
+            {
+                ScrapeStatusText = "Idle";
+                IsScraping = false;
+                return;
+            }
+
+            ScrapeStatusText = $"{status.State} - {status.Message}";
+            IsScraping = status.State == ScrapSAE.Core.Interfaces.ScrapeRunState.Running ||
+                         status.State == ScrapSAE.Core.Interfaces.ScrapeRunState.Paused;
+        }
+        catch
+        {
+            // Ignore status errors.
+        }
+    }
+
+    private async Task AnalyzeSelectorsAsync()
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = "Selecciona capturas para análisis",
+            Filter = "Images (*.png;*.jpg;*.jpeg)|*.png;*.jpg;*.jpeg",
+            Multiselect = true
+        };
+
+        if (dialog.ShowDialog() != true)
+        {
+            return;
+        }
+
+        var images = new List<string>();
+        foreach (var file in dialog.FileNames)
+        {
+            var bytes = await File.ReadAllBytesAsync(file);
+            images.Add(Convert.ToBase64String(bytes));
+        }
+
+        var request = new SelectorAnalysisRequest
+        {
+            Url = SelectedSite?.BaseUrl,
+            HtmlSnippet = SelectedStagingProduct?.RawData,
+            ImagesBase64 = images,
+            Notes = "Identificar prefijos de clase y selectores robustos."
+        };
+
+        var result = await _apiClient.AnalyzeSelectorsAsync(request);
+        if (result != null)
+        {
+            SelectorAnalysisResult = JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true });
+            AppLogger.Info($"Selector analysis result: {SelectorAnalysisResult}");
+            await ApplySelectorSuggestionAsync(result);
+        }
+    }
+
+    private async Task ApplySelectorSuggestionAsync(SelectorSuggestion suggestion)
+    {
+        if (SelectedSite == null)
+        {
+            return;
+        }
+
+        var json = SelectedSite.Selectors switch
+        {
+            JsonElement element => element.GetRawText(),
+            string text => text,
+            _ => "{}"
+        };
+
+        var dict = JsonSerializer.Deserialize<Dictionary<string, object>>(json) ?? new Dictionary<string, object>();
+        if (!string.IsNullOrWhiteSpace(suggestion.ProductListClassPrefix)) dict["productListClassPrefix"] = suggestion.ProductListClassPrefix!;
+        if (!string.IsNullOrWhiteSpace(suggestion.ProductCardClassPrefix)) dict["productCardClassPrefix"] = suggestion.ProductCardClassPrefix!;
+        if (!string.IsNullOrWhiteSpace(suggestion.DetailButtonText)) dict["detailButtonText"] = suggestion.DetailButtonText!;
+        if (!string.IsNullOrWhiteSpace(suggestion.DetailButtonClassPrefix)) dict["detailButtonClassPrefix"] = suggestion.DetailButtonClassPrefix!;
+        if (!string.IsNullOrWhiteSpace(suggestion.TitleSelector)) dict["titleSelector"] = suggestion.TitleSelector!;
+        if (!string.IsNullOrWhiteSpace(suggestion.PriceSelector)) dict["priceSelector"] = suggestion.PriceSelector!;
+        if (!string.IsNullOrWhiteSpace(suggestion.SkuSelector)) dict["skuSelector"] = suggestion.SkuSelector!;
+        if (!string.IsNullOrWhiteSpace(suggestion.ImageSelector)) dict["imageSelector"] = suggestion.ImageSelector!;
+        if (!string.IsNullOrWhiteSpace(suggestion.NextPageSelector)) dict["nextPageSelector"] = suggestion.NextPageSelector!;
+
+        SelectedSite.Selectors = JsonSerializer.Serialize(dict);
+        await UpdateSiteAsync();
+    }
+
+    private async Task RefreshAppLogsAsync()
+    {
+        try
+        {
+            var lines = await AppLogger.ReadLatestAsync(400);
+            AppLogs.Clear();
+            foreach (var line in lines)
+            {
+                AppLogs.Add(line);
+            }
+        }
+        catch
+        {
+            // Ignore app log refresh errors.
+        }
+    }
+
+    private void UpdateRecentSyncLogs()
+    {
+        RecentSyncLogs.Clear();
+        var logs = SyncLogs.AsEnumerable()
+            .Where(log => string.Equals(log.OperationType, "scrape", StringComparison.OrdinalIgnoreCase));
+        if (SelectedSite != null)
+        {
+            logs = logs.Where(log => log.SiteId == SelectedSite.Id);
+        }
+
+        foreach (var log in logs
+            .OrderByDescending(log => log.CreatedAt)
+            .Take(50))
+        {
+            RecentSyncLogs.Add(log);
+        }
+    }
+
+    private async Task SafeExecuteAsync(Func<Task> action, string operationName)
+    {
+        try
+        {
+            await action();
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Error en {operationName}: {ex.Message}";
+            AppLogger.Error($"Operation failed: {operationName}", ex);
         }
     }
 }

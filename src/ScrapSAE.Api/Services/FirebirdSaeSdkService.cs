@@ -62,7 +62,7 @@ public sealed class FirebirdSaeSdkService : ISaeSdkService
         }
 
         var payload = ParsePayload(product.AIProcessedJson);
-        var description = payload.Title ?? payload.Description ?? sku;
+        var description = payload.Title ?? payload.Description ?? payload.Name ?? sku;
         var price = payload.Price;
         var lineCode = payload.LineCode ?? GetDefaultLineCode();
 
@@ -221,8 +221,9 @@ public sealed class FirebirdSaeSdkService : ISaeSdkService
             return new Payload
             {
                 Title = GetString(root, "Title"),
+                Name = GetString(root, "Name"),
                 Description = GetString(root, "Description"),
-                LineCode = GetString(root, "LineCode"),
+                LineCode = GetString(root, "LineCode") ?? GetString(root, "SaeLineCode"),
                 Price = GetDecimal(root, "Price")
             };
         }
@@ -234,7 +235,7 @@ public sealed class FirebirdSaeSdkService : ISaeSdkService
 
     private static string? GetString(JsonElement root, string name)
     {
-        if (!root.TryGetProperty(name, out var element))
+        if (!TryGetPropertyIgnoreCase(root, name, out var element))
         {
             return null;
         }
@@ -249,7 +250,7 @@ public sealed class FirebirdSaeSdkService : ISaeSdkService
 
     private static decimal? GetDecimal(JsonElement root, string name)
     {
-        if (!root.TryGetProperty(name, out var element))
+        if (!TryGetPropertyIgnoreCase(root, name, out var element))
         {
             return null;
         }
@@ -301,8 +302,24 @@ public sealed class FirebirdSaeSdkService : ISaeSdkService
     private sealed class Payload
     {
         public string? Title { get; init; }
+        public string? Name { get; init; }
         public string? Description { get; init; }
         public string? LineCode { get; init; }
         public decimal? Price { get; init; }
+    }
+
+    private static bool TryGetPropertyIgnoreCase(JsonElement root, string name, out JsonElement element)
+    {
+        foreach (var property in root.EnumerateObject())
+        {
+            if (string.Equals(property.Name, name, StringComparison.OrdinalIgnoreCase))
+            {
+                element = property.Value;
+                return true;
+            }
+        }
+
+        element = default;
+        return false;
     }
 }

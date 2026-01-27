@@ -70,10 +70,12 @@ $RECYCLE.BIN/
 # Playwright
 playwright-report/
 test-results/
+.playwright-profile/
 
 # Serilog logs
 logs/
 *.log
+*.err
 
 # SQLite databases
 *.db
@@ -95,6 +97,7 @@ appsettings.Local.json
 *.temp
 *.swp
 *~
+temp/
 
 # Node.js (for Dashboard)
 node_modules/

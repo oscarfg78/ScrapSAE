@@ -3,33 +3,140 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:ScrapSAE.Desktop.Infrastructure"
         mc:Ignorable="d"
         Title="ScrapSAE - Consola"
         Height="900"
         Width="1300"
-        WindowStartupLocation="CenterScreen">
-    <Grid Background="#F6F7FB">
+        WindowStartupLocation="CenterScreen"
+        Loaded="MainWindow_OnLoaded">
+    <Grid Background="#F3F5F8">
+        <Grid.Resources>
+            <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+            <local:NegateBooleanConverter x:Key="NegateBool" />
+            <Style TargetType="Button">
+                <Setter Property="Padding" Value="10,6" />
+                <Setter Property="Margin" Value="0,0,8,0" />
+                <Setter Property="Background" Value="#2563EB" />
+                <Setter Property="Foreground" Value="White" />
+                <Setter Property="BorderBrush" Value="#1D4ED8" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="Cursor" Value="Hand" />
+            </Style>
+            <Style TargetType="TextBox">
+                <Setter Property="Margin" Value="0,6,0,12" />
+                <Setter Property="Padding" Value="6" />
+                <Setter Property="BorderBrush" Value="#D1D5DB" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="Background" Value="White" />
+            </Style>
+            <Style TargetType="DataGrid">
+                <Setter Property="RowBackground" Value="White" />
+                <Setter Property="AlternatingRowBackground" Value="#F9FAFB" />
+                <Setter Property="GridLinesVisibility" Value="Horizontal" />
+                <Setter Property="BorderBrush" Value="#E5E7EB" />
+                <Setter Property="BorderThickness" Value="1" />
+            </Style>
+            <Style TargetType="TabControl">
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+            </Style>
+            <Style TargetType="TabItem">
+                <Setter Property="Padding" Value="12,6" />
+                <Setter Property="Margin" Value="0,0,2,0" />
+            </Style>
+        </Grid.Resources>
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <Border Background="#1F2937" Padding="16">
+        <Border Background="#111827" Padding="16">
             <DockPanel>
                 <TextBlock Text="ScrapSAE Console" Foreground="White" FontSize="20" FontWeight="SemiBold" />
                 <Button DockPanel.Dock="Right"
                         Content="Refrescar"
                         Command="{Binding LoadAllCommand}"
-                        Padding="12,6"
                         Background="#F59E0B"
-                        Foreground="White"
-                        BorderThickness="0"
+                        BorderBrush="#D97706"
                         Margin="12,0,0,0" />
             </DockPanel>
         </Border>
 
-        <TabControl Grid.Row="1" Margin="16">
+        <Border Grid.Row="1" Background="#E5E7EB" Padding="8">
+            <StackPanel Orientation="Horizontal">
+                <Button Click="Nav_Click" Tag="0">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="" Margin="0,0,6,0" />
+                        <TextBlock Text="Health" />
+                    </StackPanel>
+                </Button>
+                <Button Click="Nav_Click" Tag="1">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="" Margin="0,0,6,0" />
+                        <TextBlock Text="Configuración" />
+                    </StackPanel>
+                </Button>
+                <Button Click="Nav_Click" Tag="2">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="" Margin="0,0,6,0" />
+                        <TextBlock Text="Proveedores" />
+                    </StackPanel>
+                </Button>
+                <Button Click="Nav_Click" Tag="3">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="" Margin="0,0,6,0" />
+                        <TextBlock Text="Staging" />
+                    </StackPanel>
+                </Button>
+                <Button Click="Nav_Click" Tag="4">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="" Margin="0,0,6,0" />
+                        <TextBlock Text="Mapeo" />
+                    </StackPanel>
+                </Button>
+                <Button Click="Nav_Click" Tag="5">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="" Margin="0,0,6,0" />
+                        <TextBlock Text="Logs" />
+                    </StackPanel>
+                </Button>
+                <Button Click="Nav_Click" Tag="6">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="" Margin="0,0,6,0" />
+                        <TextBlock Text="App Logs" />
+                    </StackPanel>
+                </Button>
+                <Button Click="Nav_Click" Tag="7">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="" Margin="0,0,6,0" />
+                        <TextBlock Text="Reportes" />
+                    </StackPanel>
+                </Button>
+                <Button Click="Nav_Click" Tag="8">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="" Margin="0,0,6,0" />
+                        <TextBlock Text="Scraping" />
+                    </StackPanel>
+                </Button>
+                <Button Click="Nav_Click" Tag="9">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="" Margin="0,0,6,0" />
+                        <TextBlock Text="SAE" />
+                    </StackPanel>
+                </Button>
+                <Button Command="{Binding ExitCommand}" Background="#EF4444" BorderBrush="#B91C1C" Margin="12,0,0,0">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="" Margin="0,0,6,0" />
+                        <TextBlock Text="Salir" />
+                    </StackPanel>
+                </Button>
+            </StackPanel>
+        </Border>
+
+        <TabControl Grid.Row="2" Margin="16" SelectedIndex="{Binding SelectedTabIndex}" TabStripPlacement="None">
             <TabItem Header="Health">
                 <Grid Margin="12">
                     <Grid.RowDefinitions>
@@ -45,7 +152,7 @@
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
-                        <Border Grid.Column="0" Background="White" Padding="12" Margin="0,0,8,0">
+                        <Border Grid.Column="0" Background="White" Padding="12" Margin="0,0,8,0" CornerRadius="6" BorderBrush="#E5E7EB" BorderThickness="1">
                             <StackPanel>
                                 <TextBlock Text="Estado Backend" FontWeight="SemiBold" />
                                 <TextBlock Text="{Binding BackendStatus}" FontSize="16" />
@@ -57,7 +164,7 @@
                                 <TextBlock Text="{Binding DatabaseStatus}" FontSize="16" />
                             </StackPanel>
                         </Border>
-                        <Border Grid.Column="1" Background="White" Padding="12" Margin="8,0,0,0">
+                        <Border Grid.Column="1" Background="White" Padding="12" Margin="8,0,0,0" CornerRadius="6" BorderBrush="#E5E7EB" BorderThickness="1">
                             <StackPanel>
                                 <TextBlock Text="Detalles" FontWeight="SemiBold" />
                                 <TextBlock Text="{Binding DiagnosticsResult.SupabaseMessage}" TextWrapping="Wrap" Margin="0,8,0,0" />
@@ -86,38 +193,38 @@
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
-                        <Border Grid.Column="0" Background="White" Padding="12" Margin="0,0,8,0">
+                        <Border Grid.Column="0" Background="White" Padding="12" Margin="0,0,8,0" CornerRadius="6" BorderBrush="#E5E7EB" BorderThickness="1">
                             <StackPanel>
                                 <TextBlock Text="Supabase URL" FontWeight="SemiBold" />
-                                <TextBox Text="{Binding SupabaseUrl}" Margin="0,6,0,12" />
+                                <TextBox Text="{Binding SupabaseUrl}" />
                                 <TextBlock Text="Supabase Service Key" FontWeight="SemiBold" />
-                                <TextBox Text="{Binding SupabaseServiceKey}" Margin="0,6,0,12" />
+                                <TextBox Text="{Binding SupabaseServiceKey}" />
                                 <TextBlock Text="SAE SDK Path" FontWeight="SemiBold" />
-                                <TextBox Text="{Binding SaeSdkPath}" Margin="0,6,0,12" />
+                                <TextBox Text="{Binding SaeSdkPath}" />
                                 <TextBlock Text="SAE DB Host" FontWeight="SemiBold" />
-                                <TextBox Text="{Binding SaeDbHost}" Margin="0,6,0,12" />
+                                <TextBox Text="{Binding SaeDbHost}" />
                                 <TextBlock Text="SAE DB Path (FDB)" FontWeight="SemiBold" />
-                                <TextBox Text="{Binding SaeDbPath}" Margin="0,6,0,12" AutomationProperties.AutomationId="SaeDbPath" AutomationProperties.Name="SaeDbPath" />
+                                <TextBox Text="{Binding SaeDbPath}" AutomationProperties.AutomationId="SaeDbPath" AutomationProperties.Name="SaeDbPath" />
                                 <TextBlock Text="SAE DB Port" FontWeight="SemiBold" />
-                                <TextBox Text="{Binding SaeDbPort}" Margin="0,6,0,12" />
+                                <TextBox Text="{Binding SaeDbPort}" />
                                 <TextBlock Text="SAE DB Charset" FontWeight="SemiBold" />
-                                <TextBox Text="{Binding SaeDbCharset}" Margin="0,6,0,12" />
+                                <TextBox Text="{Binding SaeDbCharset}" />
                                 <TextBlock Text="SAE DB Dialect" FontWeight="SemiBold" />
-                                <TextBox Text="{Binding SaeDbDialect}" Margin="0,6,0,12" />
+                                <TextBox Text="{Binding SaeDbDialect}" />
                                 <TextBlock Text="SAE Default Line Code" FontWeight="SemiBold" />
-                                <TextBox Text="{Binding SaeDefaultLineCode}" Margin="0,6,0,12" />
+                                <TextBox Text="{Binding SaeDefaultLineCode}" />
                             </StackPanel>
                         </Border>
-                        <Border Grid.Column="1" Background="White" Padding="12" Margin="8,0,0,0">
+                        <Border Grid.Column="1" Background="White" Padding="12" Margin="8,0,0,0" CornerRadius="6" BorderBrush="#E5E7EB" BorderThickness="1">
                             <StackPanel>
                                 <TextBlock Text="Usuario SAE" FontWeight="SemiBold" />
-                                <TextBox Text="{Binding SaeUser}" Margin="0,6,0,12" />
+                                <TextBox Text="{Binding SaeUser}" />
                                 <TextBlock Text="Password SAE" FontWeight="SemiBold" />
-                                <TextBox Text="{Binding SaePassword}" Margin="0,6,0,12" />
+                                <TextBox Text="{Binding SaePassword}" />
                                 <TextBlock Text="Usuario DB" FontWeight="SemiBold" />
-                                <TextBox Text="{Binding SaeDbUser}" Margin="0,6,0,12" />
+                                <TextBox Text="{Binding SaeDbUser}" />
                                 <TextBlock Text="Password DB" FontWeight="SemiBold" />
-                                <TextBox Text="{Binding SaeDbPassword}" Margin="0,6,0,12" />
+                                <TextBox Text="{Binding SaeDbPassword}" />
                                 <TextBlock Text="Nota" FontWeight="SemiBold" Margin="0,12,0,0" />
                                 <TextBlock Text="Guarda la configuración y reinicia el backend para aplicar cambios." TextWrapping="Wrap" />
                             </StackPanel>
@@ -141,7 +248,8 @@
                               SelectedItem="{Binding SelectedSite}"
                               AutoGenerateColumns="True"
                               IsReadOnly="False"
-                              CanUserAddRows="False" />
+                              CanUserAddRows="False"
+                              Margin="0,4,0,0" />
                 </Grid>
             </TabItem>
 
@@ -161,7 +269,8 @@
                               SelectedItem="{Binding SelectedStagingProduct}"
                               AutoGenerateColumns="True"
                               IsReadOnly="False"
-                              CanUserAddRows="False" />
+                              CanUserAddRows="False"
+                              Margin="0,4,0,0" />
                 </Grid>
             </TabItem>
 
@@ -181,7 +290,8 @@
                               SelectedItem="{Binding SelectedCategoryMapping}"
                               AutoGenerateColumns="True"
                               IsReadOnly="False"
-                              CanUserAddRows="False" />
+                              CanUserAddRows="False"
+                              Margin="0,4,0,0" />
                 </Grid>
             </TabItem>
 
@@ -201,7 +311,28 @@
                               SelectedItem="{Binding SelectedSyncLog}"
                               AutoGenerateColumns="True"
                               IsReadOnly="False"
-                              CanUserAddRows="False" />
+                              CanUserAddRows="False"
+                              Margin="0,4,0,0" />
+                </Grid>
+            </TabItem>
+            <TabItem Header="App Logs">
+                <Grid Margin="8">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                        <Button Content="Refrescar" Command="{Binding RefreshAppLogsCommand}" />
+                        <TextBlock Text="Archivo:" Margin="8,0,4,0" VerticalAlignment="Center" />
+                        <TextBlock Text="{Binding AppLogPath}" VerticalAlignment="Center" />
+                    </StackPanel>
+                    <ListBox Grid.Row="1"
+                             ItemsSource="{Binding AppLogs}"
+                             FontFamily="Consolas"
+                             FontSize="12"
+                             Background="White"
+                             BorderBrush="#E5E7EB"
+                             BorderThickness="1" />
                 </Grid>
             </TabItem>
 
@@ -221,13 +352,16 @@
                               SelectedItem="{Binding SelectedExecutionReport}"
                               AutoGenerateColumns="True"
                               IsReadOnly="False"
-                              CanUserAddRows="False" />
+                              CanUserAddRows="False"
+                              Margin="0,4,0,0" />
                 </Grid>
             </TabItem>
 
             <TabItem Header="Scraping">
                 <Grid Margin="8">
                     <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
@@ -239,9 +373,34 @@
                                   DisplayMemberPath="Name"
                                   Width="260"
                                   Margin="0,0,12,0" />
-                        <Button Content="Ejecutar Scraping" Command="{Binding RunScrapingCommand}" />
+                        <TextBlock Text="Cargados:" VerticalAlignment="Center" Margin="0,0,6,0" />
+                        <TextBlock Text="{Binding Sites.Count}" VerticalAlignment="Center" Margin="0,0,12,0" />
+                        <Button Content="Iniciar" Command="{Binding RunScrapingCommand}" />
+                        <Button Content="Pausar" Command="{Binding PauseScrapingCommand}" />
+                        <Button Content="Reanudar" Command="{Binding ResumeScrapingCommand}" />
+                        <Button Content="Detener" Command="{Binding StopScrapingCommand}" />
+                        <Button Content="Refrescar logs" Command="{Binding RefreshLogsCommand}" Margin="8,0,0,0" />
+                        <Button Content="Analizar selectores (IA)" Command="{Binding AnalyzeSelectorsCommand}" Margin="8,0,0,0" />
                     </StackPanel>
-                    <Border Grid.Row="1" Background="#E5E7EB" Padding="12" CornerRadius="6">
+                    <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,8">
+                        <CheckBox Content="Login manual" IsChecked="{Binding ManualLoginEnabled}" Margin="0,0,12,0" />
+                        <CheckBox Content="Headless" IsChecked="{Binding HeadlessEnabled}" IsEnabled="{Binding ManualLoginEnabled, Converter={StaticResource NegateBool}}" />
+                        <TextBlock Text="Estado:" VerticalAlignment="Center" Margin="12,0,6,0" />
+                        <TextBlock Text="{Binding ScrapeStatusText}" VerticalAlignment="Center" />
+                    </StackPanel>
+                    <Border Grid.Row="2"
+                            Background="#FEF3C7"
+                            BorderBrush="#F59E0B"
+                            BorderThickness="1"
+                            CornerRadius="6"
+                            Padding="10"
+                            Margin="0,0,0,8"
+                            Visibility="{Binding NoSites, Converter={StaticResource BoolToVisibility}}">
+                        <TextBlock Text="No hay proveedores cargados. Usa la pestaña 'Proveedores' para crear uno o revisa la conexión del backend."
+                                   TextWrapping="Wrap"
+                                   Foreground="#92400E" />
+                    </Border>
+                    <Border Grid.Row="3" Background="#E5E7EB" Padding="12" CornerRadius="6" BorderBrush="#E5E7EB" BorderThickness="1">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="Encontrados:" FontWeight="SemiBold" Margin="0,0,6,0" />
                             <TextBlock Text="{Binding ScrapeResult.ProductsFound}" Margin="0,0,16,0" />
@@ -255,13 +414,51 @@
                             <TextBlock Text="{Binding ScrapeResult.DurationMs}" />
                         </StackPanel>
                     </Border>
-                    <DataGrid Grid.Row="2"
-                              ItemsSource="{Binding StagingProducts}"
-                              SelectedItem="{Binding SelectedStagingProduct}"
-                              AutoGenerateColumns="True"
-                              IsReadOnly="False"
-                              CanUserAddRows="False"
-                              Margin="0,12,0,0" />
+                    <Grid Grid.Row="4" Margin="0,12,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="3*" />
+                            <ColumnDefinition Width="2*" />
+                        </Grid.ColumnDefinitions>
+                        <Border Grid.Column="0" Background="White" Padding="8" Margin="0,0,8,0" CornerRadius="6" BorderBrush="#E5E7EB" BorderThickness="1">
+                            <DataGrid ItemsSource="{Binding StagingProducts}"
+                                      SelectedItem="{Binding SelectedStagingProduct}"
+                                      AutoGenerateColumns="True"
+                                      IsReadOnly="False"
+                                      CanUserAddRows="False" />
+                        </Border>
+                        <Border Grid.Column="1" Background="White" Padding="8" Margin="8,0,0,0" CornerRadius="6" BorderBrush="#E5E7EB" BorderThickness="1">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="140" />
+                                </Grid.RowDefinitions>
+                                <TextBlock Text="Traza reciente" FontWeight="SemiBold" Margin="0,0,0,8" />
+                                <DataGrid Grid.Row="1"
+                                          ItemsSource="{Binding RecentSyncLogs}"
+                                          AutoGenerateColumns="False"
+                                          IsReadOnly="True"
+                                          CanUserAddRows="False">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="UTC" Binding="{Binding CreatedAt}" Width="120" />
+                                        <DataGridTextColumn Header="Tipo" Binding="{Binding OperationType}" Width="100" />
+                                        <DataGridTextColumn Header="Estado" Binding="{Binding Status}" Width="80" />
+                                        <DataGridTextColumn Header="Mensaje" Binding="{Binding Message}" Width="*" />
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                                <TextBlock Grid.Row="2" Text="IA selectores" FontWeight="SemiBold" Margin="0,8,0,4" />
+                                <TextBox Grid.Row="3"
+                                         Text="{Binding SelectorAnalysisResult}"
+                                         TextWrapping="Wrap"
+                                         VerticalScrollBarVisibility="Auto"
+                                         IsReadOnly="True"
+                                         Background="#F9FAFB"
+                                         BorderBrush="#E5E7EB"
+                                         BorderThickness="1" />
+                            </Grid>
+                        </Border>
+                    </Grid>
                 </Grid>
             </TabItem>
 
@@ -290,7 +487,7 @@
             </TabItem>
         </TabControl>
 
-        <StatusBar Grid.Row="2" Background="#111827">
+        <StatusBar Grid.Row="3" Background="#111827">
             <StatusBarItem>
                 <TextBlock Text="{Binding StatusMessage}" Foreground="White" />
             </StatusBarItem>

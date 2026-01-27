@@ -1,6 +1,7 @@
+using ScrapSAE.Core.DTOs;
 using ScrapSAE.Core.Entities;
 using ScrapSAE.Core.Interfaces;
-using Newtonsoft.Json;
+using System.Text.Json;
 
 namespace ScrapSAE.Worker;
 
@@ -9,6 +10,8 @@ public class Worker : BackgroundService
     private readonly ILogger<Worker> _logger;
     private readonly IScrapingService _scrapingService;
     private readonly IStagingService _stagingService;
+    private readonly IAIProcessorService _aiProcessorService;
+    private readonly ISyncLogService _syncLogService;
     // We use a simple tracking dictionary to avoid running the same site multiple times in the same minute
     private readonly Dictionary<Guid, DateTime> _lastRunTimes = new();
     // Random instance for human-like delays
@@ -17,11 +20,15 @@ public class Worker : BackgroundService
     public Worker(
         ILogger<Worker> logger,
         IScrapingService scrapingService,
-        IStagingService stagingService)
+        IStagingService stagingService,
+        IAIProcessorService aiProcessorService,
+        ISyncLogService syncLogService)
     {
         _logger = logger;
         _scrapingService = scrapingService;
         _stagingService = stagingService;
+        _aiProcessorService = aiProcessorService;
+        _syncLogService = syncLogService;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -40,6 +47,8 @@ public class Worker : BackgroundService
                     if (ShouldRun(site))
                     {
                         _logger.LogInformation("Starting scraping for site: {SiteName}", site.Name);
+                        var siteStartedAt = DateTime.UtcNow;
+                        await LogSyncAsync(site, "scrape", "start", "Inicio de scraping.");
 
                         // Apply site-specific defaults if max products not configured
                         if (site.MaxProductsPerScrape == 0)
@@ -73,15 +82,10 @@ public class Worker : BackgroundService
                                     SiteId = site.Id,
                                     SkuSource = scrapedProduct.SkuSource,
                                     RawData = scrapedProduct.RawHtml,
-                                    Status = "pending",
-                                    AIProcessedJson = JsonConvert.SerializeObject(new { 
-                                        scrapedProduct.Title, 
-                                        scrapedProduct.Price, 
-                                        scrapedProduct.ImageUrl,
-                                        scrapedProduct.Description,
-                                        scrapedProduct.Attributes
-                                    })
+                                    Status = "pending"
                                 };
+
+                                stagingProduct.AIProcessedJson = await BuildAiJsonAsync(scrapedProduct, stoppingToken);
 
                                 await _stagingService.CreateProductAsync(stagingProduct);
                                 savedCount++;
@@ -97,10 +101,14 @@ public class Worker : BackgroundService
                             // Update last run time after successful completion
                             _lastRunTimes[site.Id] = DateTime.UtcNow;
                             _logger.LogInformation("Finished scraping site {SiteName}. Saved {Count} products.", site.Name, savedCount);
+                            var durationMs = (int)(DateTime.UtcNow - siteStartedAt).TotalMilliseconds;
+                            await LogSyncAsync(site, "scrape", "success", $"Scraping finalizado. Productos guardados: {savedCount}.", durationMs);
                         }
                         catch (Exception ex)
                         {
                             _logger.LogError(ex, "Error processing site {SiteName}", site.Name);
+                            var durationMs = (int)(DateTime.UtcNow - siteStartedAt).TotalMilliseconds;
+                            await LogSyncAsync(site, "scrape", "error", ex.Message, durationMs);
                         }
 
                         // Random delay between processing sites (5-12 seconds) to appear more human-like
@@ -271,5 +279,65 @@ public class Worker : BackgroundService
         }
 
         return (null, null);
+    }
+
+    private async Task<string?> BuildAiJsonAsync(ScrapedProduct scrapedProduct, CancellationToken cancellationToken)
+    {
+        var rawPayload = new
+        {
+            scrapedProduct.SkuSource,
+            scrapedProduct.Title,
+            scrapedProduct.Description,
+            scrapedProduct.Price,
+            scrapedProduct.ImageUrl,
+            scrapedProduct.Brand,
+            scrapedProduct.Category,
+            scrapedProduct.Attributes
+        };
+
+        var rawData = JsonSerializer.Serialize(rawPayload);
+
+        try
+        {
+            var processed = await _aiProcessorService.ProcessProductAsync(rawData, cancellationToken);
+            processed.Sku ??= scrapedProduct.SkuSource;
+            processed.Name = string.IsNullOrWhiteSpace(processed.Name) ? (scrapedProduct.Title ?? string.Empty) : processed.Name;
+            processed.Description = string.IsNullOrWhiteSpace(processed.Description) ? (scrapedProduct.Description ?? string.Empty) : processed.Description;
+            processed.Brand ??= scrapedProduct.Brand;
+            processed.Price ??= scrapedProduct.Price;
+
+            return JsonSerializer.Serialize(processed);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "AI processing failed for SKU {Sku}. Falling back to raw fields.", scrapedProduct.SkuSource);
+            return JsonSerializer.Serialize(new
+            {
+                scrapedProduct.Title,
+                scrapedProduct.Price,
+                scrapedProduct.ImageUrl,
+                scrapedProduct.Description,
+                scrapedProduct.Attributes
+            });
+        }
+    }
+
+    private async Task LogSyncAsync(SiteProfile site, string operationType, string status, string message, int? durationMs = null)
+    {
+        try
+        {
+            await _syncLogService.LogOperationAsync(new SyncLog
+            {
+                OperationType = operationType,
+                SiteId = site.Id,
+                Status = status,
+                Message = message,
+                DurationMs = durationMs
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to write sync log for site {SiteName}", site.Name);
+        }
     }
 }

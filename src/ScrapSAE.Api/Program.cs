@@ -1,7 +1,9 @@
 using ScrapSAE.Api.Models;
 using ScrapSAE.Api.Services;
+using ScrapSAE.Core.DTOs;
 using ScrapSAE.Core.Entities;
 using ScrapSAE.Core.Interfaces;
+using ScrapSAE.Infrastructure.AI;
 using ScrapSAE.Infrastructure.Scraping;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -13,6 +15,9 @@ builder.Services.AddSwaggerGen();
 builder.Services.AddSingleton<SettingsStore>();
 builder.Services.AddSingleton<DiagnosticsService>();
 builder.Services.AddSingleton<ISupabaseRestClient, SupabaseRestClient>();
+builder.Services.AddSingleton<IScrapeControlService, ScrapeControlService>();
+builder.Services.AddHttpClient("OpenAI");
+builder.Services.AddSingleton<IAIProcessorService, OpenAIProcessorService>();
 
 builder.Services.AddSingleton(sp => new SupabaseTableService<SiteProfile>(sp.GetRequiredService<ISupabaseRestClient>(), "config_sites"));
 builder.Services.AddSingleton(sp => new SupabaseTableService<StagingProduct>(sp.GetRequiredService<ISupabaseRestClient>(), "staging_products"));
@@ -89,9 +94,87 @@ MapCrud(app, "/api/execution-reports", "ExecutionReport",
     entity => entity.CreatedAt = DateTime.UtcNow,
     _ => { });
 
-app.MapPost("/api/scraping/run/{siteId:guid}", async (Guid siteId, ScrapingRunner runner, CancellationToken token) =>
+app.MapPost("/api/scraping/run/{siteId:guid}", async (
+    Guid siteId,
+    HttpRequest request,
+    ScrapingRunner runner,
+    CancellationToken token) =>
 {
-    var result = await runner.RunForSiteAsync(siteId, token);
+    var manualLogin = bool.TryParse(request.Query["manualLogin"], out var manual) && manual;
+    var headless = !bool.TryParse(request.Query["headless"], out var headlessParsed) || headlessParsed;
+
+    var previousManual = Environment.GetEnvironmentVariable("SCRAPSAE_MANUAL_LOGIN");
+    var previousForceManual = Environment.GetEnvironmentVariable("SCRAPSAE_FORCE_MANUAL_LOGIN");
+    var previousHeadless = Environment.GetEnvironmentVariable("SCRAPSAE_HEADLESS");
+
+    try
+    {
+        Environment.SetEnvironmentVariable("SCRAPSAE_MANUAL_LOGIN", manualLogin ? "true" : "false");
+        Environment.SetEnvironmentVariable("SCRAPSAE_FORCE_MANUAL_LOGIN", manualLogin ? "true" : "false");
+        Environment.SetEnvironmentVariable("SCRAPSAE_HEADLESS", headless ? "true" : "false");
+
+        var result = await runner.RunForSiteAsync(siteId, token);
+        return Results.Ok(result);
+    }
+    finally
+    {
+        Environment.SetEnvironmentVariable("SCRAPSAE_MANUAL_LOGIN", previousManual);
+        Environment.SetEnvironmentVariable("SCRAPSAE_FORCE_MANUAL_LOGIN", previousForceManual);
+        Environment.SetEnvironmentVariable("SCRAPSAE_HEADLESS", previousHeadless);
+    }
+});
+
+app.MapPost("/api/scraping/pause/{siteId:guid}", (Guid siteId, IScrapeControlService control) =>
+{
+    control.Pause(siteId);
+    return Results.Ok(new { state = control.GetStatus(siteId).State.ToString() });
+});
+
+app.MapPost("/api/scraping/resume/{siteId:guid}", (Guid siteId, IScrapeControlService control) =>
+{
+    control.Resume(siteId);
+    return Results.Ok(new { state = control.GetStatus(siteId).State.ToString() });
+});
+
+app.MapPost("/api/scraping/stop/{siteId:guid}", (Guid siteId, IScrapeControlService control) =>
+{
+    control.Stop(siteId);
+    return Results.Ok(new { state = control.GetStatus(siteId).State.ToString() });
+});
+
+app.MapGet("/api/scraping/status/{siteId:guid}", (Guid siteId, IScrapeControlService control) =>
+{
+    return Results.Ok(control.GetStatus(siteId));
+});
+
+app.MapPost("/api/ai/analyze-selectors", async (
+    SelectorAnalysisRequest request,
+    IAIProcessorService ai,
+    CancellationToken token) =>
+{
+    var result = await ai.AnalyzeSelectorsAsync(request, token);
+    return Results.Ok(result);
+});
+
+app.MapGet("/api/sync-logs/live", async (
+    Guid? siteId,
+    DateTime? sinceUtc,
+    ISupabaseRestClient supabase) =>
+{
+    var query = "sync_logs?select=*";
+    if (siteId.HasValue)
+    {
+        query += $"&site_id=eq.{siteId}";
+    }
+
+    if (sinceUtc.HasValue)
+    {
+        query += $"&created_at=gt.{sinceUtc:O}";
+    }
+
+    query += "&order=created_at.asc";
+
+    var result = await supabase.GetAsync<SyncLog>(query);
     return Results.Ok(result);
 });
 

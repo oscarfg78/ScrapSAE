@@ -84,6 +84,11 @@ public interface IAIProcessorService
     /// Sugiere una categoría de SAE para un producto
     /// </summary>
     Task<CategorySuggestion> SuggestCategoryAsync(string productDescription, IEnumerable<ProductLine> availableLines);
+
+    /// <summary>
+    /// Analiza selectores de scraping con apoyo de IA e imágenes.
+    /// </summary>
+    Task<SelectorSuggestion> AnalyzeSelectorsAsync(SelectorAnalysisRequest request, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -150,4 +155,35 @@ public interface ISchedulerService
     /// Obtiene el próximo tiempo de ejecución para un sitio
     /// </summary>
     DateTime? GetNextExecutionTime(Guid siteId);
+}
+
+public enum ScrapeRunState
+{
+    Idle,
+    Running,
+    Paused,
+    Stopped,
+    Completed,
+    Error
+}
+
+public sealed class ScrapeStatus
+{
+    public Guid SiteId { get; set; }
+    public ScrapeRunState State { get; set; } = ScrapeRunState.Idle;
+    public string? Message { get; set; }
+    public DateTime? StartedAtUtc { get; set; }
+    public DateTime? UpdatedAtUtc { get; set; }
+}
+
+public interface IScrapeControlService
+{
+    ScrapeStatus GetStatus(Guid siteId);
+    CancellationToken Start(Guid siteId);
+    void MarkCompleted(Guid siteId, string? message = null);
+    void MarkError(Guid siteId, string message);
+    void Pause(Guid siteId);
+    void Resume(Guid siteId);
+    void Stop(Guid siteId);
+    Task WaitIfPausedAsync(Guid siteId, CancellationToken cancellationToken);
 }

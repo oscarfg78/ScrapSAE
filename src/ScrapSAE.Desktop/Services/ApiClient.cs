@@ -1,7 +1,10 @@
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text.Json;
+using ScrapSAE.Core.DTOs;
 using ScrapSAE.Core.Entities;
+using ScrapSAE.Core.Interfaces;
+using ScrapSAE.Desktop.Infrastructure;
 using ScrapSAE.Desktop.Models;
 
 namespace ScrapSAE.Desktop.Services;
@@ -45,11 +48,52 @@ public sealed class ApiClient
     public Task<ExecutionReport?> UpdateExecutionReportAsync(Guid id, ExecutionReport report) => PutAsync($"api/execution-reports/{id}", report);
     public Task DeleteExecutionReportAsync(Guid id) => DeleteAsync($"api/execution-reports/{id}");
 
-    public async Task<ScrapeRunResult?> RunScrapingAsync(Guid siteId)
+    public async Task<ScrapeRunResult?> RunScrapingAsync(Guid siteId, bool manualLogin, bool headless)
     {
-        var response = await _httpClient.PostAsync($"api/scraping/run/{siteId}", null);
+        var query = $"api/scraping/run/{siteId}?manualLogin={manualLogin.ToString().ToLowerInvariant()}&headless={headless.ToString().ToLowerInvariant()}";
+        try
+        {
+            var response = await _httpClient.PostAsync(query, null);
+            response.EnsureSuccessStatusCode();
+            return await response.Content.ReadFromJsonAsync<ScrapeRunResult>(_jsonOptions);
+        }
+        catch (Exception ex)
+        {
+            AppLogger.Error($"RunScrapingAsync failed. Url={query}", ex);
+            throw;
+        }
+    }
+
+    public async Task<ScrapeStatus?> GetScrapeStatusAsync(Guid siteId)
+    {
+        var response = await _httpClient.GetAsync($"api/scraping/status/{siteId}");
         response.EnsureSuccessStatusCode();
-        return await response.Content.ReadFromJsonAsync<ScrapeRunResult>(_jsonOptions);
+        return await response.Content.ReadFromJsonAsync<ScrapeStatus>(_jsonOptions);
+    }
+
+    public async Task PauseScrapingAsync(Guid siteId)
+    {
+        var response = await _httpClient.PostAsync($"api/scraping/pause/{siteId}", null);
+        response.EnsureSuccessStatusCode();
+    }
+
+    public async Task ResumeScrapingAsync(Guid siteId)
+    {
+        var response = await _httpClient.PostAsync($"api/scraping/resume/{siteId}", null);
+        response.EnsureSuccessStatusCode();
+    }
+
+    public async Task StopScrapingAsync(Guid siteId)
+    {
+        var response = await _httpClient.PostAsync($"api/scraping/stop/{siteId}", null);
+        response.EnsureSuccessStatusCode();
+    }
+
+    public async Task<SelectorSuggestion?> AnalyzeSelectorsAsync(SelectorAnalysisRequest request)
+    {
+        var response = await _httpClient.PostAsJsonAsync("api/ai/analyze-selectors", request);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<SelectorSuggestion>(_jsonOptions);
     }
 
     public async Task<bool> SendToSaeAsync(Guid productId)
@@ -94,28 +138,80 @@ public sealed class ApiClient
 
     private async Task<List<T>> GetAllAsync<T>(string path)
     {
-        var response = await _httpClient.GetAsync(path);
-        response.EnsureSuccessStatusCode();
-        return await response.Content.ReadFromJsonAsync<List<T>>(_jsonOptions) ?? new List<T>();
+        try
+        {
+            var response = await _httpClient.GetAsync(path);
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await response.Content.ReadAsStringAsync();
+                AppLogger.Error($"GET {path} failed. Status={(int)response.StatusCode}. Body={body}");
+            }
+            response.EnsureSuccessStatusCode();
+            return await response.Content.ReadFromJsonAsync<List<T>>(_jsonOptions) ?? new List<T>();
+        }
+        catch (Exception ex)
+        {
+            AppLogger.Error($"GET {path} exception.", ex);
+            throw;
+        }
     }
 
     private async Task<T?> PostAsync<T>(string path, T body)
     {
-        var response = await _httpClient.PostAsJsonAsync(path, body);
-        response.EnsureSuccessStatusCode();
-        return await response.Content.ReadFromJsonAsync<T>(_jsonOptions);
+        try
+        {
+            var response = await _httpClient.PostAsJsonAsync(path, body);
+            if (!response.IsSuccessStatusCode)
+            {
+                var content = await response.Content.ReadAsStringAsync();
+                AppLogger.Error($"POST {path} failed. Status={(int)response.StatusCode}. Body={content}");
+            }
+            response.EnsureSuccessStatusCode();
+            return await response.Content.ReadFromJsonAsync<T>(_jsonOptions);
+        }
+        catch (Exception ex)
+        {
+            AppLogger.Error($"POST {path} exception.", ex);
+            throw;
+        }
     }
 
     private async Task<T?> PutAsync<T>(string path, T body)
     {
-        var response = await _httpClient.PutAsJsonAsync(path, body);
-        response.EnsureSuccessStatusCode();
-        return await response.Content.ReadFromJsonAsync<T>(_jsonOptions);
+        try
+        {
+            var response = await _httpClient.PutAsJsonAsync(path, body);
+            if (!response.IsSuccessStatusCode)
+            {
+                var content = await response.Content.ReadAsStringAsync();
+                AppLogger.Error($"PUT {path} failed. Status={(int)response.StatusCode}. Body={content}");
+            }
+            response.EnsureSuccessStatusCode();
+            return await response.Content.ReadFromJsonAsync<T>(_jsonOptions);
+        }
+        catch (Exception ex)
+        {
+            AppLogger.Error($"PUT {path} exception.", ex);
+            throw;
+        }
     }
 
     private async Task DeleteAsync(string path)
     {
-        var response = await _httpClient.DeleteAsync(path);
-        response.EnsureSuccessStatusCode();
+        try
+        {
+            var response = await _httpClient.DeleteAsync(path);
+            if (!response.IsSuccessStatusCode)
+            {
+                var content = await response.Content.ReadAsStringAsync();
+                AppLogger.Error($"DELETE {path} failed. Status={(int)response.StatusCode}. Body={content}");
+            }
+            response.EnsureSuccessStatusCode();
+        }
+        catch (Exception ex)
+        {
+            AppLogger.Error($"DELETE {path} exception.", ex);
+            throw;
+        }
     }
 }

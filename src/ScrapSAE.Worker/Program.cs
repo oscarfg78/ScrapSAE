@@ -1,4 +1,5 @@
 using ScrapSAE.Core.Interfaces;
+using ScrapSAE.Infrastructure.AI;
 using ScrapSAE.Infrastructure.Data;
 using ScrapSAE.Infrastructure.Scraping;
 using ScrapSAE.Worker;
@@ -10,6 +11,9 @@ builder.Services.AddSingleton<IStagingService, SupabaseStagingService>();
 builder.Services.AddSingleton<ISyncLogService, SupabaseSyncLogService>();
 builder.Services.AddSingleton<IExecutionReportService, SupabaseExecutionReportService>();
 builder.Services.AddSingleton<IScrapingService, PlaywrightScrapingService>();
+builder.Services.AddSingleton<IScrapeControlService, NoOpScrapeControlService>();
+builder.Services.AddHttpClient("OpenAI");
+builder.Services.AddSingleton<IAIProcessorService, OpenAIProcessorService>();
 
 // Register Worker and Initializer
 builder.Services.AddSingleton<DbInitializer>();
