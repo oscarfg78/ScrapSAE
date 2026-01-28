@@ -14,6 +14,9 @@ public sealed class ScrapingRunner
     private readonly SupabaseTableService<SyncLog> _syncLogService;
     private readonly SupabaseTableService<CategoryMapping> _categoryMappingService;
     private readonly IScrapeControlService _scrapeControl;
+    private readonly IPostExecutionAnalyzer? _postExecutionAnalyzer;
+    private readonly IConfigurationUpdater? _configurationUpdater;
+    private readonly IPerformanceMetricsCollector? _metricsCollector;
     private readonly ILogger<ScrapingRunner> _logger;
     private static readonly JsonSerializerOptions _jsonOptions = new()
     {
@@ -29,7 +32,10 @@ public sealed class ScrapingRunner
         SupabaseTableService<SyncLog> syncLogService,
         SupabaseTableService<CategoryMapping> categoryMappingService,
         IScrapeControlService scrapeControl,
-        ILogger<ScrapingRunner> logger)
+        ILogger<ScrapingRunner> logger,
+        IPostExecutionAnalyzer? postExecutionAnalyzer = null,
+        IConfigurationUpdater? configurationUpdater = null,
+        IPerformanceMetricsCollector? metricsCollector = null)
     {
         _scrapingService = scrapingService;
         _supabase = supabase;
@@ -38,7 +44,11 @@ public sealed class ScrapingRunner
         _categoryMappingService = categoryMappingService;
         _scrapeControl = scrapeControl;
         _logger = logger;
+        _postExecutionAnalyzer = postExecutionAnalyzer;
+        _configurationUpdater = configurationUpdater;
+        _metricsCollector = metricsCollector;
     }
+
 
     public async Task<ScrapeRunResult> RunForSiteAsync(Guid siteId, CancellationToken cancellationToken)
     {
@@ -101,6 +111,41 @@ public sealed class ScrapingRunner
 
         var duration = (int)(DateTime.UtcNow - startedAt).TotalMilliseconds;
         await LogAsync(site, "scrape", "success", $"Scraping finalizado. Productos creados: {created}. Actualizados: {updated}.", duration);
+        
+        // === ANÁLISIS POST-EJECUCIÓN ===
+        if (_postExecutionAnalyzer != null && _metricsCollector != null)
+        {
+            try
+            {
+                // Crear métricas de ejecución
+                var metrics = new ScrapeExecutionMetrics
+                {
+                    SiteId = siteId,
+                    StartedAt = startedAt,
+                    CompletedAt = DateTime.UtcNow,
+                    ProductsFound = scraped.Count - skipped,
+                    ProductsSkipped = skipped,
+                    ProductsWithSku = scraped.Count(p => !string.IsNullOrEmpty(p.SkuSource)),
+                    ProductsWithPrice = scraped.Count(p => p.Price.HasValue)
+                };
+                
+                // Analizar la ejecución
+                var analysisResult = await _postExecutionAnalyzer.AnalyzeExecutionAsync(siteId, metrics, cancellationToken);
+                await LogAsync(site, "analysis", "info", analysisResult.Summary ?? "Análisis completado");
+                
+                // Aplicar sugerencias automáticamente si hay un configurador disponible
+                if (_configurationUpdater != null && analysisResult.Suggestions.Any(s => s.AutoApplicable))
+                {
+                    await _configurationUpdater.ApplySuggestionsAsync(siteId, analysisResult.Suggestions, cancellationToken);
+                    await LogAsync(site, "config", "updated", $"Aplicadas {analysisResult.Suggestions.Count(s => s.AutoApplicable)} sugerencias automáticas");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error en análisis post-ejecución para sitio {SiteId}", siteId);
+            }
+        }
+        
         _scrapeControl.MarkCompleted(siteId, "Scraping completado.");
         return new ScrapeRunResult
         {
@@ -113,6 +158,7 @@ public sealed class ScrapingRunner
             DurationMs = duration
         };
     }
+
 
     private async Task<SiteProfile?> GetSiteAsync(Guid siteId)
     {

@@ -100,7 +100,14 @@ public class SiteSelectors
     public string? ProductFamilyLinkSelector { get; set; }  // Selector para enlaces de familias
     public string? ProductFamilyLinkText { get; set; }      // Texto del enlace (ej: "Explorar la serie")
     public List<string>? CategoryUrls { get; set; }         // URLs directas de categorías para modo families
+    
+    // Propiedades para extracción profunda de detalle de variante
+    public string? VariantDetailLinkSelector { get; set; }  // Selector del enlace a la página de detalle desde la fila de variante
+    public string? DetailTitleSelector { get; set; }        // Selector para el título en la página de detalle
+    public string? DetailDescriptionSelector { get; set; }  // Selector para la descripción en la página de detalle
+    public string? DetailImageSelector { get; set; }        // Selector para la imagen principal en la página de detalle
 }
+
 
 public class SelectorAnalysisRequest
 {

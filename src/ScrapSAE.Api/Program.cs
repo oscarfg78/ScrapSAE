@@ -6,6 +6,7 @@ using ScrapSAE.Core.Interfaces;
 using ScrapSAE.Infrastructure.AI;
 using ScrapSAE.Infrastructure.Scraping;
 
+
 var builder = WebApplication.CreateBuilder(args);
 builder.Configuration.AddJsonFile("appsettings.runtime.json", optional: true, reloadOnChange: true);
 
@@ -20,6 +21,11 @@ builder.Services.AddSingleton<ISyncLogService, ApiSyncLogService>();
 builder.Services.AddHttpClient("OpenAI");
 builder.Services.AddSingleton<IAIProcessorService, OpenAIProcessorService>();
 
+// Nuevos servicios para arquitectura adaptativa
+builder.Services.AddSingleton<IPerformanceMetricsCollector, PerformanceMetricsCollector>();
+builder.Services.AddSingleton<IPostExecutionAnalyzer, PostExecutionAnalyzerService>();
+builder.Services.AddSingleton<IConfigurationUpdater, ConfigurationUpdaterService>();
+
 builder.Services.AddSingleton(sp => new SupabaseTableService<SiteProfile>(sp.GetRequiredService<ISupabaseRestClient>(), "config_sites"));
 builder.Services.AddSingleton(sp => new SupabaseTableService<StagingProduct>(sp.GetRequiredService<ISupabaseRestClient>(), "staging_products"));
 builder.Services.AddSingleton(sp => new SupabaseTableService<CategoryMapping>(sp.GetRequiredService<ISupabaseRestClient>(), "category_mapping"));
@@ -28,6 +34,7 @@ builder.Services.AddSingleton(sp => new SupabaseTableService<ExecutionReport>(sp
 
 builder.Services.AddSingleton<IScrapingService, PlaywrightScrapingService>();
 builder.Services.AddSingleton<ScrapingRunner>();
+
 var saeProvider = builder.Configuration["SAE:Provider"] ?? "firebird";
 if (string.Equals(saeProvider, "firebird", StringComparison.OrdinalIgnoreCase))
 {

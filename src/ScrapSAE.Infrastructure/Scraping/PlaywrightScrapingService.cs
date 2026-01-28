@@ -3052,6 +3052,13 @@ private async Task NavigateAndCollectFromSubcategoriesAsync(
             selectors.VariantSkuLinkSelector ??= GetSelector(root, "VariantSkuLinkSelector", "variantSkuLinkSelector", "variant_sku_link_selector");
             selectors.DetailSkuSelector ??= GetSelector(root, "DetailSkuSelector", "detailSkuSelector", "detail_sku_selector");
             selectors.DetailPriceSelector ??= GetSelector(root, "DetailPriceSelector", "detailPriceSelector", "detail_price_selector");
+            
+            // Nuevas propiedades para extracción profunda de detalles
+            selectors.VariantDetailLinkSelector ??= GetSelector(root, "VariantDetailLinkSelector", "variantDetailLinkSelector", "variant_detail_link_selector");
+            selectors.DetailTitleSelector ??= GetSelector(root, "DetailTitleSelector", "detailTitleSelector", "detail_title_selector");
+            selectors.DetailDescriptionSelector ??= GetSelector(root, "DetailDescriptionSelector", "detailDescriptionSelector", "detail_description_selector");
+            selectors.DetailImageSelector ??= GetSelector(root, "DetailImageSelector", "detailImageSelector", "detail_image_selector");
+
 
             if (selectors.CategoryUrls == null || selectors.CategoryUrls.Count == 0)
             {
@@ -3310,9 +3317,11 @@ private async Task<bool> TryScrapeFamiliesModeAsync(
         
         if (categoryUrls.Count == 0)
         {
-            await LogStepAsync(site.Id, "warning", "No se encontraron URLs de categorías en la configuración", null);
-            return false;
+            // Usar la página actual como punto de partida si no hay URLs configuradas
+            await LogStepAsync(site.Id, "info", "No se encontraron URLs de categorías, usando página actual", new { url = page.Url });
+            categoryUrls = new List<string> { page.Url };
         }
+
         
         foreach (var categoryUrl in categoryUrls)
         {
@@ -3407,9 +3416,49 @@ private async Task<List<string>> CollectFamilyLinksAsync(IPage page, SiteSelecto
         }
         else
         {
-            _logger.LogWarning("No se configuró selector ni texto para enlaces de familias");
-            return links;
+            // Fallback: Detectar automáticamente enlaces de categorías/familias en Festo
+            _logger.LogInformation("Intentando detectar enlaces de familias automáticamente...");
+            
+            // Selectores comunes para tarjetas de categoría en Festo
+            var fallbackSelectors = new[]
+            {
+                // Tarjetas de categoría con imagen y texto
+                "a[class*='category-card--'], a[class*='category-tile--']",
+                "a[class*='product-family--'], a[class*='product-category--']",
+                // Enlaces dentro de contenedores de categorías
+                "div[class*='category-list--'] a, div[class*='categories--'] a",
+                "div[class*='family-list--'] a, div[class*='families--'] a",
+                // Enlaces con imágenes de productos (tarjetas típicas)
+                "a:has(img):has(span), a:has(img):has(div)",
+                // Selectores de Festo específicos
+                "[class*='pim-category-'] a, [class*='product-group-'] a",
+                // Cualquier enlace que contenga /c/ en la URL (categorías de Festo)
+                "a[href*='/c/productos/'], a[href*='/catalog/']"
+            };
+            
+            foreach (var selector in fallbackSelectors)
+            {
+                try
+                {
+                    var testLocator = page.Locator(selector);
+                    var testCount = await testLocator.CountAsync();
+                    if (testCount > 0)
+                    {
+                        _logger.LogInformation("Fallback selector encontró {Count} elementos: {Selector}", testCount, selector);
+                        linkLocator = testLocator;
+                        goto FoundLinks;
+                    }
+                }
+                catch { }
+            }
+            
+            // Último fallback: Buscar cualquier enlace que parezca una categoría
+            _logger.LogWarning("No se encontraron enlaces con selectores de fallback, buscando enlaces genéricos...");
+            linkLocator = page.Locator("main a[href*='/c/'], main a[href*='/productos/'], main a[href*='/category/']");
+            
+            FoundLinks:;
         }
+
         
         var count = await linkLocator.CountAsync();
         _logger.LogInformation($"Encontrados {count} enlaces de familias en la página");
@@ -3507,110 +3556,89 @@ private async Task<List<ScrapedProduct>> ExtractProductsFromFamilyPageAsync(
         var rowCount = await variantRows.CountAsync();
         await LogStepAsync(siteId, "info", $"Encontradas {rowCount} variantes en la familia", new { familyTitle });
         
-        // Procesar cada variante
-        for (int i = 0; i < rowCount && products.Count < maxProducts; i++)
+        // FASE 1: Recolectar todas las URLs de detalle de las variantes
+        var variantUrls = new List<(int index, string url, string? sku)>();
+        var detailLinkSelector = selectors.VariantDetailLinkSelector ?? selectors.VariantSkuLinkSelector ?? "a[href*='/p/']";
+        
+        for (int i = 0; i < rowCount && variantUrls.Count < maxProducts; i++)
         {
             try
             {
                 var row = variantRows.Nth(i);
+                var link = row.Locator(detailLinkSelector).First;
                 
-                // Extraer SKU
-                string? sku = null;
-                if (!string.IsNullOrEmpty(selectors.VariantSkuLinkSelector))
+                if (await link.CountAsync() > 0)
                 {
-                    var skuLink = row.Locator(selectors.VariantSkuLinkSelector).First;
-                    if (await skuLink.CountAsync() > 0)
+                    var href = await link.GetAttributeAsync("href");
+                    var skuPreview = await link.TextContentAsync();
+                    skuPreview = skuPreview?.Trim();
+                    
+                    if (!string.IsNullOrEmpty(href))
                     {
-                        sku = await skuLink.TextContentAsync();
-                        sku = sku?.Trim();
+                        var fullUrl = NormalizeHref(familyUrl, href);
+                        
+                        // Skip if already seen
+                        if (!string.IsNullOrEmpty(skuPreview) && seenProducts.Contains(skuPreview))
+                            continue;
+                            
+                        variantUrls.Add((i, fullUrl, skuPreview));
                     }
                 }
-                
-                // Verificar si ya procesamos este SKU
-                if (string.IsNullOrEmpty(sku) || seenProducts.Contains(sku))
-                    continue;
-                
-                // Extraer precio (puede estar en la fila o necesitar navegar)
-                decimal? price = null;
-                if (!string.IsNullOrEmpty(selectors.DetailPriceSelector))
-                {
-                    var priceElem = row.Locator(selectors.DetailPriceSelector).First;
-                    if (await priceElem.CountAsync() > 0)
-                    {
-                        var priceText = await priceElem.TextContentAsync();
-                        price = ParsePrice(priceText);
-                    }
-                }
-                
-                // Si el SKU o el precio faltan, entrar a la ficha de producto para completar
-                if (string.IsNullOrEmpty(sku) || price == null)
-                {
-                    _logger.LogInformation("SKU o precio nulo en tabla, entrando a detalle para: {Sku}", sku ?? "Desconocido");
-                    var link = row.Locator(selectors.VariantSkuLinkSelector).First;
-                    if (await link.CountAsync() > 0)
-                    {
-                        var detailUrl = await link.GetAttributeAsync("href");
-                        if (!string.IsNullOrEmpty(detailUrl))
-                        {
-                            // Navegar al detalle en el mismo frame para ser más humano
-                            // (En una implementación real, podríamos usar un nuevo tab,
-                            // pero seguir en la misma ventana es más común para humanos)
-                            // Para no perder el contexto de la tabla, volvemos después.
-                            var currentUrl = page.Url;
-                            await HumanNavigateAsync(page, detailUrl, WaitUntilState.NetworkIdle);
-                            
-                            // Extraer del detalle
-                            if (string.IsNullOrEmpty(sku))
-                            {
-                                var skuElem = page.Locator(selectors.DetailSkuSelector).First;
-                                sku = await skuElem.CountAsync() > 0 ? await skuElem.TextContentAsync() : null;
-                                sku = sku?.Trim();
-                            }
-                            
-                            if (price == null)
-                            {
-                                var priceElem = page.Locator(selectors.DetailPriceSelector).First;
-                                price = await priceElem.CountAsync() > 0 ? ParsePrice(await priceElem.TextContentAsync()) : null;
-                            }
-                            
-                            // Volver a la tabla de variantes
-                            await HumanNavigateAsync(page, currentUrl, WaitUntilState.NetworkIdle);
-                            
-                            // Re-localizar la tabla y las filas ya que el DOM cambió
-                            variantTable = page.Locator(selectors.VariantTableSelector).First;
-                            variantRows = page.Locator(selectors.VariantRowSelector);
-                            row = variantRows.Nth(i);
-                        }
-                    }
-                }
-
-                // Verificar de nuevo si ya procesamos este SKU (por si cambió tras el detalle)
-                if (string.IsNullOrEmpty(sku) || seenProducts.Contains(sku))
-                    continue;
-                
-                // Crear el producto
-                var product = new ScrapedProduct
-                {
-                    SkuSource = sku,
-                    Title = familyTitle ?? "Producto sin título",
-                    Price = price,
-                    ScrapedAt = DateTime.UtcNow,
-                    Attributes = new Dictionary<string, string>
-                    {
-                        ["product_url"] = familyUrl,
-                        ["family_title"] = familyTitle ?? "",
-                        ["variant_index"] = i.ToString()
-                    }
-                };
-                
-                products.Add(product);
-                seenProducts.Add(sku);
-                
-                _logger.LogInformation($"Variante extraída: SKU={sku}, Precio={price}");
             }
             catch (Exception ex)
             {
-                _logger.LogWarning($"Error extrayendo variante {i}: {ex.Message}");
+                _logger.LogDebug("Error recolectando URL de variante {Index}: {Message}", i, ex.Message);
+            }
+        }
+        
+        _logger.LogInformation("Recolectadas {Count} URLs de variantes para extracción profunda", variantUrls.Count);
+        await LogStepAsync(siteId, "info", $"URLs de variantes recolectadas: {variantUrls.Count}", null);
+        
+        // FASE 2: Navegar a cada página de detalle y extraer todos los datos
+        foreach (var (index, detailUrl, skuPreview) in variantUrls)
+        {
+            if (products.Count >= maxProducts || cancellationToken.IsCancellationRequested)
+                break;
+                
+            try
+            {
+                _logger.LogInformation("Extrayendo variante {Index}/{Total} desde página de detalle: {Url}", 
+                    index + 1, variantUrls.Count, detailUrl);
+                
+                // Navegar a la página de detalle
+                await HumanNavigateAsync(page, detailUrl, WaitUntilState.NetworkIdle);
+                await AcceptCookiesAsync(page, cancellationToken);
+                
+                // Extraer todos los datos desde la página de detalle
+                var product = await ExtractProductFromDetailPageDeepAsync(page, selectors, siteId, familyTitle);
+                
+                if (product != null && !string.IsNullOrEmpty(product.SkuSource))
+                {
+                    if (seenProducts.Add(product.SkuSource))
+                    {
+                        product.Attributes["family_url"] = familyUrl;
+                        product.Attributes["family_title"] = familyTitle ?? "";
+                        product.Attributes["variant_index"] = index.ToString();
+                        product.Attributes["detail_url"] = detailUrl;
+                        
+                        products.Add(product);
+                        _logger.LogInformation("Variante extraída (profunda): SKU={Sku}, Título={Title}, Precio={Price}", 
+                            product.SkuSource, product.Title, product.Price?.ToString() ?? "N/A");
+                    }
+                }
+                else
+                {
+                    _logger.LogWarning("No se pudo extraer producto válido de: {Url}", detailUrl);
+                }
+                
+                // Pausa humana entre páginas
+                await HumanDelayAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning("Error extrayendo variante {Index} desde {Url}: {Message}", 
+                    index, detailUrl, ex.Message);
+                await LogStepAsync(siteId, "warning", $"Error en variante {index}", new { url = detailUrl, error = ex.Message });
             }
         }
     }
@@ -3621,6 +3649,216 @@ private async Task<List<ScrapedProduct>> ExtractProductsFromFamilyPageAsync(
     
     return products;
 }
+
+/// <summary>
+/// Extrae un producto con máxima precisión desde una página de detalle
+/// </summary>
+private async Task<ScrapedProduct?> ExtractProductFromDetailPageDeepAsync(
+    IPage page,
+    SiteSelectors selectors,
+    Guid siteId,
+    string? familyTitle)
+{
+    try
+    {
+        await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+        await Task.Delay(1000); // Pequeña espera para que se carguen elementos dinámicos
+        
+        var product = new ScrapedProduct
+        {
+            ScrapedAt = DateTime.UtcNow,
+            Attributes = new Dictionary<string, string>
+            {
+                ["product_url"] = page.Url
+            }
+        };
+        
+        // 1. Extraer SKU (prioridad máxima) - Múltiples estrategias para Festo
+        var skuSelector = selectors.DetailSkuSelector ?? "span[class*='part-number'], .sku, [data-testid*='sku']";
+        var skuElem = page.Locator(skuSelector).First;
+        if (await skuElem.CountAsync() > 0)
+        {
+            product.SkuSource = (await skuElem.TextContentAsync())?.Trim();
+        }
+        
+        // Fallback 1: Buscar el número de artículo de Festo (patrón típico como "5249943")
+        if (string.IsNullOrEmpty(product.SkuSource))
+        {
+            // El artículo suele mostrarse debajo del modelo (ej: bajo "DSNU-12-70-P-A")
+            var articleElem = page.Locator("h1 + div, h1 ~ div:first-of-type, [class*='article-number--'], [class*='product-number--']").First;
+            if (await articleElem.CountAsync() > 0)
+            {
+                var text = (await articleElem.TextContentAsync())?.Trim();
+                // Buscar patrón de número de artículo (7 dígitos típico de Festo)
+                var match = System.Text.RegularExpressions.Regex.Match(text ?? "", @"\b\d{6,8}\b");
+                if (match.Success)
+                {
+                    product.SkuSource = match.Value;
+                    _logger.LogInformation("SKU extraído de número de artículo: {Sku}", product.SkuSource);
+                }
+            }
+        }
+        
+        // Fallback 2: Extraer de la URL (formato: /a/5249943/)
+        if (string.IsNullOrEmpty(product.SkuSource))
+        {
+            var urlMatch = System.Text.RegularExpressions.Regex.Match(page.Url, @"/a/(\d+)/?");
+            if (urlMatch.Success)
+            {
+                product.SkuSource = urlMatch.Groups[1].Value;
+                _logger.LogInformation("SKU extraído de URL: {Sku}", product.SkuSource);
+            }
+        }
+        
+        // Fallback 3: Buscar GTIN/Código de barras
+        if (string.IsNullOrEmpty(product.SkuSource))
+        {
+            var gtinElem = page.Locator("[class*='gtin--'], [class*='order-code--'], text=Código de barras").First;
+            if (await gtinElem.CountAsync() > 0)
+            {
+                var gtinText = (await gtinElem.TextContentAsync())?.Trim();
+                // Extraer número del texto (puede contener "Código de barras / GTIN: 4052568472080")
+                var gtinMatch = System.Text.RegularExpressions.Regex.Match(gtinText ?? "", @"\b\d{8,14}\b");
+                if (gtinMatch.Success)
+                {
+                    product.SkuSource = gtinMatch.Value;
+                    product.Attributes["gtin"] = gtinMatch.Value;
+                    _logger.LogInformation("SKU extraído de GTIN: {Sku}", product.SkuSource);
+                }
+            }
+        }
+        
+        // Fallback 4: Buscar en todo el contenido visible patrones de número de artículo
+        if (string.IsNullOrEmpty(product.SkuSource))
+        {
+            try
+            {
+                var pageContent = await page.ContentAsync();
+                // Buscar patrones típicos de Festo: número de 7 dígitos
+                var articleMatch = System.Text.RegularExpressions.Regex.Match(pageContent, @"(?:art[íi]culo|article|product).*?(\d{6,8})", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                if (articleMatch.Success)
+                {
+                    product.SkuSource = articleMatch.Groups[1].Value;
+                    _logger.LogInformation("SKU extraído de contenido de página: {Sku}", product.SkuSource);
+                }
+            }
+            catch { }
+        }
+
+        
+        // 2. Extraer Título - Intentar capturar nombre y modelo por separado
+        var titleSelector = selectors.DetailTitleSelector ?? selectors.TitleSelector ?? "h1";
+        var titleElem = page.Locator(titleSelector).First;
+        if (await titleElem.CountAsync() > 0)
+        {
+            product.Title = (await titleElem.TextContentAsync())?.Trim();
+        }
+        
+        // Intentar extraer modelo del producto (ej: "DSNU-12-70-P-A")
+        // En Festo, el modelo suele estar cerca del título o en elementos específicos
+        try
+        {
+            // Buscar modelo en patrón típico (letras-números-guiones)
+            var modelLocator = page.Locator("h1 ~ div, [class*='model--'], [class*='product-name--']").First;
+            if (await modelLocator.CountAsync() > 0)
+            {
+                var modelText = (await modelLocator.TextContentAsync())?.Trim();
+                var modelMatch = System.Text.RegularExpressions.Regex.Match(modelText ?? "", @"\b[A-Z]{2,}[-\dA-Z]+\b");
+                if (modelMatch.Success)
+                {
+                    product.Attributes["model"] = modelMatch.Value;
+                    // Enriquecer el título con el modelo si no lo tiene
+                    if (!string.IsNullOrEmpty(product.Title) && !product.Title.Contains(modelMatch.Value))
+                    {
+                        product.Title = $"{product.Title} {modelMatch.Value}".Trim();
+                    }
+                    else if (string.IsNullOrEmpty(product.Title))
+                    {
+                        product.Title = modelMatch.Value;
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug("Error extrayendo modelo: {Message}", ex.Message);
+        }
+        
+        // Si no hay título, usar el de la familia + SKU
+        if (string.IsNullOrEmpty(product.Title) && !string.IsNullOrEmpty(familyTitle))
+        {
+            product.Title = $"{familyTitle} {product.SkuSource ?? ""}".Trim();
+        }
+
+        
+        // 3. Extraer Precio
+        var priceSelector = selectors.DetailPriceSelector ?? "div[class*='price-display-text--'], .price, .product-price";
+        var priceElem = page.Locator(priceSelector).First;
+        if (await priceElem.CountAsync() > 0)
+        {
+            var priceText = await priceElem.TextContentAsync();
+            product.Price = ParsePrice(priceText);
+            product.Attributes["price_text"] = priceText ?? "";
+        }
+        
+        // 4. Extraer Descripción
+        var descSelector = selectors.DetailDescriptionSelector ?? selectors.DescriptionSelector ?? 
+            ".product-description, [class*='description--'], .description";
+        var descElem = page.Locator(descSelector).First;
+        if (await descElem.CountAsync() > 0)
+        {
+            product.Description = (await descElem.TextContentAsync())?.Trim();
+        }
+        
+        // 5. Extraer Imagen Principal
+        var imageSelector = selectors.DetailImageSelector ?? selectors.ImageSelector ?? 
+            "img[class*='image--'], .product-image img, img[src*='product']";
+        var imageElem = page.Locator(imageSelector).First;
+        if (await imageElem.CountAsync() > 0)
+        {
+            product.ImageUrl = await imageElem.GetAttributeAsync("src");
+        }
+        
+        // 6. Extraer atributos adicionales (specs, categoría, etc.)
+        try
+        {
+            // Breadcrumb para categoría
+            var breadcrumb = await TryExtractBreadcrumbAsync(page);
+            if (breadcrumb.Count > 0)
+            {
+                product.Category = string.Join(" > ", breadcrumb);
+                product.Attributes["category_path"] = product.Category;
+            }
+            
+            // Marca
+            var brandElem = page.Locator("[class*='brand--'], .brand, [data-testid*='brand']").First;
+            if (await brandElem.CountAsync() > 0)
+            {
+                product.Brand = (await brandElem.TextContentAsync())?.Trim();
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug("Error extrayendo atributos adicionales: {Message}", ex.Message);
+        }
+        
+        // Validar que tengamos datos críticos
+        if (string.IsNullOrEmpty(product.SkuSource) && string.IsNullOrEmpty(product.Title))
+        {
+            _logger.LogWarning("Producto sin SKU ni título en: {Url}", page.Url);
+            await LogStepAsync(siteId, "warning", "Producto sin datos críticos", new { url = page.Url });
+            return null;
+        }
+        
+        return product;
+    }
+    catch (Exception ex)
+    {
+        _logger.LogWarning(ex, "Error en ExtractProductFromDetailPageDeepAsync");
+        return null;
+    }
+}
+
 
 /// <summary>
 /// Simula actividad aleatoria de usuario (hover, scroll, etc.) para parecer humano

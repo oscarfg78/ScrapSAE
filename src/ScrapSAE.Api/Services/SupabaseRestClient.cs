@@ -42,6 +42,13 @@ public sealed class SupabaseRestClient : ISupabaseRestClient
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<T[]>(_jsonOptions) ?? Array.Empty<T>();
     }
+    
+    public async Task<string> GetAsync(string pathAndQuery)
+    {
+        var response = await _httpClient.GetAsync($"{_baseUrl}/rest/v1/{pathAndQuery}");
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadAsStringAsync();
+    }
 
     public async Task<T?> PostAsync<T>(string path, T body) where T : class
     {
@@ -58,10 +65,18 @@ public sealed class SupabaseRestClient : ISupabaseRestClient
         var result = await response.Content.ReadFromJsonAsync<T[]>(_jsonOptions);
         return result?.FirstOrDefault();
     }
+    
+    public async Task PatchAsync(string pathAndQuery, string jsonBody)
+    {
+        var content = new StringContent(jsonBody, System.Text.Encoding.UTF8, "application/json");
+        var response = await _httpClient.PatchAsync($"{_baseUrl}/rest/v1/{pathAndQuery}", content);
+        response.EnsureSuccessStatusCode();
+    }
 
     public async Task DeleteAsync(string pathAndQuery)
     {
         var response = await _httpClient.DeleteAsync($"{_baseUrl}/rest/v1/{pathAndQuery}");
         response.EnsureSuccessStatusCode();
     }
+
 }
