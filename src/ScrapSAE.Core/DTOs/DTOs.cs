@@ -87,8 +87,19 @@ public class SiteSelectors
     public string? NextPageSelector { get; set; }
     public string? DetailButtonText { get; set; }
     public string? DetailButtonClassPrefix { get; set; }
+    public string? VariantTableSelector { get; set; }
+    public string? VariantRowSelector { get; set; }
+    public string? VariantSkuLinkSelector { get; set; }
+    public string? DetailSkuSelector { get; set; }
+    public string? DetailPriceSelector { get; set; }
     public bool UsesInfiniteScroll { get; set; }
     public int MaxPages { get; set; } = 10;
+    
+    // Propiedades para modo de scraping de familias (Festo-style)
+    public string? ScrapingMode { get; set; } // "traditional" o "families"
+    public string? ProductFamilyLinkSelector { get; set; }  // Selector para enlaces de familias
+    public string? ProductFamilyLinkText { get; set; }      // Texto del enlace (ej: "Explorar la serie")
+    public List<string>? CategoryUrls { get; set; }         // URLs directas de categorías para modo families
 }
 
 public class SelectorAnalysisRequest

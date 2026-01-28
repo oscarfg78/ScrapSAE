@@ -1,0 +1,16 @@
+{
+    "scrapingMode": "families",
+    "maxPages": 1,
+    "categoryUrls": [
+        "https://www.festo.com/mx/es/c/productos/actuadores/cilindros-neumaticos/cilindros-con-vastago-id_pim215/"
+    ],
+    "productFamilyLinkText": "Explorar la serie",
+    "productFamilyLinkSelector": "a[class*='similar-products-link']",
+    "titleSelector": "[class*='product-name--']",
+    "imageSelector": "img[class*='image--']",
+    "detailSkuSelector": "span[class*='part-number-value--']",
+    "detailPriceSelector": "div[class*='price-display-text--']",
+    "variantTableSelector": "div[class*='variants-table-container--']",
+    "variantRowSelector": "tr[class*='product-row--']",
+    "variantSkuLinkSelector": "a[href*='/p/']"
+}

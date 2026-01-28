@@ -87,12 +87,81 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
             return _context;
         }
 
-        _browser = await _playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+        // Argumentos anti-detección
+        var launchOptions = new BrowserTypeLaunchOptions
         {
-            Headless = headless
-        });
+            Headless = headless,
+            Args = new[]
+            {
+                "--disable-blink-features=AutomationControlled",
+                "--disable-dev-shm-usage",
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-web-security",
+                "--disable-features=IsolateOrigins,site-per-process",
+                "--disable-site-isolation-trials"
+            }
+        };
+        
+        _browser = await _playwright.Chromium.LaunchAsync(launchOptions);
 
-        _context = await _browser.NewContextAsync(options ?? new BrowserNewContextOptions());
+        // Configuración stealth del contexto
+        var contextOptions = options ?? new BrowserNewContextOptions();
+        
+        // User-Agent realista
+        if (string.IsNullOrEmpty(contextOptions.UserAgent))
+        {
+            contextOptions.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+        }
+        
+        // Viewport realista
+        if (contextOptions.ViewportSize == null)
+        {
+            contextOptions.ViewportSize = new ViewportSize { Width = 1920, Height = 1080 };
+        }
+        
+        // Locale y timezone
+        if (string.IsNullOrEmpty(contextOptions.Locale))
+        {
+            contextOptions.Locale = "es-MX";
+        }
+        if (string.IsNullOrEmpty(contextOptions.TimezoneId))
+        {
+            contextOptions.TimezoneId = "America/Mexico_City";
+        }
+        
+        // Headers HTTP realistas
+        if (contextOptions.ExtraHTTPHeaders == null)
+        {
+            contextOptions.ExtraHTTPHeaders = new Dictionary<string, string>
+            {
+                ["Accept-Language"] = "es-MX,es;q=0.9,en;q=0.8",
+                ["Accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
+                ["Accept-Encoding"] = "gzip, deflate, br",
+                ["DNT"] = "1",
+                ["Connection"] = "keep-alive",
+                ["Upgrade-Insecure-Requests"] = "1",
+                ["Sec-Fetch-Dest"] = "document",
+                ["Sec-Fetch-Mode"] = "navigate",
+                ["Sec-Fetch-Site"] = "none",
+                ["Sec-Fetch-User"] = "?1"
+            };
+        }
+        
+        _context = await _browser.NewContextAsync(contextOptions);
+        
+        // Inyectar script stealth
+        var stealthScriptPath = "/home/ubuntu/ScrapSAE/stealth_script.js";
+        if (File.Exists(stealthScriptPath))
+        {
+            var stealthScript = await File.ReadAllTextAsync(stealthScriptPath);
+            await _context.AddInitScriptAsync(stealthScript);
+            _logger.LogInformation("🥷 Stealth mode activated");
+        }
+        else
+        {
+            _logger.LogWarning("Stealth script not found at {Path}", stealthScriptPath);
+        }
         _isPersistentContext = false;
         return _context;
     }
@@ -134,9 +203,12 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
             }
             FillSelectorsFromJson(selectors, selectorsJson);
             _logger.LogInformation("Using selectors for {SiteName}: {SelectorsJson}", site.Name, selectorsJson);
-            if (string.IsNullOrWhiteSpace(selectors.ProductListSelector))
+            
+            // Validar selectores según el modo
+            var scrapingMode = selectors.ScrapingMode?.ToLower() ?? "traditional";
+            if (scrapingMode != "families" && string.IsNullOrWhiteSpace(selectors.ProductListSelector))
             {
-                _logger.LogError("Missing ProductListSelector for site {SiteName}. SelectorsJson: {SelectorsJson}", site.Name, selectorsJson);
+                _logger.LogError("Missing ProductListSelector for site {SiteName} in traditional mode. SelectorsJson: {SelectorsJson}", site.Name, selectorsJson);
                 return products;
             }
 
@@ -272,11 +344,41 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
                 }
             }
 
-            var searchProducts = await TryScrapeCategorySearchAsync(page, site, selectors, cancellationToken);
-            if (searchProducts.Count > 0)
+            // Detectar el modo de scraping y usar el método apropiado
+            await LogStepAsync(site.Id, "info", $"Modo de scraping detectado: {scrapingMode}", null);
+            
+            List<ScrapedProduct> searchProducts;
+            if (scrapingMode == "families")
             {
-                await LogStepAsync(site.Id, "success", "Scraping por busqueda de categorias completado.", new { count = searchProducts.Count });
-                return searchProducts;
+                // Modo families (Festo-style): Navegar a categorías y extraer familias
+                var seenProducts = new HashSet<string>();
+                var maxProducts = site.MaxProductsPerScrape > 0 ? site.MaxProductsPerScrape : 100;
+                searchProducts = new List<ScrapedProduct>();
+                
+                var success = await TryScrapeFamiliesModeAsync(
+                    page,
+                    site,
+                    selectors,
+                    searchProducts,
+                    seenProducts,
+                    maxProducts,
+                    cancellationToken);
+                    
+                if (success && searchProducts.Count > 0)
+                {
+                    await LogStepAsync(site.Id, "success", "Scraping en modo families completado.", new { count = searchProducts.Count });
+                    return searchProducts;
+                }
+            }
+            else
+            {
+                // Modo tradicional: Búsqueda por categorías
+                searchProducts = await TryScrapeCategorySearchAsync(page, site, selectors, cancellationToken);
+                if (searchProducts.Count > 0)
+                {
+                    await LogStepAsync(site.Id, "success", "Scraping por busqueda de categorias completado.", new { count = searchProducts.Count });
+                    return searchProducts;
+                }
             }
 
             var categoryProducts = await TryScrapeCategoriesAsync(page, site, selectors, cancellationToken);
@@ -591,6 +693,16 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
             if (continueClicked)
             {
                 await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+                // Wait for password field to appear
+                try
+                {
+                    await page.WaitForSelectorAsync("input[type='password']", new() { Timeout = 10000 });
+                    _logger.LogInformation("Password field appeared after clicking Continue");
+                }
+                catch
+                {
+                    _logger.LogWarning("Password field did not appear within timeout");
+                }
                 await Task.Delay(_random.Next(1200, 2000), cancellationToken);
             }
 
@@ -648,6 +760,17 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
                 catch
                 {
                     _logger.LogWarning("Network idle timeout after login submit");
+                }
+                
+                // Wait for a logged-in indicator to confirm successful login
+                try
+                {
+                    await page.WaitForSelectorAsync("button:has-text('MiFesto'), [data-testid='user-menu'], .user-menu", new() { Timeout = 20000 });
+                    _logger.LogInformation("Login verified - user menu detected");
+                }
+                catch
+                {
+                    _logger.LogWarning("Could not verify login - user menu not detected within timeout");
                 }
                 
                 await Task.Delay(_random.Next(3000, 5000), cancellationToken);
@@ -1805,7 +1928,9 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
 
             var beforeCount = products.Count;
             var resultsShot = await SaveStepScreenshotAsync(page, $"search_results_{term}");
-            await CollectProductsFromListAsync(
+            
+            // Usar el nuevo método que navega por subcategorías
+            await NavigateAndCollectFromSubcategoriesAsync(
                 page,
                 site.Id,
                 selectors,
@@ -1813,7 +1938,9 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
                 seenProducts,
                 maxProducts,
                 new List<string> { term },
-                cancellationToken);
+                cancellationToken,
+                depth: 0);
+            
             var added = products.Count - beforeCount;
             await LogStepAsync(site.Id, "success", "Busqueda completada.", new { term, added, screenshotFile = resultsShot });
 
@@ -2233,8 +2360,9 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
                     }
                 }
 
-                var product = await ExtractProductFromDetailPageAsync(page, selectors, categoryPath);
-                if (product != null)
+                // Para Festo, usar el método mejorado que maneja variantes
+                var extractedProducts = await ExtractFestoProductsFromDetailPageAsync(page, selectors, categoryPath, cancellationToken);
+                foreach (var product in extractedProducts)
                 {
                     var key = GetProductKey(product);
                     if (seenProducts.Add(key))
@@ -2259,8 +2387,8 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
                     Timeout = 90000
                 });
                 await AcceptCookiesAsync(detailPage, cancellationToken);
-                var product = await ExtractProductFromDetailPageAsync(detailPage, selectors, categoryPath);
-                if (product != null)
+                var extractedProducts = await ExtractFestoProductsFromDetailPageAsync(detailPage, selectors, categoryPath, cancellationToken);
+                foreach (var product in extractedProducts)
                 {
                     var key = GetProductKey(product);
                     if (seenProducts.Add(key))
@@ -2276,6 +2404,158 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
             }
         }
     }
+// NUEVO MÉTODO PARA NAVEGAR POR SUBCATEGORÍAS DE FESTO
+// Este método debe insertarse en PlaywrightScrapingService.cs
+
+private async Task NavigateAndCollectFromSubcategoriesAsync(
+    IPage page,
+    Guid siteId,
+    SiteSelectors selectors,
+    List<ScrapedProduct> products,
+    HashSet<string> seenProducts,
+    int maxProducts,
+    List<string> categoryPath,
+    CancellationToken cancellationToken,
+    int depth = 0)
+{
+    const int MaxDepth = 3; // Evitar recursión infinita
+    
+    if (depth >= MaxDepth || products.Count >= maxProducts)
+    {
+        return;
+    }
+    
+    await _scrapeControl.WaitIfPausedAsync(siteId, cancellationToken);
+    await Task.Delay(2000, cancellationToken); // Esperar a que cargue la página
+    
+    // Primero intentar detectar si hay productos en esta página
+    var productContainers = page.Locator("div[class*='single-product-container--']");
+    var productCount = await productContainers.CountAsync();
+    
+    _logger.LogInformation("Profundidad {Depth}: Detectados {Count} productos en la página actual", depth, productCount);
+    
+    if (productCount > 0)
+    {
+        // Hay productos, extraerlos
+        _logger.LogInformation("Extrayendo productos de la página actual...");
+        await CollectProductsFromListAsync(
+            page,
+            siteId,
+            selectors,
+            products,
+            seenProducts,
+            maxProducts,
+            categoryPath,
+            cancellationToken);
+        
+        return; // No buscar subcategorías si ya hay productos
+    }
+    
+    // No hay productos, buscar subcategorías o enlaces de navegación
+    var subcategorySelectors = new[]
+    {
+        "a[class*='category-tile--']",
+        "a[data-testid='category-tile']",
+        "a[class*='product-family--']",
+        "a[href*='/c/']",
+        "div[class*='category-container--'] a"
+    };
+    
+    ILocator? subcategoryLinks = null;
+    int linkCount = 0;
+    
+    foreach (var selector in subcategorySelectors)
+    {
+        var links = page.Locator(selector);
+        linkCount = await links.CountAsync();
+        
+        if (linkCount > 0)
+        {
+            subcategoryLinks = links;
+            _logger.LogInformation("Encontradas {Count} subcategorías con selector: {Selector}", linkCount, selector);
+            break;
+        }
+    }
+    
+    if (subcategoryLinks == null || linkCount == 0)
+    {
+        _logger.LogWarning("No se encontraron productos ni subcategorías en esta página");
+        return;
+    }
+    
+    // Extraer los hrefs de todas las subcategorías antes de navegar
+    var subcategoryUrls = new List<(string url, string name)>();
+    
+    for (int i = 0; i < Math.Min(linkCount, 20); i++) // Limitar a 20 subcategorías
+    {
+        if (products.Count >= maxProducts)
+        {
+            break;
+        }
+        
+        try
+        {
+            var link = subcategoryLinks.Nth(i);
+            var href = await link.GetAttributeAsync("href");
+            var name = await link.InnerTextAsync();
+            
+            if (!string.IsNullOrWhiteSpace(href))
+            {
+                var fullUrl = href.StartsWith("http") ? href : $"https://www.festo.com{href}";
+                subcategoryUrls.Add((fullUrl, name?.Trim() ?? ""));
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error extrayendo URL de subcategoría {Index}", i);
+        }
+    }
+    
+    _logger.LogInformation("Navegando por {Count} subcategorías...", subcategoryUrls.Count);
+    
+    // Navegar por cada subcategoría
+    foreach (var (url, name) in subcategoryUrls)
+    {
+        if (products.Count >= maxProducts || cancellationToken.IsCancellationRequested)
+        {
+            break;
+        }
+        
+        try
+        {
+            await _scrapeControl.WaitIfPausedAsync(siteId, cancellationToken);
+            
+            var newCategoryPath = new List<string>(categoryPath) { name };
+            _logger.LogInformation("Navegando a subcategoría: {Path}", string.Join(" > ", newCategoryPath));
+            
+            await page.GotoAsync(url, new PageGotoOptions
+            {
+                WaitUntil = WaitUntilState.DOMContentLoaded,
+                Timeout = 90000
+            });
+            
+            await AcceptCookiesAsync(page, cancellationToken);
+            await Task.Delay(1000, cancellationToken);
+            
+            // Recursión: buscar productos o más subcategorías
+            await NavigateAndCollectFromSubcategoriesAsync(
+                page,
+                siteId,
+                selectors,
+                products,
+                seenProducts,
+                maxProducts,
+                newCategoryPath,
+                cancellationToken,
+                depth + 1);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error navegando subcategoría: {Name} ({Url})", name, url);
+        }
+    }
+}
+
 
     private async Task<ScrapedProduct?> ExtractProductFromDetailPageAsync(
         IPage page,
@@ -2397,6 +2677,168 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
         {
             return null;
         }
+    }
+
+    private async Task<List<ScrapedProduct>> ExtractFestoProductsFromDetailPageAsync(
+        IPage page,
+        SiteSelectors selectors,
+        List<string> categoryPath,
+        CancellationToken cancellationToken)
+    {
+        var products = new List<ScrapedProduct>();
+        
+        try
+        {
+            await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+            await Task.Delay(2000, cancellationToken);
+            
+            var variantTableSelector = selectors.VariantTableSelector ?? "div[class*='variants-table-container--']";
+            var variantTable = await page.QuerySelectorAsync(variantTableSelector);
+            
+            if (variantTable != null)
+            {
+                _logger.LogInformation("Página de familia de productos detectada - extrayendo variantes");
+                
+                var familyTitle = "";
+                var titleLocator = page.Locator("h1");
+                if (await titleLocator.CountAsync() > 0)
+                {
+                    familyTitle = (await titleLocator.First.InnerTextAsync())?.Trim() ?? "";
+                }
+                
+                var variantRowSelector = selectors.VariantRowSelector ?? "tr[class*='product-row--']";
+                var variantRows = await variantTable.QuerySelectorAllAsync(variantRowSelector);
+                
+                _logger.LogInformation("Encontradas {Count} variantes en la tabla", variantRows.Count);
+                
+                foreach (var row in variantRows)
+                {
+                    try
+                    {
+                        var product = new ScrapedProduct
+                        {
+                            ScrapedAt = DateTime.UtcNow,
+                            Attributes = new Dictionary<string, string>()
+                        };
+                        
+                        var skuLinkSelector = selectors.VariantSkuLinkSelector ?? "a[href*='/p/']";
+                        var skuLink = await row.QuerySelectorAsync(skuLinkSelector);
+                        if (skuLink != null)
+                        {
+                            var skuText = (await skuLink.InnerTextAsync())?.Trim();
+                            if (!string.IsNullOrWhiteSpace(skuText))
+                            {
+                                product.SkuSource = skuText;
+                                product.Title = $"{familyTitle} {skuText}";
+                            }
+                            
+                            var href = await skuLink.GetAttributeAsync("href");
+                            if (!string.IsNullOrWhiteSpace(href))
+                            {
+                                product.Attributes["variant_url"] = NormalizeHref(page.Url, href);
+                            }
+                        }
+                        
+                        var priceElements = await row.QuerySelectorAllAsync("div[class*='price-display-text--'], span[class*='price--']");
+                        foreach (var priceEl in priceElements)
+                        {
+                            var priceText = (await priceEl.InnerTextAsync())?.Trim();
+                            if (!string.IsNullOrWhiteSpace(priceText) && priceText.Contains("MXN"))
+                            {
+                                product.Price = ParsePrice(priceText);
+                                product.Attributes["price_text"] = priceText;
+                                break;
+                            }
+                        }
+                        
+                        var imageEl = await row.QuerySelectorAsync("img");
+                        if (imageEl == null)
+                        {
+                            imageEl = await page.QuerySelectorAsync("img[class*='image--']");
+                        }
+                        if (imageEl != null)
+                        {
+                            product.ImageUrl = await imageEl.GetAttributeAsync("src");
+                        }
+                        
+                        product.Attributes["product_url"] = page.Url;
+                        product.Attributes["family_title"] = familyTitle;
+                        
+                        if (!string.IsNullOrWhiteSpace(product.SkuSource))
+                        {
+                            products.Add(product);
+                            _logger.LogInformation("Variante extraída: {SKU} - Precio: {Price}", 
+                                product.SkuSource, product.Price?.ToString() ?? "N/A");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Error extrayendo variante de fila");
+                    }
+                }
+            }
+            else
+            {
+                _logger.LogInformation("Página de producto simple detectada");
+                
+                var product = new ScrapedProduct
+                {
+                    RawHtml = await page.ContentAsync(),
+                    ScrapedAt = DateTime.UtcNow,
+                    Attributes = new Dictionary<string, string>()
+                };
+                
+                var titleLocator = page.Locator("h1");
+                if (await titleLocator.CountAsync() > 0)
+                {
+                    product.Title = (await titleLocator.First.InnerTextAsync())?.Trim();
+                }
+                
+                var skuSelector = selectors.DetailSkuSelector ?? "span[class*='part-number-value--'], .part-number";
+                var skuEl = await page.QuerySelectorAsync(skuSelector);
+                if (skuEl != null)
+                {
+                    product.SkuSource = (await skuEl.InnerTextAsync())?.Trim();
+                }
+                
+                if (string.IsNullOrWhiteSpace(product.SkuSource) && !string.IsNullOrWhiteSpace(product.Title))
+                {
+                    var match = System.Text.RegularExpressions.Regex.Match(product.Title, @"[A-Z]{2,}[-\w]+");
+                    if (match.Success)
+                    {
+                        product.SkuSource = match.Value;
+                    }
+                }
+                
+                var priceSelector = selectors.DetailPriceSelector ?? "div[class*='price-display-text--'], .price";
+                var priceEl = await page.QuerySelectorAsync(priceSelector);
+                if (priceEl != null)
+                {
+                    var priceText = (await priceEl.InnerTextAsync())?.Trim();
+                    product.Price = ParsePrice(priceText);
+                    product.Attributes["price_text"] = priceText ?? "";
+                }
+                
+                var imageEl = await page.QuerySelectorAsync("img[class*='image--']");
+                if (imageEl != null)
+                {
+                    product.ImageUrl = await imageEl.GetAttributeAsync("src");
+                }
+                
+                product.Attributes["product_url"] = page.Url;
+                
+                if (!string.IsNullOrWhiteSpace(product.SkuSource))
+                {
+                    products.Add(product);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error extrayendo productos de página de detalle de Festo");
+        }
+        
+        return products;
     }
 
     private static async Task<string?> GetCategoryNameAsync(IElementHandle link)
@@ -2716,4 +3158,451 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
             // Caller disposes it to reload with state in headless mode (optional, but cleaner).
         }
     }
+// Nuevos métodos para el modo "families" de scraping
+// Estos métodos deben agregarse a la clase PlaywrightScrapingService
+
+/// <summary>
+/// Método principal para scraping en modo "families" (estilo Festo)
+/// </summary>
+private async Task<bool> TryScrapeFamiliesModeAsync(
+    IPage page,
+    SiteProfile site,
+    SiteSelectors selectors,
+    List<ScrapedProduct> products,
+    HashSet<string> seenProducts,
+    int maxProducts,
+    CancellationToken cancellationToken)
+{
+    try
+    {
+        await LogStepAsync(site.Id, "info", "Iniciando scraping en modo families", new { mode = "families" });
+        
+        // Obtener las URLs de categorías desde la configuración
+        var categoryUrls = selectors.CategoryUrls ?? new List<string>();
+        
+        if (categoryUrls.Count == 0)
+        {
+            await LogStepAsync(site.Id, "warning", "No se encontraron URLs de categorías en la configuración", null);
+            return false;
+        }
+        
+        foreach (var categoryUrl in categoryUrls)
+        {
+            if (products.Count >= maxProducts)
+            {
+                await LogStepAsync(site.Id, "info", "Límite de productos alcanzado", new { count = products.Count });
+                break;
+            }
+            
+            await LogStepAsync(site.Id, "info", $"Procesando categoría: {categoryUrl}", null);
+            
+            // Navegar a la URL de la categoría con comportamiento humano
+            await HumanNavigateAsync(page, categoryUrl, WaitUntilState.NetworkIdle);
+            
+            var screenshot = await SaveStepScreenshotAsync(page, $"category_{Path.GetFileName(categoryUrl)}");
+            
+            // Buscar enlaces de familias de productos
+            var familyLinks = await CollectFamilyLinksAsync(page, selectors);
+            await LogStepAsync(site.Id, "info", $"Encontrados {familyLinks.Count} enlaces de familias", new { screenshotFile = screenshot });
+            
+            // Procesar cada familia
+            foreach (var familyLink in familyLinks)
+            {
+                if (products.Count >= maxProducts)
+                    break;
+                    
+                await _scrapeControl.WaitIfPausedAsync(site.Id, cancellationToken);
+                
+                // Pausa humanizada antes de procesar la siguiente familia
+                await HumanDelayAsync(2000, 4000);
+                
+                try
+                {
+                    var familyProducts = await ExtractProductsFromFamilyPageAsync(
+                        page,
+                        site.Id,
+                        familyLink,
+                        selectors,
+                        seenProducts,
+                        maxProducts - products.Count,
+                        cancellationToken);
+                    
+                    products.AddRange(familyProducts);
+                    await LogStepAsync(site.Id, "info", $"Extraídos {familyProducts.Count} productos de la familia", new { url = familyLink });
+                }
+                catch (Exception ex)
+                {
+                    await LogStepAsync(site.Id, "error", $"Error procesando familia: {ex.Message}", new { url = familyLink });
+                }
+            }
+        }
+        
+        return products.Count > 0;
+    }
+    catch (Exception ex)
+    {
+        await LogStepAsync(site.Id, "error", $"Error en modo families: {ex.Message}", null);
+        return false;
+    }
+}
+
+/// <summary>
+/// Recolecta los enlaces de familias de productos de una página de categoría
+/// </summary>
+private async Task<List<string>> CollectFamilyLinksAsync(IPage page, SiteSelectors selectors)
+{
+    var links = new List<string>();
+    
+    try
+    {
+        // Hacer scroll gradual humanizado para cargar los productos sugeridos
+        _logger.LogInformation("Haciendo scroll gradual para cargar productos sugeridos...");
+        await HumanScrollAsync(page, scrolls: 4);
+        
+        // Buscar enlaces usando el selector o el texto configurado
+        ILocator linkLocator;
+        
+        if (!string.IsNullOrEmpty(selectors.ProductFamilyLinkSelector))
+        {
+            linkLocator = page.Locator(selectors.ProductFamilyLinkSelector);
+        }
+        else if (!string.IsNullOrEmpty(selectors.ProductFamilyLinkText))
+        {
+            linkLocator = page.Locator($"a:has-text('{selectors.ProductFamilyLinkText}')");
+        }
+        else
+        {
+            _logger.LogWarning("No se configuró selector ni texto para enlaces de familias");
+            return links;
+        }
+        
+        var count = await linkLocator.CountAsync();
+        _logger.LogInformation($"Encontrados {count} enlaces de familias en la página");
+        
+        // Extraer las URLs de los enlaces
+        for (int i = 0; i < count; i++)
+        {
+            try
+            {
+                var href = await linkLocator.Nth(i).GetAttributeAsync("href");
+                if (!string.IsNullOrEmpty(href))
+                {
+                    // Convertir a URL absoluta si es necesario
+                    if (!href.StartsWith("http"))
+                    {
+                        var baseUrl = new Uri(page.Url);
+                        href = new Uri(baseUrl, href).ToString();
+                    }
+                    
+                    if (!links.Contains(href))
+                    {
+                        links.Add(href);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning($"Error extrayendo enlace {i}: {ex.Message}");
+            }
+        }
+    }
+    catch (Exception ex)
+    {
+        _logger.LogError($"Error recolectando enlaces de familias: {ex.Message}");
+    }
+    
+    return links;
+}
+
+/// <summary>
+/// Extrae productos de una página de familia (con tabla de variantes)
+/// </summary>
+private async Task<List<ScrapedProduct>> ExtractProductsFromFamilyPageAsync(
+    IPage page,
+    Guid siteId,
+    string familyUrl,
+    SiteSelectors selectors,
+    HashSet<string> seenProducts,
+    int maxProducts,
+    CancellationToken cancellationToken)
+{
+    var products = new List<ScrapedProduct>();
+    
+    try
+    {
+        // Navegar a la página de la familia con comportamiento humano
+        await HumanNavigateAsync(page, familyUrl, WaitUntilState.NetworkIdle);
+        
+        // Extraer el título de la familia
+        string? familyTitle = null;
+        if (!string.IsNullOrEmpty(selectors.TitleSelector))
+        {
+            var titleElem = page.Locator(selectors.TitleSelector).First;
+            if (await titleElem.CountAsync() > 0)
+            {
+                familyTitle = await titleElem.TextContentAsync();
+            }
+        }
+        
+        // Buscar la tabla de variantes
+        if (string.IsNullOrEmpty(selectors.VariantTableSelector))
+        {
+            await LogStepAsync(siteId, "warning", "No se configuró selector de tabla de variantes", null);
+            return products;
+        }
+        
+        var variantTable = page.Locator(selectors.VariantTableSelector).First;
+        if (await variantTable.CountAsync() == 0)
+        {
+            await LogStepAsync(siteId, "info", "No se encontró tabla de variantes en esta familia", new { url = familyUrl });
+            return products;
+        }
+        
+        // Extraer las filas de variantes
+        if (string.IsNullOrEmpty(selectors.VariantRowSelector))
+        {
+            await LogStepAsync(siteId, "warning", "No se configuró selector de filas de variantes", null);
+            return products;
+        }
+        
+        var variantRows = page.Locator(selectors.VariantRowSelector);
+        var rowCount = await variantRows.CountAsync();
+        await LogStepAsync(siteId, "info", $"Encontradas {rowCount} variantes en la familia", new { familyTitle });
+        
+        // Procesar cada variante
+        for (int i = 0; i < rowCount && products.Count < maxProducts; i++)
+        {
+            try
+            {
+                var row = variantRows.Nth(i);
+                
+                // Extraer SKU
+                string? sku = null;
+                if (!string.IsNullOrEmpty(selectors.VariantSkuLinkSelector))
+                {
+                    var skuLink = row.Locator(selectors.VariantSkuLinkSelector).First;
+                    if (await skuLink.CountAsync() > 0)
+                    {
+                        sku = await skuLink.TextContentAsync();
+                        sku = sku?.Trim();
+                    }
+                }
+                
+                // Verificar si ya procesamos este SKU
+                if (string.IsNullOrEmpty(sku) || seenProducts.Contains(sku))
+                    continue;
+                
+                // Extraer precio (puede estar en la fila o necesitar navegar)
+                decimal? price = null;
+                if (!string.IsNullOrEmpty(selectors.DetailPriceSelector))
+                {
+                    var priceElem = row.Locator(selectors.DetailPriceSelector).First;
+                    if (await priceElem.CountAsync() > 0)
+                    {
+                        var priceText = await priceElem.TextContentAsync();
+                        price = ParsePrice(priceText);
+                    }
+                }
+                
+                // Crear el producto
+                var product = new ScrapedProduct
+                {
+                    SkuSource = sku,
+                    Title = familyTitle ?? "Producto sin título",
+                    Price = price,
+                    ScrapedAt = DateTime.UtcNow,
+                    Attributes = new Dictionary<string, string>
+                    {
+                        ["product_url"] = familyUrl,
+                        ["family_title"] = familyTitle ?? "",
+                        ["variant_index"] = i.ToString()
+                    }
+                };
+                
+                products.Add(product);
+                seenProducts.Add(sku);
+                
+                _logger.LogInformation($"Variante extraída: SKU={sku}, Precio={price}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning($"Error extrayendo variante {i}: {ex.Message}");
+            }
+        }
+    }
+    catch (Exception ex)
+    {
+        await LogStepAsync(siteId, "error", $"Error extrayendo productos de familia: {ex.Message}", new { url = familyUrl });
+    }
+    
+    return products;
+}
+// Métodos auxiliares para simular comportamiento humano
+// Métodos auxiliares para simular comportamiento humano
+
+/// <summary>
+/// Pausa aleatoria para simular comportamiento humano
+/// </summary>
+private async Task HumanDelayAsync(int minMs = 2000, int maxMs = 5000)
+{
+    var delay = _random.Next(minMs, maxMs);
+    _logger.LogDebug($"Pausa humana: {delay}ms");
+    await Task.Delay(delay);
+}
+
+/// <summary>
+/// Simula movimiento de mouse aleatorio
+/// </summary>
+private async Task SimulateMouseMovementAsync(IPage page)
+{
+    try
+    {
+        var width = 1920;
+        var height = 1080;
+        
+        // Generar posiciones aleatorias
+        var x1 = _random.Next(100, width - 100);
+        var y1 = _random.Next(100, height - 100);
+        var x2 = _random.Next(100, width - 100);
+        var y2 = _random.Next(100, height - 100);
+        
+        // Mover el mouse en varios pasos para simular movimiento natural
+        await page.Mouse.MoveAsync(x1, y1);
+        await Task.Delay(_random.Next(100, 300));
+        await page.Mouse.MoveAsync(x2, y2);
+        await Task.Delay(_random.Next(100, 300));
+        
+        _logger.LogDebug($"Movimiento de mouse simulado: ({x1},{y1}) -> ({x2},{y2})");
+    }
+    catch (Exception ex)
+    {
+        _logger.LogWarning($"Error simulando movimiento de mouse: {ex.Message}");
+    }
+}
+
+/// <summary>
+/// Realiza scroll gradual para simular lectura humana
+/// </summary>
+private async Task HumanScrollAsync(IPage page, int scrolls = 3)
+{
+    try
+    {
+        _logger.LogInformation($"Realizando scroll gradual ({scrolls} pasos)...");
+        
+        for (int i = 0; i < scrolls; i++)
+        {
+            // Scroll gradual en lugar de ir directo al final
+            var scrollAmount = _random.Next(300, 800);
+            await page.EvaluateAsync($"window.scrollBy(0, {scrollAmount})");
+            
+            // Pausa aleatoria entre scrolls
+            await HumanDelayAsync(1000, 2500);
+            
+            // Ocasionalmente mover el mouse
+            if (_random.Next(0, 2) == 0)
+            {
+                await SimulateMouseMovementAsync(page);
+            }
+        }
+        
+        // Scroll final al fondo
+        await page.EvaluateAsync("window.scrollTo(0, document.body.scrollHeight)");
+        await HumanDelayAsync(1500, 3000);
+    }
+    catch (Exception ex)
+    {
+        _logger.LogWarning($"Error en scroll gradual: {ex.Message}");
+    }
+}
+
+/// <summary>
+/// Simula lectura de página antes de hacer clic
+/// </summary>
+private async Task SimulateReadingAsync(IPage page)
+{
+    try
+    {
+        // Simular que el usuario está leyendo la página
+        await HumanDelayAsync(2000, 4000);
+        
+        // Mover el mouse ocasionalmente
+        if (_random.Next(0, 2) == 0)
+        {
+            await SimulateMouseMovementAsync(page);
+        }
+        
+        // Pequeño scroll aleatorio
+        if (_random.Next(0, 3) == 0)
+        {
+            var scrollAmount = _random.Next(-200, 200);
+            await page.EvaluateAsync($"window.scrollBy(0, {scrollAmount})");
+            await HumanDelayAsync(500, 1500);
+        }
+    }
+    catch (Exception ex)
+    {
+        _logger.LogWarning($"Error simulando lectura: {ex.Message}");
+    }
+}
+
+/// <summary>
+/// Navega a una URL con comportamiento humano
+/// </summary>
+private async Task HumanNavigateAsync(IPage page, string url, WaitUntilState waitUntil = WaitUntilState.NetworkIdle)
+{
+    _logger.LogInformation($"Navegando (modo humano) a: {url}");
+    
+    // Pausa antes de navegar
+    await HumanDelayAsync(1500, 3000);
+    
+    // Navegar
+    await page.GotoAsync(url, new PageGotoOptions 
+    { 
+        WaitUntil = waitUntil,
+        Timeout = 90000
+    });
+    
+    // Pausa después de cargar
+    await HumanDelayAsync(2000, 4000);
+    
+    // Simular lectura inicial
+    await SimulateReadingAsync(page);
+}
+
+/// <summary>
+/// Hace clic en un elemento con comportamiento humano
+/// </summary>
+private async Task HumanClickAsync(ILocator locator)
+{
+    try
+    {
+        // Pausa antes del clic
+        await HumanDelayAsync(1000, 2000);
+        
+        // Scroll al elemento
+        await locator.ScrollIntoViewIfNeededAsync();
+        await HumanDelayAsync(500, 1000);
+        
+        // Mover mouse al elemento
+        var box = await locator.BoundingBoxAsync();
+        if (box != null)
+        {
+            var x = box.X + box.Width / 2;
+            var y = box.Y + box.Height / 2;
+            await locator.Page.Mouse.MoveAsync(x, y);
+            await HumanDelayAsync(300, 700);
+        }
+        
+        // Hacer clic
+        await locator.ClickAsync();
+        
+        // Pausa después del clic
+        await HumanDelayAsync(1500, 3000);
+    }
+    catch (Exception ex)
+    {
+        _logger.LogWarning($"Error en clic humano: {ex.Message}");
+        throw;
+    }
+}
 }
