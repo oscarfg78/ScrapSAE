@@ -55,6 +55,8 @@ public sealed class MainViewModel : ViewModelBase
     private string _scrapeStatusText = "Idle";
     private int _selectedTabIndex;
     private string _selectorAnalysisResult = string.Empty;
+    private string _scrapingMode = "Tradicional";
+    private bool _isFamiliesMode;
 
     public MainViewModel(ApiClient apiClient)
     {
@@ -322,6 +324,24 @@ public sealed class MainViewModel : ViewModelBase
     {
         get => _headlessEnabled;
         set => SetField(ref _headlessEnabled, value);
+    }
+
+    public string ScrapingMode
+    {
+        get => _scrapingMode;
+        set
+        {
+            if (SetField(ref _scrapingMode, value))
+            {
+                IsFamiliesMode = value == "Familias (Festo)";
+            }
+        }
+    }
+
+    public bool IsFamiliesMode
+    {
+        get => _isFamiliesMode;
+        set => SetField(ref _isFamiliesMode, value);
     }
 
     public bool IsScraping
