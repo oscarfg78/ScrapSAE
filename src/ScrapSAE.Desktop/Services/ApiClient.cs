@@ -18,7 +18,7 @@ public sealed class ApiClient
     public ApiClient(string baseUrl)
     {
         BaseUrl = baseUrl.TrimEnd('/');
-        _httpClient = new HttpClient { BaseAddress = new Uri(BaseUrl + "/") };
+        _httpClient = new HttpClient { BaseAddress = new Uri(BaseUrl + "/"), Timeout = TimeSpan.FromMinutes(30) };
         _jsonOptions = new JsonSerializerOptions
         {
             PropertyNameCaseInsensitive = true

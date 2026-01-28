@@ -16,7 +16,13 @@ var logger = loggerFactory.CreateLogger<Program>();
 logger.LogInformation("=== INICIANDO PRUEBA DE SCRAPER DE FESTO CON URLS DIRECTAS ===");
 
 // Cargar configuración de Festo
-var configPath = "/home/ubuntu/ScrapSAE/festo_config_families_mode.json";
+var configPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "festo_config_families_mode.json");
+if (!File.Exists(configPath))
+{
+    // Probar en el directorio actual
+    configPath = Path.Combine(Directory.GetCurrentDirectory(), "festo_config_families_mode.json");
+}
+
 if (!File.Exists(configPath))
 {
     logger.LogError("No se encontró el archivo de configuración: {Path}", configPath);
@@ -109,7 +115,7 @@ try
         }
         
         // Guardar resultados en JSON
-        var outputPath = "/home/ubuntu/festo_scraping_results_direct.json";
+        var outputPath = Path.Combine(Directory.GetCurrentDirectory(), "festo_scraping_results_direct.json");
         var outputJsonOptions = new JsonSerializerOptions { WriteIndented = true };
         var resultsJson = JsonSerializer.Serialize(allProducts, outputJsonOptions);
         await File.WriteAllTextAsync(outputPath, resultsJson);

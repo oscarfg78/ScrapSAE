@@ -14,6 +14,13 @@ public sealed class ScrapingRunner
     private readonly SupabaseTableService<SyncLog> _syncLogService;
     private readonly SupabaseTableService<CategoryMapping> _categoryMappingService;
     private readonly IScrapeControlService _scrapeControl;
+    private readonly ILogger<ScrapingRunner> _logger;
+    private static readonly JsonSerializerOptions _jsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+    };
 
     public ScrapingRunner(
         IScrapingService scrapingService,
@@ -21,7 +28,8 @@ public sealed class ScrapingRunner
         IAIProcessorService aiProcessorService,
         SupabaseTableService<SyncLog> syncLogService,
         SupabaseTableService<CategoryMapping> categoryMappingService,
-        IScrapeControlService scrapeControl)
+        IScrapeControlService scrapeControl,
+        ILogger<ScrapingRunner> logger)
     {
         _scrapingService = scrapingService;
         _supabase = supabase;
@@ -29,6 +37,7 @@ public sealed class ScrapingRunner
         _syncLogService = syncLogService;
         _categoryMappingService = categoryMappingService;
         _scrapeControl = scrapeControl;
+        _logger = logger;
     }
 
     public async Task<ScrapeRunResult> RunForSiteAsync(Guid siteId, CancellationToken cancellationToken)
@@ -64,6 +73,7 @@ public sealed class ScrapingRunner
             if (string.IsNullOrWhiteSpace(item.SkuSource))
             {
                 skipped++;
+                _logger.LogWarning("Producto omitido por SKU vacío. Título: {Title}", item.Title);
                 continue;
             }
 
@@ -211,7 +221,12 @@ public sealed class ScrapingRunner
                 if (terms.Count > 0)
                 {
                     selectors.CategorySearchTerms = terms;
-                    site.Selectors = JsonSerializer.Serialize(selectors);
+                    // Asegurar que conservamos el modo si ya existe
+                    if (string.IsNullOrEmpty(selectors.ScrapingMode) && site.Name.Contains("Festo", StringComparison.OrdinalIgnoreCase))
+                    {
+                        selectors.ScrapingMode = "families";
+                    }
+                    site.Selectors = JsonSerializer.Serialize(selectors, _jsonOptions);
                     await LogAsync(site, "scrape", "info", $"Categorias cargadas: {terms.Count}.");
                 }
             }
@@ -235,15 +250,15 @@ public sealed class ScrapingRunner
         {
             if (selectorsObj is JsonElement jsonElement)
             {
-                return JsonSerializer.Deserialize<SiteSelectors>(jsonElement.GetRawText());
+                return JsonSerializer.Deserialize<SiteSelectors>(jsonElement.GetRawText(), _jsonOptions);
             }
 
             if (selectorsObj is string json)
             {
-                return JsonSerializer.Deserialize<SiteSelectors>(json);
+                return JsonSerializer.Deserialize<SiteSelectors>(json, _jsonOptions);
             }
 
-            return JsonSerializer.Deserialize<SiteSelectors>(JsonSerializer.Serialize(selectorsObj));
+            return JsonSerializer.Deserialize<SiteSelectors>(JsonSerializer.Serialize(selectorsObj, _jsonOptions), _jsonOptions);
         }
         catch
         {

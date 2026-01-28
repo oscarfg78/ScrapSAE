@@ -1,0 +1,50 @@
+﻿info: Program[0]
+      === INICIANDO PRUEBA DE SCRAPER DE FESTO CON URLS DIRECTAS ===
+info: Program[0]
+      URLs de categor├¡as a procesar: 1
+info: Program[0]
+      
+--- Iniciando scraping ---
+info: Program[0]
+      
+=== Procesando categor├¡a: https://www.festo.com/mx/es/c/productos/actuadores/cilindros-neumaticos/cilindros-con-vastago-id_pim215/ ===
+info: ScrapSAE.Infrastructure.Scraping.PlaywrightScrapingService[0]
+      Using selectors for Festo M├®xico: {
+          "scrapingMode": "families",
+          "maxPages": 1,
+          "categoryUrls": [
+              "https://www.festo.com/mx/es/c/productos/actuadores/cilindros-neumaticos/cilindros-con-vastago-id_pim215/"
+          ],
+          "productFamilyLinkText": "Explorar la serie",
+          "productFamilyLinkSelector": "a[class*='similar-products-link']",
+          "titleSelector": "[class*='product-name--']",
+          "imageSelector": "img[class*='image--']",
+          "detailSkuSelector": "span[class*='part-number-value--']",
+          "detailPriceSelector": "div[class*='price-display-text--']",
+          "variantTableSelector": "div[class*='variants-table-container--']",
+          "variantRowSelector": "tr[class*='product-row--']",
+          "variantSkuLinkSelector": "a[href*='/p/']"
+      }
+      
+warn: ScrapSAE.Infrastructure.Scraping.PlaywrightScrapingService[0]
+      Stealth script not found. Searched in: c:\Proyectos\ScrapSAE\TestFestoScraper\bin\Debug\net8.0\ and C:\Proyectos\ScrapSAE\TestFestoScraper
+info: ScrapSAE.Infrastructure.Scraping.PlaywrightScrapingService[0]
+      Saved step screenshot to: C:\Users\oscar\AppData\Local\Temp\scrapsae-screens\20260128_045425_Festo M├®xico_initial.png
+info: ScrapSAE.Infrastructure.Scraping.PlaywrightScrapingService[0]
+      Site Festo M├®xico requires login. Attempting to authenticate...
+warn: ScrapSAE.Infrastructure.Scraping.PlaywrightScrapingService[0]
+      Invalid credentials format for site Festo M├®xico
+warn: ScrapSAE.Infrastructure.Scraping.PlaywrightScrapingService[0]
+      Automated login failed or session not established. Initiating manual login fallback...
+info: ScrapSAE.Infrastructure.Scraping.PlaywrightScrapingService[0]
+      Starting Manual Login Fallback for Festo M├®xico...
+warn: ScrapSAE.Infrastructure.Scraping.PlaywrightScrapingService[0]
+      Stealth script not found. Searched in: c:\Proyectos\ScrapSAE\TestFestoScraper\bin\Debug\net8.0\ and C:\Proyectos\ScrapSAE\TestFestoScraper
+info: ScrapSAE.Infrastructure.Scraping.PlaywrightScrapingService[0]
+      =============================================================================
+info: ScrapSAE.Infrastructure.Scraping.PlaywrightScrapingService[0]
+      PLEASE LOG IN MANUALLY IN THE BROWSER WINDOW.
+info: ScrapSAE.Infrastructure.Scraping.PlaywrightScrapingService[0]
+      The script acts as a 'Logged In' detector. It waits for you.
+info: ScrapSAE.Infrastructure.Scraping.PlaywrightScrapingService[0]
+      =============================================================================

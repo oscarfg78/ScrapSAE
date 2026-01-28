@@ -1,0 +1,67 @@
+﻿info: Program[0]
+      === INICIANDO PRUEBA DE SCRAPER DE FESTO CON URLS DIRECTAS ===
+info: Program[0]
+      URLs de categor├¡as a procesar: 1
+info: Program[0]
+      
+--- Iniciando scraping ---
+info: Program[0]
+      
+=== Procesando categor├¡a: https://www.festo.com/mx/es/c/productos/actuadores/cilindros-neumaticos/cilindros-con-vastago-id_pim215/ ===
+info: ScrapSAE.Infrastructure.Scraping.PlaywrightScrapingService[0]
+      Using selectors for Festo M├®xico: {
+          "scrapingMode": "families",
+          "maxPages": 1,
+          "categoryUrls": [
+              "https://www.festo.com/mx/es/c/productos/actuadores/cilindros-neumaticos/cilindros-con-vastago-id_pim215/"
+          ],
+          "productFamilyLinkText": "Explorar la serie",
+          "productFamilyLinkSelector": "a[class*='similar-products-link']",
+          "titleSelector": "[class*='product-name--']",
+          "imageSelector": "img[class*='image--']",
+          "detailSkuSelector": "span[class*='part-number-value--']",
+          "detailPriceSelector": "div[class*='price-display-text--']",
+          "variantTableSelector": "div[class*='variants-table-container--']",
+          "variantRowSelector": "tr[class*='product-row--']",
+          "variantSkuLinkSelector": "a[href*='/p/']"
+      }
+      
+warn: ScrapSAE.Infrastructure.Scraping.PlaywrightScrapingService[0]
+      Stealth script not found. Searched in: c:\Proyectos\ScrapSAE\TestFestoScraper\bin\Debug\net8.0\ and C:\Proyectos\ScrapSAE\TestFestoScraper
+info: ScrapSAE.Infrastructure.Scraping.PlaywrightScrapingService[0]
+      Saved step screenshot to: C:\Users\oscar\AppData\Local\Temp\scrapsae-screens\20260128_044851_Festo M├®xico_initial.png
+info: ScrapSAE.Infrastructure.Scraping.PlaywrightScrapingService[0]
+      Detected existing login session for site Festo M├®xico
+info: ScrapSAE.Infrastructure.Scraping.PlaywrightScrapingService[0]
+      Saved debug screenshot to: C:\Users\oscar\AppData\Local\Temp\scrapsae-screens\20260128_044851_Festo M├®xico_post_login.png
+info: ScrapSAE.Infrastructure.Scraping.PlaywrightScrapingService[0]
+      Navegando (modo humano) a: https://www.festo.com/mx/es/c/productos/actuadores/cilindros-neumaticos/cilindros-con-vastago-id_pim215/
+info: ScrapSAE.Infrastructure.Scraping.PlaywrightScrapingService[0]
+      Saved step screenshot to: C:\Users\oscar\AppData\Local\Temp\scrapsae-screens\20260128_044859_category_.png
+info: ScrapSAE.Infrastructure.Scraping.PlaywrightScrapingService[0]
+      Haciendo scroll gradual para cargar productos sugeridos...
+info: ScrapSAE.Infrastructure.Scraping.PlaywrightScrapingService[0]
+      Realizando scroll gradual (4 pasos)...
+info: ScrapSAE.Infrastructure.Scraping.PlaywrightScrapingService[0]
+      Encontrados 0 enlaces de familias en la p├ígina
+info: ScrapSAE.Infrastructure.Scraping.PlaywrightScrapingService[0]
+      Scraping page 1 of Festo M├®xico
+fail: ScrapSAE.Infrastructure.Scraping.PlaywrightScrapingService[0]
+      Error scraping site Festo M├®xico
+      Microsoft.Playwright.PlaywrightException: Unexpected token "" while parsing css selector "". Did you mean to CSS.escape it?
+         at Microsoft.Playwright.Transport.Connection.InnerSendMessageToServerAsync[T](ChannelOwner object, String method, Dictionary`2 dictionary, Boolean keepNulls) in /_/src/Playwright/Transport/Connection.cs:line 201
+         at Microsoft.Playwright.Transport.Connection.WrapApiCallAsync[T](Func`1 action, Boolean isInternal, String title) in /_/src/Playwright/Transport/Connection.cs:line 499
+         at Microsoft.Playwright.Core.Frame.QuerySelectorAllAsync(String selector) in /_/src/Playwright/Core/Frame.cs:line 668
+         at ScrapSAE.Infrastructure.Scraping.PlaywrightScrapingService.ScrapeAsync(SiteProfile site, CancellationToken cancellationToken) in c:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\Scraping\PlaywrightScrapingService.cs:line 436
+info: Program[0]
+      Productos extra├¡dos de esta categor├¡a: 0
+info: Program[0]
+      
+=== RESULTADOS TOTALES ===
+info: Program[0]
+      Total de productos extra├¡dos: 0
+warn: Program[0]
+      ÔÜá´©Å No se extrajeron productos. Revisa los logs para m├ís detalles.
+info: Program[0]
+      
+=== PRUEBA FINALIZADA ===

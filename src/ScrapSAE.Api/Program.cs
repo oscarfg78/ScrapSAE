@@ -135,9 +135,13 @@ app.MapPost("/api/scraping/run/{siteId:guid}", async (
 
     try
     {
+        Console.WriteLine($"[DEBUG] Scraping request for site {siteId}: manualLogin={manualLogin}, headless={headless}");
         Environment.SetEnvironmentVariable("SCRAPSAE_MANUAL_LOGIN", manualLogin ? "true" : "false");
         Environment.SetEnvironmentVariable("SCRAPSAE_FORCE_MANUAL_LOGIN", manualLogin ? "true" : "false");
         Environment.SetEnvironmentVariable("SCRAPSAE_HEADLESS", headless ? "true" : "false");
+        
+        Console.WriteLine($"[DEBUG] Env SCRAPSAE_MANUAL_LOGIN: {Environment.GetEnvironmentVariable("SCRAPSAE_MANUAL_LOGIN")}");
+        Console.WriteLine($"[DEBUG] Env SCRAPSAE_HEADLESS: {Environment.GetEnvironmentVariable("SCRAPSAE_HEADLESS")}");
 
         var result = await runner.RunForSiteAsync(siteId, token);
         return Results.Ok(result);
