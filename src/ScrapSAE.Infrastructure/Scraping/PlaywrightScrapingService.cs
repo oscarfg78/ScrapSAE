@@ -1,4 +1,4 @@
-using Microsoft.Playwright;
+﻿using Microsoft.Playwright;
 using Microsoft.Extensions.Logging;
 using System.Linq;
 using System.Text.Json;
@@ -1257,8 +1257,8 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
         var selectors = new[]
         {
             "[data-testid='navigation-login-link']",
-            "button:has-text('Inicio de sesiÃ³n')",
-            "a:has-text('Inicio de sesiÃ³n')"
+            "button:has-text('Inicio de sesión')",
+            "a:has-text('Inicio de sesión')"
         };
 
         foreach (var selector in selectors)

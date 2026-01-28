@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
 using System.IO;
@@ -77,9 +77,9 @@ public sealed class MainViewModel : ViewModelBase
         UpdateStagingCommand = new AsyncCommand(() => SafeExecuteAsync(UpdateStagingAsync, "Actualizar staging"));
         DeleteStagingCommand = new AsyncCommand(() => SafeExecuteAsync(DeleteStagingAsync, "Eliminar staging"));
 
-        CreateCategoryCommand = new AsyncCommand(() => SafeExecuteAsync(CreateCategoryAsync, "Crear categor�a"));
-        UpdateCategoryCommand = new AsyncCommand(() => SafeExecuteAsync(UpdateCategoryAsync, "Actualizar categor�a"));
-        DeleteCategoryCommand = new AsyncCommand(() => SafeExecuteAsync(DeleteCategoryAsync, "Eliminar categor�a"));
+        CreateCategoryCommand = new AsyncCommand(() => SafeExecuteAsync(CreateCategoryAsync, "Crear categoría"));
+        UpdateCategoryCommand = new AsyncCommand(() => SafeExecuteAsync(UpdateCategoryAsync, "Actualizar categoría"));
+        DeleteCategoryCommand = new AsyncCommand(() => SafeExecuteAsync(DeleteCategoryAsync, "Eliminar categoría"));
 
         CreateSyncLogCommand = new AsyncCommand(() => SafeExecuteAsync(CreateSyncLogAsync, "Crear log"));
         UpdateSyncLogCommand = new AsyncCommand(() => SafeExecuteAsync(UpdateSyncLogAsync, "Actualizar log"));
@@ -93,9 +93,9 @@ public sealed class MainViewModel : ViewModelBase
         SendSelectedToSaeCommand = new AsyncCommand(() => SafeExecuteAsync(SendSelectedToSaeAsync, "Enviar seleccionado a SAE"), () => SelectedStagingProduct != null);
         SendPendingToSaeCommand = new AsyncCommand(() => SafeExecuteAsync(SendPendingToSaeAsync, "Enviar pendientes a SAE"));
 
-        LoadSettingsCommand = new AsyncCommand(() => SafeExecuteAsync(LoadSettingsAsync, "Cargar configuraci�n"));
-        SaveSettingsCommand = new AsyncCommand(() => SafeExecuteAsync(SaveSettingsAsync, "Guardar configuraci�n"));
-        RunDiagnosticsCommand = new AsyncCommand(() => SafeExecuteAsync(RunDiagnosticsAsync, "Ejecutar diagn�stico"));
+        LoadSettingsCommand = new AsyncCommand(() => SafeExecuteAsync(LoadSettingsAsync, "Cargar configuración"));
+        SaveSettingsCommand = new AsyncCommand(() => SafeExecuteAsync(SaveSettingsAsync, "Guardar configuración"));
+        RunDiagnosticsCommand = new AsyncCommand(() => SafeExecuteAsync(RunDiagnosticsAsync, "Ejecutar diagnóstico"));
         TestBackendCommand = new AsyncCommand(() => SafeExecuteAsync(TestBackendAsync, "Probar backend"));
         ExitCommand = new RelayCommand(() => Application.Current.Shutdown());
         RefreshLogsCommand = new AsyncCommand(() => SafeExecuteAsync(RefreshLogsAsync, "Refrescar logs"));
@@ -754,7 +754,7 @@ public sealed class MainViewModel : ViewModelBase
         }
 
         var ok = await _apiClient.SendToSaeAsync(SelectedStagingProduct.Id);
-        StatusMessage = ok ? "Env�o a SAE realizado." : "SAE SDK no configurado.";
+        StatusMessage = ok ? "Envío a SAE realizado." : "SAE SDK no configurado.";
         await LoadAllAsync();
     }
 
@@ -788,7 +788,7 @@ public sealed class MainViewModel : ViewModelBase
             var settings = await _apiClient.GetSettingsAsync();
             if (settings == null)
             {
-                StatusMessage = "No hay configuraci�n guardada.";
+                StatusMessage = "No hay configuración guardada.";
                 return;
             }
 
@@ -805,11 +805,11 @@ public sealed class MainViewModel : ViewModelBase
             SaeDbCharset = settings.SaeDbCharset ?? "ISO8859_1";
             SaeDbDialect = settings.SaeDbDialect ?? 3;
             SaeDefaultLineCode = settings.SaeDefaultLineCode ?? "LINEA";
-            StatusMessage = "Configuraci�n cargada.";
+            StatusMessage = "Configuración cargada.";
         }
         catch (Exception ex)
         {
-            StatusMessage = $"Error al cargar configuraci�n: {ex.Message}";
+            StatusMessage = $"Error al cargar configuración: {ex.Message}";
         }
     }
 
@@ -835,11 +835,11 @@ public sealed class MainViewModel : ViewModelBase
             };
 
             await _apiClient.SaveSettingsAsync(settings);
-            StatusMessage = "Configuraci�n guardada. Reinicia el backend si estaba corriendo.";
+            StatusMessage = "Configuración guardada. Reinicia el backend si estaba corriendo.";
         }
         catch (Exception ex)
         {
-            StatusMessage = $"Error al guardar configuraci�n: {ex.Message}";
+            StatusMessage = $"Error al guardar configuración: {ex.Message}";
         }
     }
 
@@ -850,7 +850,7 @@ public sealed class MainViewModel : ViewModelBase
             DiagnosticsResult = await _apiClient.GetDiagnosticsAsync();
             if (DiagnosticsResult == null)
             {
-                StatusMessage = "No se pudo obtener diagn�stico.";
+                StatusMessage = "No se pudo obtener diagnóstico.";
                 return;
             }
 
@@ -859,10 +859,10 @@ public sealed class MainViewModel : ViewModelBase
             SaeStatus = DiagnosticsResult.SaeSdkOk ? "OK" : "Error";
             SupabaseSampleCount = DiagnosticsResult.SupabaseSampleCount;
             DatabaseStatus = DiagnosticsResult.SupabaseOk
-                ? $"OK ({SupabaseSampleCount ?? 0} registros le�dos)"
+                ? $"OK ({SupabaseSampleCount ?? 0} registros leídos)"
                 : "Error";
 
-            StatusMessage = "Diagn�stico completado.";
+            StatusMessage = "Diagnóstico completado.";
         }
         catch (Exception ex)
         {

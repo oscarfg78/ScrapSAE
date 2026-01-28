@@ -17,7 +17,9 @@ public class WorkerTests
         var logger = new Mock<ILogger<Worker>>();
         var scraping = new Mock<IScrapingService>();
         var staging = new Mock<IStagingService>();
-        _worker = new Worker(logger.Object, scraping.Object, staging.Object);
+        var aiProcessor = new Mock<IAIProcessorService>();
+        var syncLogService = new Mock<ISyncLogService>();
+        _worker = new Worker(logger.Object, scraping.Object, staging.Object, aiProcessor.Object, syncLogService.Object);
     }
 
     [Fact]
