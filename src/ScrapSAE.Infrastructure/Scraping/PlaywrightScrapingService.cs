@@ -15,18 +15,24 @@ namespace ScrapSAE.Infrastructure.Scraping;
 /// </summary>
 public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
 {
+    private const string ScreenshotDirectoryName = "scrapsae-screens";
     private readonly ILogger<PlaywrightScrapingService> _logger;
     private readonly IScrapeControlService _scrapeControl;
+    private readonly ISyncLogService? _syncLogService;
     private IPlaywright? _playwright;
     private IBrowser? _browser;
     private IBrowserContext? _context;
     private bool _isPersistentContext;
     private readonly Random _random = new();
 
-    public PlaywrightScrapingService(ILogger<PlaywrightScrapingService> logger, IScrapeControlService scrapeControl)
+    public PlaywrightScrapingService(
+        ILogger<PlaywrightScrapingService> logger,
+        IScrapeControlService scrapeControl,
+        ISyncLogService? syncLogService = null)
     {
         _logger = logger;
         _scrapeControl = scrapeControl;
+        _syncLogService = syncLogService;
     }
 
     private async Task<IBrowserContext> GetContextAsync(BrowserNewContextOptions? options = null)
@@ -153,58 +159,81 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
 
             // Navigate to site (or login URL if provided)
             await _scrapeControl.WaitIfPausedAsync(site.Id, cancellationToken);
+            await LogStepAsync(site.Id, "info", "Navegando a URL inicial.", new { url = initialUrl });
             await page.GotoAsync(initialUrl, new PageGotoOptions
             {
                 WaitUntil = WaitUntilState.DOMContentLoaded,
                 Timeout = 90000
             });
             await AcceptCookiesAsync(page, cancellationToken);
-            await SaveDebugScreenshotAsync(page, $"{site.Name}_initial");
+            var initialShot = await SaveStepScreenshotAsync(page, $"{site.Name}_initial");
+            await LogStepAsync(site.Id, "success", "Pagina inicial cargada.", new { url = page.Url, screenshotFile = initialShot });
 
             // Handle login if required
             if (site.RequiresLogin && !string.IsNullOrEmpty(site.CredentialsEncrypted))
             {
-                var skipLoginEnv = Environment.GetEnvironmentVariable("SCRAPSAE_SKIP_LOGIN");
-                if (!string.IsNullOrWhiteSpace(skipLoginEnv) &&
-                    bool.TryParse(skipLoginEnv, out var skipLogin) &&
-                    skipLogin)
+                var forceManualLoginEnv = Environment.GetEnvironmentVariable("SCRAPSAE_FORCE_MANUAL_LOGIN");
+                if (!string.IsNullOrWhiteSpace(forceManualLoginEnv) &&
+                    bool.TryParse(forceManualLoginEnv, out var forceManualLogin) &&
+                    forceManualLogin)
                 {
-                    _logger.LogInformation("Skipping login for site {SiteName} due to SCRAPSAE_SKIP_LOGIN", site.Name);
-                }
-                else if (!await IsLoggedInAsync(page))
-                {
-                    _logger.LogInformation("Site {SiteName} requires login. Attempting to authenticate...", site.Name);
-                    
-                    var loginSuccess = false;
-                    try 
-                    {
-                        await HandleLoginAsync(page, site, cancellationToken);
-                        loginSuccess = await IsLoggedInAsync(page);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Automated login failed.");
-                    }
+                    _logger.LogInformation("Force manual login enabled for site {SiteName}.", site.Name);
+                    await LogStepAsync(site.Id, "info", "Forzando login manual.");
+                    await ManualLoginFallbackAsync(site, cancellationToken);
 
-                    if (!loginSuccess)
-                    {
-                        _logger.LogWarning("Automated login failed or session not established. Initiating manual login fallback...");
-                        await ManualLoginFallbackAsync(site, cancellationToken);
-                        
-                        // Re-initialize context with new state
-                        await DisposeAsync(); // Close current
-                        
-                        // Reload with state
-                        context = await GetContextAsync(new BrowserNewContextOptions { StorageStatePath = GetStorageStatePath(site.Name) });
-                        page = await context.NewPageAsync();
-                        
-                        // Navigate again
-                        await page.GotoAsync(initialUrl, new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 90000 });
-                    }
+                    // Re-initialize context with saved state
+                    await DisposeAsync();
+                    context = await GetContextAsync(new BrowserNewContextOptions { StorageStatePath = GetStorageStatePath(site.Name) });
+                    page = await context.NewPageAsync();
+
+                    await page.GotoAsync(initialUrl, new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 90000 });
+                    await AcceptCookiesAsync(page, cancellationToken);
                 }
                 else
                 {
-                    _logger.LogInformation("Detected existing login session for site {SiteName}", site.Name);
+                    var skipLoginEnv = Environment.GetEnvironmentVariable("SCRAPSAE_SKIP_LOGIN");
+                    if (!string.IsNullOrWhiteSpace(skipLoginEnv) &&
+                        bool.TryParse(skipLoginEnv, out var skipLogin) &&
+                        skipLogin)
+                    {
+                        _logger.LogInformation("Skipping login for site {SiteName} due to SCRAPSAE_SKIP_LOGIN", site.Name);
+                    }
+                    else if (!await IsLoggedInAsync(page))
+                    {
+                        _logger.LogInformation("Site {SiteName} requires login. Attempting to authenticate...", site.Name);
+
+                        var loginSuccess = false;
+                        try
+                        {
+                            await HandleLoginAsync(page, site, cancellationToken);
+                            loginSuccess = await IsLoggedInAsync(page);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Automated login failed.");
+                        }
+
+                        if (!loginSuccess)
+                        {
+                            _logger.LogWarning("Automated login failed or session not established. Initiating manual login fallback...");
+                            await LogStepAsync(site.Id, "warn", "Login automatico fallo. Iniciando login manual.");
+                            await ManualLoginFallbackAsync(site, cancellationToken);
+
+                            // Re-initialize context with new state
+                            await DisposeAsync();
+                            context = await GetContextAsync(new BrowserNewContextOptions { StorageStatePath = GetStorageStatePath(site.Name) });
+                            page = await context.NewPageAsync();
+
+                            // Navigate again
+                            await page.GotoAsync(initialUrl, new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 90000 });
+                            await AcceptCookiesAsync(page, cancellationToken);
+                        }
+                    }
+                    else
+                    {
+                        _logger.LogInformation("Detected existing login session for site {SiteName}", site.Name);
+                        await LogStepAsync(site.Id, "success", "Sesion activa detectada.");
+                    }
                 }
             }
             
@@ -229,6 +258,7 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
             if (!string.IsNullOrWhiteSpace(startUrl))
             {
                 _logger.LogInformation("Using start URL override: {StartUrl}", startUrl);
+                await LogStepAsync(site.Id, "info", "Usando URL de inicio forzada.", new { url = startUrl });
                 await _scrapeControl.WaitIfPausedAsync(site.Id, cancellationToken);
                 var startProducts = await TryScrapeProductDetailWithVariationsAsync(
                     page,
@@ -237,13 +267,22 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
                     cancellationToken);
                 if (startProducts.Count > 0)
                 {
+                    await LogStepAsync(site.Id, "success", "Scraping por URL directa completado.", new { count = startProducts.Count });
                     return startProducts;
                 }
+            }
+
+            var searchProducts = await TryScrapeCategorySearchAsync(page, site, selectors, cancellationToken);
+            if (searchProducts.Count > 0)
+            {
+                await LogStepAsync(site.Id, "success", "Scraping por busqueda de categorias completado.", new { count = searchProducts.Count });
+                return searchProducts;
             }
 
             var categoryProducts = await TryScrapeCategoriesAsync(page, site, selectors, cancellationToken);
             if (categoryProducts.Count > 0)
             {
+                await LogStepAsync(site.Id, "success", "Scraping por navegacion de categorias completado.", new { count = categoryProducts.Count });
                 return categoryProducts;
             }
 
@@ -785,6 +824,22 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
         }
     }
 
+    private async Task<string?> CaptureScreenshotBase64Async(IPage page, string suffix)
+    {
+        try
+        {
+            var bytes = await page.ScreenshotAsync(new() { FullPage = true });
+            var base64 = Convert.ToBase64String(bytes);
+            _logger.LogInformation("Captured screenshot for {Suffix}, size={Size} bytes", suffix, bytes.Length);
+            return base64;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not capture screenshot for {Suffix}", suffix);
+            return null;
+        }
+    }
+
     public async ValueTask DisposeAsync()
     {
         if (_context != null)
@@ -806,7 +861,7 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
         try
         {
             var filename = $"{DateTime.UtcNow:yyyyMMdd_HHmmss}_{suffix}.png";
-            var screenshotPath = Path.Combine(Path.GetTempPath(), filename);
+            var screenshotPath = Path.Combine(GetScreenshotDirectory(), filename);
             await page.ScreenshotAsync(new() { Path = screenshotPath, FullPage = true });
             _logger.LogInformation("Saved debug screenshot to: {Path}", screenshotPath);
         }
@@ -816,18 +871,68 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
         }
     }
 
+    private async Task LogStepAsync(Guid siteId, string status, string message, object? details = null)
+    {
+        if (_syncLogService == null)
+        {
+            return;
+        }
+
+        try
+        {
+            var log = new SyncLog
+            {
+                OperationType = "scrape-step",
+                SiteId = siteId,
+                Status = status,
+                Message = message,
+                Details = details == null ? null : System.Text.Json.JsonSerializer.Serialize(details),
+                CreatedAt = DateTime.UtcNow
+            };
+            await _syncLogService.LogOperationAsync(log);
+        }
+        catch
+        {
+            // Avoid breaking scraping flow if logging fails.
+        }
+    }
+
     private async Task SaveElementScreenshotAsync(ILocator locator, string suffix)
     {
         try
         {
             var filename = $"{DateTime.UtcNow:yyyyMMdd_HHmmss}_{suffix}.png";
-            var screenshotPath = Path.Combine(Path.GetTempPath(), filename);
+            var screenshotPath = Path.Combine(GetScreenshotDirectory(), filename);
             await locator.ScreenshotAsync(new() { Path = screenshotPath });
             _logger.LogInformation("Saved element screenshot to: {Path}", screenshotPath);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Could not save element screenshot");
+        }
+    }
+
+    private static string GetScreenshotDirectory()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), ScreenshotDirectoryName);
+        Directory.CreateDirectory(dir);
+        return dir;
+    }
+
+    private async Task<string?> SaveStepScreenshotAsync(IPage page, string suffix)
+    {
+        try
+        {
+            var filename = $"{DateTime.UtcNow:yyyyMMdd_HHmmss}_{suffix}.png";
+            var screenshotPath = Path.Combine(GetScreenshotDirectory(), filename);
+            await page.ScreenshotAsync(new() { Path = screenshotPath, FullPage = true });
+            _logger.LogInformation("Saved step screenshot to: {Path}", screenshotPath);
+            return filename;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not save step screenshot");
+            return null;
         }
     }
 
@@ -1410,14 +1515,47 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
         return crumbs;
     }
 
-    private static async Task<string?> GetDetailHrefFromCardAsync(ILocator card)
+    private static async Task<string?> GetDetailHrefFromCardAsync(ILocator card, SiteSelectors selectors)
     {
         try
         {
-            var link = card.Locator("a[href*='/p/'], a[href*='/a/'], a[href*='/product'], a[href*='/producto']");
-            if (await link.CountAsync() > 0)
+            if (!string.IsNullOrWhiteSpace(selectors.ProductLinkSelector))
             {
-                return await link.First.GetAttributeAsync("href");
+                var link = card.Locator(selectors.ProductLinkSelector);
+                if (await link.CountAsync() > 0)
+                {
+                    var href = await link.First.GetAttributeAsync("href");
+                    if (!string.IsNullOrWhiteSpace(href))
+                    {
+                        return href;
+                    }
+                }
+            }
+
+            var imageLink = card.Locator("a:has(img)");
+            if (await imageLink.CountAsync() > 0)
+            {
+                var href = await imageLink.First.GetAttributeAsync("href");
+                if (!string.IsNullOrWhiteSpace(href))
+                {
+                    return href;
+                }
+            }
+
+            var titleLink = card.Locator("a:has(h1), a:has(h2), a:has(h3), a:has(span)");
+            if (await titleLink.CountAsync() > 0)
+            {
+                var href = await titleLink.First.GetAttributeAsync("href");
+                if (!string.IsNullOrWhiteSpace(href))
+                {
+                    return href;
+                }
+            }
+
+            var patternLink = card.Locator("a[href*='/p/'], a[href*='/a/'], a[href*='/product'], a[href*='/producto']");
+            if (await patternLink.CountAsync() > 0)
+            {
+                return await patternLink.First.GetAttributeAsync("href");
             }
 
             var detailLink = card.Locator("a:has-text('Detalles'), button:has-text('Detalles')");
@@ -1552,6 +1690,310 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
         }
     }
 
+    private async Task<List<ScrapedProduct>> TryScrapeCategorySearchAsync(
+        IPage page,
+        SiteProfile site,
+        SiteSelectors selectors,
+        CancellationToken cancellationToken)
+    {
+        var products = new List<ScrapedProduct>();
+        var landingUrl = selectors.CategoryLandingUrl ?? site.BaseUrl;
+        if (string.IsNullOrWhiteSpace(landingUrl))
+        {
+            return products;
+        }
+
+        await _scrapeControl.WaitIfPausedAsync(site.Id, cancellationToken);
+        if (!page.Url.StartsWith(landingUrl, StringComparison.OrdinalIgnoreCase))
+        {
+            await LogStepAsync(site.Id, "info", "Abriendo landing de categorias.", new { url = landingUrl });
+            await page.GotoAsync(landingUrl, new PageGotoOptions
+            {
+                WaitUntil = WaitUntilState.DOMContentLoaded,
+                Timeout = 90000
+            });
+            await AcceptCookiesAsync(page, cancellationToken);
+        }
+
+        var pageCategories = await ReadCategoryNamesAsync(page, site.Id, selectors, cancellationToken);
+        if (pageCategories.Count > 0)
+        {
+            await LogStepAsync(site.Id, "info", "Categorias detectadas en pagina.", new { count = pageCategories.Count });
+        }
+
+        var searchTerms = selectors.CategorySearchTerms.Count > 0
+            ? new List<string>(selectors.CategorySearchTerms)
+            : pageCategories;
+
+        if (searchTerms.Count == 0)
+        {
+            await LogStepAsync(site.Id, "warn", "No se encontraron categorias para buscar.");
+            return products;
+        }
+
+        if (pageCategories.Count > 0 && selectors.CategorySearchTerms.Count > 0)
+        {
+            searchTerms = searchTerms
+                .Where(term => pageCategories.Any(cat => cat.Contains(term, StringComparison.OrdinalIgnoreCase)))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        if (searchTerms.Count == 0)
+        {
+            await LogStepAsync(site.Id, "warn", "Categorias del catalogo no coinciden con la pagina.");
+            return products;
+        }
+
+        var maxProducts = site.MaxProductsPerScrape > 0 ? site.MaxProductsPerScrape : int.MaxValue;
+        var seenProducts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var term in searchTerms)
+        {
+            if (products.Count >= maxProducts || cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+
+            await _scrapeControl.WaitIfPausedAsync(site.Id, cancellationToken);
+            await LogStepAsync(site.Id, "info", "Buscando categoria.", new { term });
+
+            var input = await FindSearchInputAsync(page, selectors);
+            if (input == null)
+            {
+                var fallbackUrl = BuildSearchUrl(site.BaseUrl, term);
+                if (string.IsNullOrWhiteSpace(fallbackUrl))
+                {
+                    await LogStepAsync(site.Id, "warn", "No se encontro input de busqueda y no hay URL de busqueda.");
+                    break;
+                }
+
+                await LogStepAsync(site.Id, "info", "Navegando a URL de busqueda.", new { url = fallbackUrl });
+                await page.GotoAsync(fallbackUrl, new PageGotoOptions
+                {
+                    WaitUntil = WaitUntilState.DOMContentLoaded,
+                    Timeout = 90000
+                });
+                await AcceptCookiesAsync(page, cancellationToken);
+            }
+            else
+            {
+                await input.ClickAsync();
+                try
+                {
+                    await input.PressAsync("Control+A");
+                    await input.PressAsync("Delete");
+                }
+                catch
+                {
+                    // Ignore and fallback to FillAsync below.
+                }
+                await input.FillAsync(term);
+
+                var searchButton = await FindSearchButtonAsync(page, selectors);
+                if (searchButton != null)
+                {
+                    await VerifyAndClickAsync(searchButton, page, "magnifier_button", cancellationToken);
+                }
+                else
+                {
+                    await input.PressAsync("Enter");
+                }
+            }
+
+            await WaitForProductListAsync(page, selectors, cancellationToken);
+
+            var beforeCount = products.Count;
+            var resultsShot = await SaveStepScreenshotAsync(page, $"search_results_{term}");
+            await CollectProductsFromListAsync(
+                page,
+                site.Id,
+                selectors,
+                products,
+                seenProducts,
+                maxProducts,
+                new List<string> { term },
+                cancellationToken);
+            var added = products.Count - beforeCount;
+            await LogStepAsync(site.Id, "success", "Busqueda completada.", new { term, added, screenshotFile = resultsShot });
+
+            await _scrapeControl.WaitIfPausedAsync(site.Id, cancellationToken);
+            if (!page.Url.StartsWith(landingUrl, StringComparison.OrdinalIgnoreCase))
+            {
+                await page.GotoAsync(landingUrl, new PageGotoOptions
+                {
+                    WaitUntil = WaitUntilState.DOMContentLoaded,
+                    Timeout = 90000
+                });
+                await AcceptCookiesAsync(page, cancellationToken);
+            }
+        }
+
+        return products;
+    }
+
+    private static string? BuildSearchUrl(string baseUrl, string term)
+    {
+        if (string.IsNullOrWhiteSpace(baseUrl) || string.IsNullOrWhiteSpace(term))
+        {
+            return null;
+        }
+
+        if (baseUrl.Contains("festo.com", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"https://www.festo.com/mx/es/search/?text={Uri.EscapeDataString(term)}";
+        }
+
+        return null;
+    }
+
+    private async Task<List<string>> ReadCategoryNamesAsync(
+        IPage page,
+        Guid siteId,
+        SiteSelectors selectors,
+        CancellationToken cancellationToken)
+    {
+        var names = new List<string>();
+        var selector = selectors.CategoryLinkSelector ??
+                       "a[data-testid='category-tile'], a[href*='/c/'], a[href*='/category']";
+        try
+        {
+            await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+            var items = page.Locator(selector);
+            var count = await items.CountAsync();
+            for (var i = 0; i < count; i++)
+            {
+                await _scrapeControl.WaitIfPausedAsync(siteId, cancellationToken);
+                var item = items.Nth(i);
+                var name = await ExtractCategoryNameAsync(item, selectors);
+                if (!string.IsNullOrWhiteSpace(name))
+                {
+                    names.Add(name);
+                }
+            }
+        }
+        catch
+        {
+            // Ignore and fallback.
+        }
+
+        return names.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private static async Task<string?> ExtractCategoryNameAsync(ILocator item, SiteSelectors selectors)
+    {
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(selectors.CategoryNameSelector))
+            {
+                var nameEl = item.Locator(selectors.CategoryNameSelector);
+                if (await nameEl.CountAsync() > 0)
+                {
+                    var text = await nameEl.First.InnerTextAsync();
+                    return string.IsNullOrWhiteSpace(text) ? null : text.Trim();
+                }
+            }
+
+            var fallback = await item.InnerTextAsync();
+            return string.IsNullOrWhiteSpace(fallback) ? null : fallback.Trim();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private async Task<ILocator?> FindSearchInputAsync(IPage page, SiteSelectors selectors)
+    {
+        var selectorList = new List<string>();
+        if (!string.IsNullOrWhiteSpace(selectors.SearchInputSelector))
+        {
+            selectorList.Add(selectors.SearchInputSelector);
+        }
+
+        selectorList.AddRange(new[]
+        {
+            "input[type='search']",
+            "input[placeholder*='Buscar']",
+            "input[aria-label*='Buscar']",
+            "input[name='q']"
+        });
+
+        foreach (var selector in selectorList.Distinct())
+        {
+            var locator = page.Locator(selector);
+            if (await locator.CountAsync() > 0)
+            {
+                return locator.First;
+            }
+        }
+
+        return null;
+    }
+
+    private async Task<ILocator?> FindSearchButtonAsync(IPage page, SiteSelectors selectors)
+    {
+        var selectorList = new List<string>();
+        if (!string.IsNullOrWhiteSpace(selectors.SearchButtonSelector))
+        {
+            selectorList.Add(selectors.SearchButtonSelector);
+        }
+
+        selectorList.AddRange(new[]
+        {
+            ".magnifier-button",
+            "button.magnifier-button",
+            "[data-testid*='magnifier']",
+            "button[aria-label*='Buscar']"
+        });
+
+        foreach (var selector in selectorList.Distinct())
+        {
+            var locator = page.Locator(selector);
+            if (await locator.CountAsync() > 0)
+            {
+                return locator.First;
+            }
+        }
+
+        return null;
+    }
+
+    private async Task WaitForProductListAsync(IPage page, SiteSelectors selectors, CancellationToken cancellationToken)
+    {
+        var selectorList = new List<string>();
+        if (!string.IsNullOrWhiteSpace(selectors.ProductListSelector))
+        {
+            selectorList.Add(selectors.ProductListSelector);
+        }
+
+        if (!string.IsNullOrWhiteSpace(selectors.ProductListClassPrefix))
+        {
+            selectorList.Add(BuildClassPrefixSelector(selectors.ProductListClassPrefix));
+        }
+
+        selectorList.AddRange(new[]
+        {
+            ".single-product-container--oWOit",
+            ".single-product-container",
+            ".product-list-page-container-right",
+            ".product-list-page-container-right--"
+        });
+
+        foreach (var selector in selectorList.Distinct())
+        {
+            try
+            {
+                await page.WaitForSelectorAsync(selector, new() { Timeout = 15000 });
+                return;
+            }
+            catch
+            {
+                // Try next selector.
+            }
+        }
+    }
+
     private async Task<List<ScrapedProduct>> TryScrapeCategoriesAsync(
         IPage page,
         SiteProfile site,
@@ -1595,6 +2037,7 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
 
         await TraverseCategoryPageAsync(
             page,
+            site.Id,
             selectors,
             products,
             visited,
@@ -1608,6 +2051,7 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
 
     private async Task TraverseCategoryPageAsync(
         IPage page,
+        Guid siteId,
         SiteSelectors selectors,
         List<ScrapedProduct> products,
         HashSet<string> visited,
@@ -1628,15 +2072,15 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
         var productListFound = await page.QuerySelectorAsync(".single-product-container--oWOit, .single-product-container");
         if (productListFound != null)
         {
-            await CollectProductsFromListAsync(
-                page,
-                site.Id,
-                selectors,
-                products,
-                seenProducts,
-                maxProducts,
-                categoryPath,
-                cancellationToken);
+        await CollectProductsFromListAsync(
+            page,
+            siteId,
+            selectors,
+            products,
+            seenProducts,
+            maxProducts,
+            categoryPath,
+            cancellationToken);
             return;
         }
 
@@ -1680,6 +2124,7 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
             }
             await TraverseCategoryPageAsync(
                 page,
+                siteId,
                 selectors,
                 products,
                 visited,
@@ -1703,6 +2148,11 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
     {
         var cards = page.Locator(".single-product-container--oWOit, .single-product-container");
         var count = await cards.CountAsync();
+        await LogStepAsync(siteId, "info", "Productos detectados en listado.", new
+        {
+            count,
+            categoryPath = categoryPath.Count > 0 ? string.Join(" > ", categoryPath) : null
+        });
         for (var i = 0; i < count && products.Count < maxProducts; i++)
         {
             await _scrapeControl.WaitIfPausedAsync(siteId, cancellationToken);
@@ -1759,7 +2209,7 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
 
                 if (page.Url == previousUrl)
                 {
-                    var detailHref = await GetDetailHrefFromCardAsync(card);
+                    var detailHref = await GetDetailHrefFromCardAsync(card, selectors);
                     if (!string.IsNullOrWhiteSpace(detailHref))
                     {
                         detailHref = NormalizeHref(page.Url, detailHref);
@@ -1798,31 +2248,27 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
                 continue;
             }
 
-            var link = card.Locator("a[href]");
-            if (await link.CountAsync() > 0)
+            var fallbackHref = await GetDetailHrefFromCardAsync(card, selectors);
+            if (!string.IsNullOrWhiteSpace(fallbackHref))
             {
-                var href = await link.First.GetAttributeAsync("href");
-                if (!string.IsNullOrWhiteSpace(href))
+                fallbackHref = NormalizeHref(page.Url, fallbackHref);
+                var detailPage = await page.Context.NewPageAsync();
+                await detailPage.GotoAsync(fallbackHref, new PageGotoOptions
                 {
-                    href = NormalizeHref(page.Url, href);
-                    var detailPage = await page.Context.NewPageAsync();
-                    await detailPage.GotoAsync(href, new PageGotoOptions
+                    WaitUntil = WaitUntilState.DOMContentLoaded,
+                    Timeout = 90000
+                });
+                await AcceptCookiesAsync(detailPage, cancellationToken);
+                var product = await ExtractProductFromDetailPageAsync(detailPage, selectors, categoryPath);
+                if (product != null)
+                {
+                    var key = GetProductKey(product);
+                    if (seenProducts.Add(key))
                     {
-                        WaitUntil = WaitUntilState.DOMContentLoaded,
-                        Timeout = 90000
-                    });
-                    await AcceptCookiesAsync(detailPage, cancellationToken);
-                    var product = await ExtractProductFromDetailPageAsync(detailPage, selectors, categoryPath);
-                    if (product != null)
-                    {
-                        var key = GetProductKey(product);
-                        if (seenProducts.Add(key))
-                        {
-                            products.Add(product);
-                        }
+                        products.Add(product);
                     }
-                    await detailPage.CloseAsync();
                 }
+                await detailPage.CloseAsync();
             }
             else
             {
@@ -1846,6 +2292,8 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
                 RawHtml = await page.ContentAsync(),
                 ScrapedAt = DateTime.UtcNow
             };
+
+            product.ScreenshotBase64 = await CaptureScreenshotBase64Async(page, "product_detail");
 
             var titleLocator = page.Locator("h1");
             if (await titleLocator.CountAsync() > 0)
@@ -1938,7 +2386,7 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
 
             var hasBarcode = product.Attributes.TryGetValue("barcode", out var barcodeValue) &&
                 !string.IsNullOrWhiteSpace(barcodeValue);
-            if (!product.Price.HasValue && !hasBarcode)
+            if (string.IsNullOrWhiteSpace(product.Title) && !product.Price.HasValue && !hasBarcode)
             {
                 return null;
             }
@@ -2033,6 +2481,11 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
             selectors.ProductListSelector ??= GetSelector(root, "ProductListSelector", "productListSelector", "product_list_selector");
             selectors.ProductListClassPrefix ??= GetSelector(root, "ProductListClassPrefix", "productListClassPrefix", "product_list_class_prefix");
             selectors.ProductCardClassPrefix ??= GetSelector(root, "ProductCardClassPrefix", "productCardClassPrefix", "product_card_class_prefix");
+            selectors.CategoryLandingUrl ??= GetSelector(root, "CategoryLandingUrl", "categoryLandingUrl", "category_landing_url");
+            selectors.CategoryLinkSelector ??= GetSelector(root, "CategoryLinkSelector", "categoryLinkSelector", "category_link_selector");
+            selectors.CategoryNameSelector ??= GetSelector(root, "CategoryNameSelector", "categoryNameSelector", "category_name_selector");
+            selectors.SearchInputSelector ??= GetSelector(root, "SearchInputSelector", "searchInputSelector", "search_input_selector");
+            selectors.SearchButtonSelector ??= GetSelector(root, "SearchButtonSelector", "searchButtonSelector", "search_button_selector");
             selectors.TitleSelector ??= GetSelector(root, "TitleSelector", "titleSelector", "title_selector");
             selectors.PriceSelector ??= GetSelector(root, "PriceSelector", "priceSelector", "price_selector");
             selectors.SkuSelector ??= GetSelector(root, "SkuSelector", "skuSelector", "sku_selector");
@@ -2051,6 +2504,12 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
                 {
                     selectors.MaxPages = maxPages;
                 }
+            }
+
+            if (selectors.CategorySearchTerms.Count == 0 &&
+                TryGetStringList(root, out var terms, "CategorySearchTerms", "categorySearchTerms", "category_search_terms"))
+            {
+                selectors.CategorySearchTerms = terms;
             }
 
             if (!selectors.UsesInfiniteScroll)
@@ -2102,6 +2561,40 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
         }
 
         result = 0;
+        return false;
+    }
+
+    private static bool TryGetStringList(JsonElement root, out List<string> result, params string[] names)
+    {
+        result = new List<string>();
+        foreach (var name in names)
+        {
+            if (!root.TryGetProperty(name, out var value))
+            {
+                continue;
+            }
+
+            if (value.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in value.EnumerateArray())
+                {
+                    if (item.ValueKind == JsonValueKind.String)
+                    {
+                        var text = item.GetString();
+                        if (!string.IsNullOrWhiteSpace(text))
+                        {
+                            result.Add(text.Trim());
+                        }
+                    }
+                }
+            }
+
+            if (result.Count > 0)
+            {
+                return true;
+            }
+        }
+
         return false;
     }
 
@@ -2187,6 +2680,28 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
                 var statePath = GetStorageStatePath(site.Name);
                 await context.StorageStateAsync(new() { Path = statePath });
                 _logger.LogInformation("Session state saved to {Path}", statePath);
+
+                try
+                {
+                    var landingUrl = site.BaseUrl;
+                    if (!string.IsNullOrWhiteSpace(landingUrl))
+                    {
+                        await page.GotoAsync(landingUrl, new PageGotoOptions
+                        {
+                            WaitUntil = WaitUntilState.DOMContentLoaded,
+                            Timeout = 90000
+                        });
+                        await AcceptCookiesAsync(page, cancellationToken);
+                        await WaitForCategoryOrProductListAsync(page, cancellationToken);
+                        var readyShot = await SaveStepScreenshotAsync(page, $"{site.Name}_manual_login_ready");
+                        await LogStepAsync(site.Id, "success", "Login manual completado. Entorno listo.", new { url = page.Url, screenshotFile = readyShot });
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Manual login completed, but landing page preparation failed.");
+                    await LogStepAsync(site.Id, "warn", "Login manual completado, pero no se pudo preparar la landing.");
+                }
             }
             else
             {

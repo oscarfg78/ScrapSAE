@@ -16,6 +16,7 @@ builder.Services.AddSingleton<SettingsStore>();
 builder.Services.AddSingleton<DiagnosticsService>();
 builder.Services.AddSingleton<ISupabaseRestClient, SupabaseRestClient>();
 builder.Services.AddSingleton<IScrapeControlService, ScrapeControlService>();
+builder.Services.AddSingleton<ISyncLogService, ApiSyncLogService>();
 builder.Services.AddHttpClient("OpenAI");
 builder.Services.AddSingleton<IAIProcessorService, OpenAIProcessorService>();
 
@@ -61,10 +62,35 @@ app.MapGet("/api/diagnostics", async (DiagnosticsService diagnostics, Cancellati
     return Results.Ok(result);
 });
 
+var screenshotDir = Path.Combine(Path.GetTempPath(), "scrapsae-screens");
+app.MapGet("/api/sync-logs/screenshot/{fileName}", (string fileName) =>
+{
+    if (string.IsNullOrWhiteSpace(fileName) ||
+        fileName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 ||
+        fileName.Contains("..") ||
+        fileName.Contains(Path.DirectorySeparatorChar) ||
+        fileName.Contains(Path.AltDirectorySeparatorChar))
+    {
+        return Results.BadRequest();
+    }
+
+    var path = Path.Combine(screenshotDir, fileName);
+    if (!System.IO.File.Exists(path))
+    {
+        return Results.NotFound();
+    }
+
+    return Results.File(path, "image/png");
+});
+
 MapCrud(app, "/api/sites", "Site", 
     app.Services.GetRequiredService<SupabaseTableService<SiteProfile>>(),
     entity =>
     {
+        if (entity.Id == Guid.Empty)
+        {
+            entity.Id = Guid.NewGuid();
+        }
         entity.CreatedAt = DateTime.UtcNow;
         entity.UpdatedAt = DateTime.UtcNow;
     },

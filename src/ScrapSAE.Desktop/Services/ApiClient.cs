@@ -13,10 +13,12 @@ public sealed class ApiClient
 {
     private readonly HttpClient _httpClient;
     private readonly JsonSerializerOptions _jsonOptions;
+    public string BaseUrl { get; }
 
     public ApiClient(string baseUrl)
     {
-        _httpClient = new HttpClient { BaseAddress = new Uri(baseUrl.TrimEnd('/') + "/") };
+        BaseUrl = baseUrl.TrimEnd('/');
+        _httpClient = new HttpClient { BaseAddress = new Uri(BaseUrl + "/") };
         _jsonOptions = new JsonSerializerOptions
         {
             PropertyNameCaseInsensitive = true
@@ -121,6 +123,16 @@ public sealed class ApiClient
         var response = await _httpClient.PostAsJsonAsync("api/settings", settings);
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<AppSettingsDto>(_jsonOptions);
+    }
+
+    public string? GetSyncLogScreenshotUrl(string? fileName)
+    {
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            return null;
+        }
+
+        return $"{BaseUrl}/api/sync-logs/screenshot/{Uri.EscapeDataString(fileName)}";
     }
 
     public async Task<DiagnosticsResult?> GetDiagnosticsAsync()

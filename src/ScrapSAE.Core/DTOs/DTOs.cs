@@ -9,6 +9,7 @@ public class ScrapedProduct
     public string? Title { get; set; }
     public string? Description { get; set; }
     public string? RawHtml { get; set; }
+    public string? ScreenshotBase64 { get; set; }
     public string? ImageUrl { get; set; }
     public decimal? Price { get; set; }
     public string? Category { get; set; }
@@ -70,6 +71,12 @@ public class SiteSelectors
     public string? ProductListClassPrefix { get; set; }
     public string? ProductCardClassPrefix { get; set; }
     public string? ProductLinkSelector { get; set; }
+    public string? CategoryLandingUrl { get; set; }
+    public string? CategoryLinkSelector { get; set; }
+    public string? CategoryNameSelector { get; set; }
+    public List<string> CategorySearchTerms { get; set; } = new();
+    public string? SearchInputSelector { get; set; }
+    public string? SearchButtonSelector { get; set; }
     public string? TitleSelector { get; set; }
     public string? PriceSelector { get; set; }
     public string? DescriptionSelector { get; set; }

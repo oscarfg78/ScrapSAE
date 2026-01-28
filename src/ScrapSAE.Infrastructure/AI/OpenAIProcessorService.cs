@@ -177,10 +177,15 @@ public sealed class OpenAIProcessorService : IAIProcessorService
     private object BuildProcessedProductRequest(string rawData)
     {
         var systemPrompt = """
-            Eres un asistente que extrae datos de productos desde texto crudo.
+            Eres un asistente que extrae datos de productos desde texto crudo y/o imagenes.
             Devuelve solo JSON valido que cumpla el esquema indicado. No inventes datos.
             Si un campo no existe, usa null o un string vacio segun el tipo.
             """;
+
+        if (TryExtractScreenshot(rawData, out var screenshotBase64, out var sanitizedText))
+        {
+            return BuildProcessedProductVisionRequest(systemPrompt, sanitizedText, screenshotBase64!);
+        }
 
         var userPrompt = $"Datos crudos del producto:\n{rawData}";
 
@@ -258,6 +263,137 @@ public sealed class OpenAIProcessorService : IAIProcessorService
                 }
             }
         };
+    }
+
+    private object BuildProcessedProductVisionRequest(string systemPrompt, string textContext, string screenshotBase64)
+    {
+        var userPrompt = $"Datos del producto (texto):\n{textContext}\n\nAnaliza tambien la imagen adjunta.";
+
+        return new
+        {
+            model = _visionModel,
+            temperature = 0.2,
+            input = new object[]
+            {
+                new
+                {
+                    role = "system",
+                    content = new object[]
+                    {
+                        new { type = "input_text", text = systemPrompt }
+                    }
+                },
+                new
+                {
+                    role = "user",
+                    content = new object[]
+                    {
+                        new { type = "input_text", text = userPrompt },
+                        new { type = "input_image", image_url = $"data:image/png;base64,{screenshotBase64}" }
+                    }
+                }
+            },
+            text = new
+            {
+                format = new
+                {
+                    type = "json_schema",
+                    name = "processed_product",
+                    strict = true,
+                    schema = new
+                    {
+                        type = "object",
+                        additionalProperties = false,
+                        required = new[]
+                        {
+                            "sku",
+                            "name",
+                            "brand",
+                            "model",
+                            "description",
+                            "features",
+                            "specifications",
+                            "suggestedCategory",
+                            "lineCode",
+                            "price",
+                            "confidenceScore"
+                        },
+                        properties = new
+                        {
+                            sku = new { type = new[] { "string", "null" } },
+                            name = new { type = "string" },
+                            brand = new { type = new[] { "string", "null" } },
+                            model = new { type = new[] { "string", "null" } },
+                            description = new { type = "string" },
+                            features = new { type = "array", items = new { type = "string" } },
+                            specifications = new { type = "object", additionalProperties = new { type = "string" } },
+                            suggestedCategory = new { type = new[] { "string", "null" } },
+                            lineCode = new { type = new[] { "string", "null" } },
+                            price = new { type = new[] { "number", "null" } },
+                            confidenceScore = new { type = new[] { "number", "null" }, minimum = 0, maximum = 1 }
+                        }
+                    }
+                }
+            }
+        };
+    }
+
+    private static bool TryExtractScreenshot(string rawData, out string? screenshotBase64, out string sanitizedText)
+    {
+        screenshotBase64 = null;
+        sanitizedText = rawData;
+
+        if (string.IsNullOrWhiteSpace(rawData) || !rawData.TrimStart().StartsWith("{", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(rawData);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            if (doc.RootElement.TryGetProperty("screenshotBase64", out var screenshot) &&
+                screenshot.ValueKind == JsonValueKind.String)
+            {
+                screenshotBase64 = screenshot.GetString();
+            }
+
+            if (string.IsNullOrWhiteSpace(screenshotBase64))
+            {
+                return false;
+            }
+
+            var sanitized = new Dictionary<string, object?>();
+            foreach (var prop in doc.RootElement.EnumerateObject())
+            {
+                if (string.Equals(prop.Name, "screenshotBase64", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                sanitized[prop.Name] = prop.Value.ValueKind switch
+                {
+                    JsonValueKind.String => prop.Value.GetString(),
+                    JsonValueKind.Number => prop.Value.GetDecimal(),
+                    JsonValueKind.True => true,
+                    JsonValueKind.False => false,
+                    JsonValueKind.Object => prop.Value.ToString(),
+                    JsonValueKind.Array => prop.Value.ToString(),
+                    _ => null
+                };
+            }
+
+            sanitizedText = JsonSerializer.Serialize(sanitized, JsonOptions);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private object BuildCategorySuggestionRequest(string productDescription, IEnumerable<ProductLine> availableLines)

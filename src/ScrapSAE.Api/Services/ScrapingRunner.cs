@@ -12,6 +12,7 @@ public sealed class ScrapingRunner
     private readonly ISupabaseRestClient _supabase;
     private readonly IAIProcessorService _aiProcessorService;
     private readonly SupabaseTableService<SyncLog> _syncLogService;
+    private readonly SupabaseTableService<CategoryMapping> _categoryMappingService;
     private readonly IScrapeControlService _scrapeControl;
 
     public ScrapingRunner(
@@ -19,12 +20,14 @@ public sealed class ScrapingRunner
         ISupabaseRestClient supabase,
         IAIProcessorService aiProcessorService,
         SupabaseTableService<SyncLog> syncLogService,
+        SupabaseTableService<CategoryMapping> categoryMappingService,
         IScrapeControlService scrapeControl)
     {
         _scrapingService = scrapingService;
         _supabase = supabase;
         _aiProcessorService = aiProcessorService;
         _syncLogService = syncLogService;
+        _categoryMappingService = categoryMappingService;
         _scrapeControl = scrapeControl;
     }
 
@@ -38,6 +41,7 @@ public sealed class ScrapingRunner
         }
 
         await LogAsync(site, "scrape", "start", "Inicio de scraping.");
+        site = await EnrichSiteSelectorsAsync(site);
         var controlToken = _scrapeControl.Start(siteId);
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, controlToken);
         List<ScrapedProduct> scraped;
@@ -159,6 +163,7 @@ public sealed class ScrapingRunner
             scrapedProduct.Description,
             scrapedProduct.Price,
             scrapedProduct.ImageUrl,
+            scrapedProduct.ScreenshotBase64,
             scrapedProduct.Brand,
             scrapedProduct.Category,
             scrapedProduct.Attributes
@@ -187,6 +192,80 @@ public sealed class ScrapingRunner
                 scrapedProduct.Description,
                 scrapedProduct.Attributes
             });
+        }
+    }
+
+    private async Task<SiteProfile> EnrichSiteSelectorsAsync(SiteProfile site)
+    {
+        try
+        {
+            var selectors = DeserializeSelectors(site.Selectors);
+            if (selectors == null)
+            {
+                return site;
+            }
+
+            if (selectors.CategorySearchTerms.Count == 0)
+            {
+                var terms = await LoadCategorySearchTermsAsync();
+                if (terms.Count > 0)
+                {
+                    selectors.CategorySearchTerms = terms;
+                    site.Selectors = JsonSerializer.Serialize(selectors);
+                    await LogAsync(site, "scrape", "info", $"Categorias cargadas: {terms.Count}.");
+                }
+            }
+        }
+        catch
+        {
+            // Ignore selector enrichment failures.
+        }
+
+        return site;
+    }
+
+    private static SiteSelectors? DeserializeSelectors(object? selectorsObj)
+    {
+        if (selectorsObj == null)
+        {
+            return null;
+        }
+
+        try
+        {
+            if (selectorsObj is JsonElement jsonElement)
+            {
+                return JsonSerializer.Deserialize<SiteSelectors>(jsonElement.GetRawText());
+            }
+
+            if (selectorsObj is string json)
+            {
+                return JsonSerializer.Deserialize<SiteSelectors>(json);
+            }
+
+            return JsonSerializer.Deserialize<SiteSelectors>(JsonSerializer.Serialize(selectorsObj));
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private async Task<List<string>> LoadCategorySearchTermsAsync()
+    {
+        try
+        {
+            var mappings = await _categoryMappingService.GetAllAsync();
+            return mappings
+                .Select(m => m.SourceCategory)
+                .Where(text => !string.IsNullOrWhiteSpace(text))
+                .Select(text => text!.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+        catch
+        {
+            return new List<string>();
         }
     }
 }

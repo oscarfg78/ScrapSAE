@@ -1001,7 +1001,9 @@ public sealed class MainViewModel : ViewModelBase
     {
         RecentSyncLogs.Clear();
         var logs = SyncLogs.AsEnumerable()
-            .Where(log => string.Equals(log.OperationType, "scrape", StringComparison.OrdinalIgnoreCase));
+            .Where(log =>
+                string.Equals(log.OperationType, "scrape", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(log.OperationType, "scrape-step", StringComparison.OrdinalIgnoreCase));
         if (SelectedSite != null)
         {
             logs = logs.Where(log => log.SiteId == SelectedSite.Id);

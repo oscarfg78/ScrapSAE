@@ -69,74 +69,81 @@
             <StackPanel Orientation="Horizontal">
                 <Button Click="Nav_Click" Tag="0">
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="" Margin="0,0,6,0" />
+                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE1DB;" Margin="0,0,6,0" />
                         <TextBlock Text="Health" />
                     </StackPanel>
                 </Button>
                 <Button Click="Nav_Click" Tag="1">
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="" Margin="0,0,6,0" />
+                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE115;" Margin="0,0,6,0" />
                         <TextBlock Text="Configuración" />
                     </StackPanel>
                 </Button>
                 <Button Click="Nav_Click" Tag="2">
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="" Margin="0,0,6,0" />
+                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE13D;" Margin="0,0,6,0" />
                         <TextBlock Text="Proveedores" />
                     </StackPanel>
                 </Button>
                 <Button Click="Nav_Click" Tag="3">
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="" Margin="0,0,6,0" />
+                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE1CF;" Margin="0,0,6,0" />
                         <TextBlock Text="Staging" />
                     </StackPanel>
                 </Button>
                 <Button Click="Nav_Click" Tag="4">
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="" Margin="0,0,6,0" />
+                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE158;" Margin="0,0,6,0" />
                         <TextBlock Text="Mapeo" />
                     </StackPanel>
                 </Button>
                 <Button Click="Nav_Click" Tag="5">
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="" Margin="0,0,6,0" />
+                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE133;" Margin="0,0,6,0" />
                         <TextBlock Text="Logs" />
                     </StackPanel>
                 </Button>
                 <Button Click="Nav_Click" Tag="6">
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="" Margin="0,0,6,0" />
+                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE125;" Margin="0,0,6,0" />
                         <TextBlock Text="App Logs" />
                     </StackPanel>
                 </Button>
                 <Button Click="Nav_Click" Tag="7">
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="" Margin="0,0,6,0" />
+                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE12A;" Margin="0,0,6,0" />
                         <TextBlock Text="Reportes" />
                     </StackPanel>
                 </Button>
                 <Button Click="Nav_Click" Tag="8">
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="" Margin="0,0,6,0" />
+                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE135;" Margin="0,0,6,0" />
                         <TextBlock Text="Scraping" />
                     </StackPanel>
                 </Button>
                 <Button Click="Nav_Click" Tag="9">
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="" Margin="0,0,6,0" />
+                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE126;" Margin="0,0,6,0" />
                         <TextBlock Text="SAE" />
                     </StackPanel>
                 </Button>
                 <Button Command="{Binding ExitCommand}" Background="#EF4444" BorderBrush="#B91C1C" Margin="12,0,0,0">
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="" Margin="0,0,6,0" />
+                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE117;" Margin="0,0,6,0" />
                         <TextBlock Text="Salir" />
                     </StackPanel>
                 </Button>
             </StackPanel>
         </Border>
 
-        <TabControl Grid.Row="2" Margin="16" SelectedIndex="{Binding SelectedTabIndex}" TabStripPlacement="None">
+        <TabControl Grid.Row="2" Margin="16" SelectedIndex="{Binding SelectedTabIndex}">
+            <TabControl.Resources>
+                <Style TargetType="TabItem">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                    <Setter Property="Height" Value="0" />
+                    <Setter Property="Width" Value="0" />
+                </Style>
+            </TabControl.Resources>
             <TabItem Header="Health">
                 <Grid Margin="12">
                     <Grid.RowDefinitions>
