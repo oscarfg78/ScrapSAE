@@ -1,0 +1,11 @@
+﻿  Determining projects to restore...
+  Todos los proyectos est├ín actualizados para la restauraci├│n.
+  ScrapSAE.Core -> C:\Proyectos\ScrapSAE\src\ScrapSAE.Core\bin\Debug\net8.0\ScrapSAE.Core.dll
+  ScrapSAE.Infrastructure -> C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\bin\Debug\net8.0\ScrapSAE.Infrastructure.dll
+  ScrapSAE.Api -> C:\Proyectos\ScrapSAE\src\ScrapSAE.Api\bin\Debug\net8.0\ScrapSAE.Api.dll
+
+Compilaci├│n correcta.
+    0 Advertencia(s)
+    0 Errores
+
+Tiempo transcurrido 00:00:02.44

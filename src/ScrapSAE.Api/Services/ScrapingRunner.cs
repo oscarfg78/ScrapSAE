@@ -63,9 +63,9 @@ public sealed class ScrapingRunner
             throw new InvalidOperationException($"Site {siteId} not found.");
         }
 
-        await LogAsync(site, "scrape", "info", $"🚀 Iniciando scraping para {site.Name}...");
+        await LogAsync(site, "scrape", "success", $"🚀 Iniciando scraping para {site.Name}...");
         var scrapingMode = Environment.GetEnvironmentVariable("SCRAPSAE_MODE") ?? "traditional";
-        await LogAsync(site, "scrape", "info", $"⚙️ Modo detectado: {(scrapingMode == "families" ? "Familias (Festo)" : "Tradicional")}");
+        await LogAsync(site, "scrape", "success", $"⚙️ Modo detectado: {(scrapingMode == "families" ? "Familias (Festo)" : "Tradicional")}");
         site = await EnrichSiteSelectorsAsync(site);
         var controlToken = _scrapeControl.Start(siteId);
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, controlToken);
@@ -93,7 +93,7 @@ public sealed class ScrapingRunner
                         Environment.SetEnvironmentVariable("SCRAPSAE_LEARNED_URLS", urlsJson);
                         _logger.LogInformation("Cargadas {Count} URLs aprendidas para sitio {SiteId}", 
                             learnedUrls.Count, siteId);
-                        await LogAsync(site, "scrape", "info", 
+                        await LogAsync(site, "scrape", "success", 
                             $"Usando {learnedUrls.Count} URLs aprendidas como punto de partida.");
                     }
                     else
@@ -355,7 +355,7 @@ public sealed class ScrapingRunner
                         selectors.ScrapingMode = "families";
                     }
                     site.Selectors = JsonSerializer.Serialize(selectors, _jsonOptions);
-                    await LogAsync(site, "scrape", "info", $"Categorias cargadas: {terms.Count}.");
+                    await LogAsync(site, "scrape", "success", $"Categorias cargadas: {terms.Count}.");
                 }
             }
         }

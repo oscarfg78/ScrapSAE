@@ -53,7 +53,11 @@ public sealed class SupabaseRestClient : ISupabaseRestClient
     public async Task<T?> PostAsync<T>(string path, T body) where T : class
     {
         var response = await _httpClient.PostAsJsonAsync($"{_baseUrl}/rest/v1/{path}", body, _jsonOptions);
-        response.EnsureSuccessStatusCode();
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorContent = await response.Content.ReadAsStringAsync();
+            throw new HttpRequestException($"Error posting to {path}: {response.StatusCode} - {errorContent}");
+        }
         var result = await response.Content.ReadFromJsonAsync<T[]>(_jsonOptions);
         return result?.FirstOrDefault();
     }
@@ -61,7 +65,11 @@ public sealed class SupabaseRestClient : ISupabaseRestClient
     public async Task<T?> PatchAsync<T>(string pathAndQuery, object update) where T : class
     {
         var response = await _httpClient.PatchAsJsonAsync($"{_baseUrl}/rest/v1/{pathAndQuery}", update, _jsonOptions);
-        response.EnsureSuccessStatusCode();
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorContent = await response.Content.ReadAsStringAsync();
+            throw new HttpRequestException($"Error patching {pathAndQuery}: {response.StatusCode} - {errorContent}");
+        }
         var result = await response.Content.ReadFromJsonAsync<T[]>(_jsonOptions);
         return result?.FirstOrDefault();
     }

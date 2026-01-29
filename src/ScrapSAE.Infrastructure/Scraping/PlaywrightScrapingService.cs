@@ -434,6 +434,63 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
                 }
             }
 
+            // --- GANCHO ESPECÍFICO PARA FESTO ---
+            if (site.Name.Contains("Festo", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogInformation("Entrando en modo de navegación mejorado de Festo...");
+                await LogStepAsync(site.Id, "info", "Usando navegación mejorada y recursiva de Festo.");
+                
+                var seenProducts = new HashSet<string>();
+                var maxProducts = site.MaxProductsPerScrape > 0 ? site.MaxProductsPerScrape : 100;
+                var festoProducts = new List<ScrapedProduct>();
+
+                // Cargar URLs de ejemplo si están disponibles
+                var exampleUrls = await LoadFestoExampleUrlsAsync();
+                if (exampleUrls.Count > 0)
+                {
+                    _logger.LogInformation("Cargadas {Count} URLs desde festo_example_urls.json para iniciar el scraping.", exampleUrls.Count);
+                    foreach (var url in exampleUrls)
+                    {
+                        if (festoProducts.Count >= maxProducts) break;
+                        
+                        await _scrapeControl.WaitIfPausedAsync(site.Id, cancellationToken);
+                        _logger.LogInformation("Procesando URL de ejemplo: {Url}", url);
+                        
+                        // Asegurar que navegamos a la URL antes de extraer
+                        await page.GotoAsync(url, new() { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 90000 });
+                        await AcceptCookiesAsync(page, cancellationToken);
+
+                        // Si es una URL de producto (/a/ o /p/), extraer directamente
+                        if (url.Contains("/a/") || url.Contains("/p/"))
+                        {
+                            var extracted = await ExtractFestoProductsFromDetailPageAsync(page, selectors, new List<string>(), cancellationToken);
+                            foreach (var p in extracted)
+                            {
+                                if (seenProducts.Add(GetProductKey(p))) festoProducts.Add(p);
+                            }
+                        }
+                        else
+                        {
+                            // Si es categoría, recolectar recursivamente
+                            await NavigateAndCollectFromSubcategoriesAsync(page, site.Id, selectors, festoProducts, seenProducts, maxProducts, new List<string>(), cancellationToken);
+                        }
+                    }
+                }
+                else
+                {
+                    // Si no hay URLs de ejemplo, usar la landing actual
+                    await NavigateAndCollectFromSubcategoriesAsync(page, site.Id, selectors, festoProducts, seenProducts, maxProducts, new List<string>(), cancellationToken);
+                }
+
+                if (festoProducts.Count > 0)
+                {
+                    _logger.LogInformation("Scraping mejorado de Festo completado con {Count} productos.", festoProducts.Count);
+                    return festoProducts;
+                }
+                _logger.LogWarning("La navegación mejorada de Festo no encontró productos. Continuando con modos tradicionales...");
+            }
+            // --- FIN GANCHO FESTO ---
+
             // Detectar el modo de scraping y usar el método apropiado
             await LogStepAsync(site.Id, "info", $"Modo de scraping detectado: {scrapingMode}", null);
             
@@ -2566,7 +2623,7 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
         List<string> categoryPath,
         CancellationToken cancellationToken)
     {
-        var cards = page.Locator(".single-product-container--oWOit, .single-product-container");
+        var cards = page.Locator("[class*='single-product-container--'], .single-product-container");
         var count = await cards.CountAsync();
         await LogStepAsync(siteId, "info", "Productos detectados en listado.", new
         {
@@ -2633,6 +2690,7 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
                     if (!string.IsNullOrWhiteSpace(detailHref))
                     {
                         detailHref = NormalizeHref(page.Url, detailHref);
+                        _logger.LogInformation("Click no cambió la URL. Navegando directamente a URL de detalle: {Url}", detailHref);
                         await page.GotoAsync(detailHref, new PageGotoOptions
                         {
                             WaitUntil = WaitUntilState.DOMContentLoaded,
@@ -2642,6 +2700,7 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
                     }
                     else
                     {
+                        _logger.LogWarning("No se pudo navegar al detalle: Click falló y no se encontró URL en la tarjeta.");
                         await SaveDebugScreenshotAsync(page, "festo_detail_click_no_nav");
                         await SaveDebugHtmlAsync(await page.ContentAsync(), "festo_detail_click_no_nav");
                         await SaveDebugCardHtmlAsync(card, "festo_detail_card_no_link");
@@ -2651,6 +2710,10 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
                             _logger.LogInformation("Card button texts: {Texts}", string.Join(" | ", buttonTexts));
                         }
                     }
+                }
+                else
+                {
+                    _logger.LogInformation("Navegación exitosa vía click a: {Url}", page.Url);
                 }
 
                 // Para Festo, usar el método mejorado que maneja variantes
@@ -2664,7 +2727,17 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
                     }
                 }
 
-                await page.GoBackAsync(new() { WaitUntil = WaitUntilState.DOMContentLoaded });
+                _logger.LogInformation("Intentando regresar al listado...");
+                if (await NavigateBackViaFestoBreadcrumbAsync(page, cancellationToken))
+                {
+                    _logger.LogInformation("Regreso al listado exitoso vía breadcrumb.");
+                }
+                else
+                {
+                    _logger.LogInformation("Breadcrumb no disponible o falló. Intentando regresar vía historial (GoBack)...");
+                    await page.GoBackAsync(new() { WaitUntil = WaitUntilState.DOMContentLoaded });
+                    _logger.LogInformation("Navegación GoBack completada.");
+                }
                 await AcceptCookiesAsync(page, cancellationToken);
                 continue;
             }
@@ -2722,10 +2795,17 @@ private async Task NavigateAndCollectFromSubcategoriesAsync(
     await Task.Delay(2000, cancellationToken); // Esperar a que cargue la página
     
     // Primero intentar detectar si hay productos en esta página
-    var productContainers = page.Locator("div[class*='single-product-container--']");
+    var productContainers = page.Locator("[class*='single-product-container--']");
     var productCount = await productContainers.CountAsync();
     
-    _logger.LogInformation("Profundidad {Depth}: Detectados {Count} productos en la página actual", depth, productCount);
+    // También verificar si existe el contador de resultados mencionado por el usuario
+    var resultsCount = await page.QuerySelectorAsync("h2[class*='results-count--']");
+    if (resultsCount != null)
+    {
+        var countText = await resultsCount.InnerTextAsync();
+        _logger.LogInformation("Confirmada página de listado de productos: {Text}", countText);
+        productCount = 1; // Forzar entrada al bloque de extracción
+    }
     
     if (productCount > 0)
     {
@@ -2747,6 +2827,7 @@ private async Task NavigateAndCollectFromSubcategoriesAsync(
     // No hay productos, buscar subcategorías o enlaces de navegación
     var subcategorySelectors = new[]
     {
+        "div[class*='categories-list-grid--'] a",
         "a[class*='category-tile--']",
         "a[data-testid='category-tile']",
         "a[class*='product-family--']",
@@ -2819,7 +2900,7 @@ private async Task NavigateAndCollectFromSubcategoriesAsync(
             await _scrapeControl.WaitIfPausedAsync(siteId, cancellationToken);
             
             var newCategoryPath = new List<string>(categoryPath) { name };
-            _logger.LogInformation("Navegando a subcategoría: {Path}", string.Join(" > ", newCategoryPath));
+            _logger.LogInformation("Navegando a subcategoría '{Name}' vía URL: {Url}. Path completo: {Path}", name, url, string.Join(" > ", newCategoryPath));
             
             await page.GotoAsync(url, new PageGotoOptions
             {
@@ -3081,17 +3162,45 @@ private async Task NavigateAndCollectFromSubcategoriesAsync(
                     Attributes = new Dictionary<string, string>()
                 };
                 
-                var titleLocator = page.Locator("h1");
-                if (await titleLocator.CountAsync() > 0)
+                // Extraer Título (Headline + Order Code)
+                var headlineEl = await page.QuerySelectorAsync("[class*='product-page-headline--']");
+                var orderCodeEl = await page.QuerySelectorAsync("[class*='order-code--']");
+                
+                if (headlineEl != null)
                 {
-                    product.Title = (await titleLocator.First.InnerTextAsync())?.Trim();
+                    var headline = (await headlineEl.InnerTextAsync())?.Trim() ?? "";
+                    var orderCode = orderCodeEl != null ? (await orderCodeEl.InnerTextAsync())?.Trim() ?? "" : "";
+                    
+                    if (!string.IsNullOrEmpty(orderCode))
+                    {
+                        product.Title = $"{headline} {orderCode}".Trim();
+                        product.SkuSource = orderCode;
+                        product.Attributes["order_code"] = orderCode;
+                    }
+                    else
+                    {
+                        product.Title = headline;
+                    }
+                }
+
+                if (string.IsNullOrEmpty(product.Title))
+                {
+                    var titleLocator = page.Locator("h1");
+                    if (await titleLocator.CountAsync() > 0)
+                    {
+                        product.Title = (await titleLocator.First.InnerTextAsync())?.Trim();
+                    }
                 }
                 
                 var skuSelector = selectors.DetailSkuSelector ?? "span[class*='part-number-value--'], .part-number";
                 var skuEl = await page.QuerySelectorAsync(skuSelector);
                 if (skuEl != null)
                 {
-                    product.SkuSource = (await skuEl.InnerTextAsync())?.Trim();
+                    var skuVal = (await skuEl.InnerTextAsync())?.Trim();
+                    if (string.IsNullOrEmpty(product.SkuSource)) {
+                        product.SkuSource = skuVal;
+                    }
+                    product.Attributes["part_number"] = skuVal ?? "";
                 }
                 
                 if (string.IsNullOrWhiteSpace(product.SkuSource) && !string.IsNullOrWhiteSpace(product.Title))
@@ -3119,6 +3228,9 @@ private async Task NavigateAndCollectFromSubcategoriesAsync(
                 }
                 
                 product.Attributes["product_url"] = page.Url;
+
+                // Extraer datos técnicos
+                await ExtractFestoTechnicalDataAsync(page, product, cancellationToken);
                 
                 if (!string.IsNullOrWhiteSpace(product.SkuSource))
                 {
@@ -3132,6 +3244,128 @@ private async Task NavigateAndCollectFromSubcategoriesAsync(
         }
         
         return products;
+    }
+
+    private async Task ExtractFestoTechnicalDataAsync(IPage page, ScrapedProduct product, CancellationToken cancellationToken)
+    {
+        try
+        {
+            // 1. Click en la pestaña de Datos técnicos o similar
+            var tabs = await page.QuerySelectorAllAsync("[class*='product-details-tabs__list-item']");
+            foreach (var tab in tabs)
+            {
+                var text = await tab.InnerTextAsync();
+                if (text != null && (text.Contains("Datos técnicos") || text.Contains("Technical data")))
+                {
+                    _logger.LogInformation("Haciendo click en pestaña de datos técnicos");
+                    await tab.ClickAsync();
+                    await Task.Delay(1000, cancellationToken);
+                    break;
+                }
+            }
+
+            // 2. Extraer datos de la tabla
+            var rows = await page.QuerySelectorAllAsync("[class*='technical-data-table-row--']");
+            if (rows.Count == 0)
+            {
+                // Re-intentar buscar si la tabla no aparece inmediatamente
+                await Task.Delay(1000, cancellationToken);
+                rows = await page.QuerySelectorAllAsync("[class*='technical-data-table-row--']");
+            }
+
+            foreach (var row in rows)
+            {
+                var propEl = await row.QuerySelectorAsync("[class*='technical-data-property--']");
+                var valEl = await row.QuerySelectorAsync("[class*='technical-data-value--']");
+                
+                if (propEl != null && valEl != null)
+                {
+                    var propName = (await propEl.InnerTextAsync())?.Trim();
+                    var propValue = (await valEl.InnerTextAsync())?.Trim();
+                    
+                    if (!string.IsNullOrEmpty(propName) && propValue != null)
+                    {
+                        var key = $"tech_{propName.ToLower().Replace(" ", "_").Replace(":", "")}";
+                        product.Attributes[key] = propValue;
+                    }
+                }
+            }
+            
+            _logger.LogInformation("Extraídos {Count} atributos técnicos", product.Attributes.Count(a => a.Key.StartsWith("tech_")));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error extrayendo datos técnicos de Festo");
+        }
+    }
+
+    private async Task<bool> NavigateBackViaFestoBreadcrumbAsync(IPage page, CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Buscar todos los items del breadcrumb usando coincidencia parcial de clase
+            var breadcrumbItems = await page.QuerySelectorAllAsync("li[class*='breadcrumb-item']");
+            if (breadcrumbItems.Count >= 2)
+            {
+                // El penúltimo elemento suele ser la categoría padre (VAMC en el ejemplo del usuario)
+                var parentCategoryItem = breadcrumbItems[breadcrumbItems.Count - 2];
+                var link = await parentCategoryItem.QuerySelectorAsync("a[class*='breadcrumb-item__link']");
+                
+                if (link != null)
+                {
+                    var linkText = await link.InnerTextAsync();
+                    var href = await link.GetAttributeAsync("href");
+                    _logger.LogInformation("Estrategia Breadcrumb: Detectada categoría padre '{Category}'. Navegando a URL: {Url}", linkText?.Trim(), href);
+                    
+                    await link.ClickAsync();
+                    await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+                    await Task.Delay(1000, cancellationToken);
+                    return true;
+                }
+                else
+                {
+                    _logger.LogDebug("Estrategia Breadcrumb: El penúltimo ítem no contiene un enlace clickeable.");
+                }
+            }
+            else
+            {
+                _logger.LogDebug("Estrategia Breadcrumb: No hay suficientes elementos en el breadcrumb (encontrados: {Count}).", breadcrumbItems.Count);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug("Estrategia de breadcrumb falló o no disponible: {Message}", ex.Message);
+        }
+        return false;
+    }
+
+    private async Task<List<string>> LoadFestoExampleUrlsAsync()
+    {
+        try
+        {
+            var filePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "festo_example_urls.json");
+            if (!File.Exists(filePath))
+            {
+                // Reintentar en el directorio de ejecución si estamos en desarrollo
+                filePath = Path.Combine(Directory.GetCurrentDirectory(), "festo_example_urls.json");
+            }
+
+            if (File.Exists(filePath))
+            {
+                var json = await File.ReadAllTextAsync(filePath);
+                using var doc = JsonDocument.Parse(json);
+                if (doc.RootElement.TryGetProperty("inspectRequest", out var inspect) && 
+                    inspect.TryGetProperty("urls", out var urls))
+                {
+                    return urls.EnumerateArray().Select(u => u.GetString() ?? "").Where(u => !string.IsNullOrEmpty(u)).ToList();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("No se pudo cargar festo_example_urls.json: {Message}", ex.Message);
+        }
+        return new List<string>();
     }
 
     private static async Task<string?> GetCategoryNameAsync(IElementHandle link)

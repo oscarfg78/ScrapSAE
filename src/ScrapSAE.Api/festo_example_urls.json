@@ -10,7 +10,12 @@
             "https://www.festo.com/mx/es/a/8031817/",
             "https://www.festo.com/mx/es/p/valvula-normalizada-id_VSCS/",
             "https://www.festo.com/mx/es/p/valvula-normalizada-con-conector-central-id_VSVA_R/",
-            "https://www.festo.com/mx/es/a/534781/"
+            "https://www.festo.com/mx/es/a/534781/",
+            "https://www.festo.com/mx/es/a/8066573/",
+            "https://www.festo.com/mx/es/a/541010/",
+            "https://www.festo.com/mx/es/a/550202/",
+            "https://www.festo.com/mx/es/a/546211/",
+            "https://www.festo.com/mx/es/a/2316/"
         ],
         "inspectOnly": false,
         "manualLogin": false,
@@ -49,6 +54,26 @@
             },
             {
                 "url": "https://www.festo.com/mx/es/a/534781/",
+                "type": "ProductDetail"
+            },
+            {
+                "url": "https://www.festo.com/mx/es/a/8066573/",
+                "type": "ProductDetail"
+            },
+            {
+                "url": "https://www.festo.com/mx/es/a/541010/",
+                "type": "ProductDetail"
+            },
+            {
+                "url": "https://www.festo.com/mx/es/a/550202/",
+                "type": "ProductDetail"
+            },
+            {
+                "url": "https://www.festo.com/mx/es/a/546211/",
+                "type": "ProductDetail"
+            },
+            {
+                "url": "https://www.festo.com/mx/es/a/2316/",
                 "type": "ProductDetail"
             },
             {

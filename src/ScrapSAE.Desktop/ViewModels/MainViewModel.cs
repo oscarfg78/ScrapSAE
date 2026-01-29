@@ -21,7 +21,7 @@ public sealed class MainViewModel : ViewModelBase
     private readonly DispatcherTimer _logTimer;
     private readonly DispatcherTimer _statusTimer;
     private SiteProfile? _selectedSite;
-    private StagingProduct? _selectedStagingProduct;
+    private StagingProductUi? _selectedStagingProduct;
     private CategoryMapping? _selectedCategoryMapping;
     private SyncLog? _selectedSyncLog;
     private ExecutionReport? _selectedExecutionReport;
@@ -125,7 +125,7 @@ public sealed class MainViewModel : ViewModelBase
 
 
     public ObservableCollection<SiteProfile> Sites { get; } = new();
-    public ObservableCollection<StagingProduct> StagingProducts { get; } = new();
+    public ObservableCollection<StagingProductUi> StagingProducts { get; } = new();
     public ObservableCollection<CategoryMapping> CategoryMappings { get; } = new();
     public ObservableCollection<SyncLog> SyncLogs { get; } = new();
     public ObservableCollection<SyncLog> RecentSyncLogs { get; } = new();
@@ -160,7 +160,7 @@ public sealed class MainViewModel : ViewModelBase
         }
     }
 
-    public StagingProduct? SelectedStagingProduct
+    public StagingProductUi? SelectedStagingProduct
     {
         get => _selectedStagingProduct;
         set
@@ -514,7 +514,7 @@ public sealed class MainViewModel : ViewModelBase
             StagingProducts.Clear();
             foreach (var item in await _apiClient.GetStagingProductsAsync())
             {
-                StagingProducts.Add(item);
+                StagingProducts.Add(new StagingProductUi(item));
             }
 
             CategoryMappings.Clear();
@@ -590,7 +590,7 @@ public sealed class MainViewModel : ViewModelBase
 
     private async Task CreateStagingAsync()
     {
-        var product = SelectedStagingProduct ?? new StagingProduct
+        var product = SelectedStagingProduct?.Product ?? new StagingProduct
         {
             SiteId = SelectedSite?.Id ?? Guid.Empty,
             Status = "pending",
@@ -600,8 +600,9 @@ public sealed class MainViewModel : ViewModelBase
         var created = await _apiClient.CreateStagingProductAsync(product);
         if (created != null)
         {
-            StagingProducts.Add(created);
-            SelectedStagingProduct = created;
+            var uiModel = new StagingProductUi(created);
+            StagingProducts.Add(uiModel);
+            SelectedStagingProduct = uiModel;
         }
     }
 
@@ -612,7 +613,7 @@ public sealed class MainViewModel : ViewModelBase
             return;
         }
 
-        var updated = await _apiClient.UpdateStagingProductAsync(SelectedStagingProduct.Id, SelectedStagingProduct);
+        var updated = await _apiClient.UpdateStagingProductAsync(SelectedStagingProduct.Product.Id, SelectedStagingProduct.Product);
         if (updated != null)
         {
             StatusMessage = "Producto staging actualizado.";
@@ -626,7 +627,7 @@ public sealed class MainViewModel : ViewModelBase
             return;
         }
 
-        await _apiClient.DeleteStagingProductAsync(SelectedStagingProduct.Id);
+        await _apiClient.DeleteStagingProductAsync(SelectedStagingProduct.Product.Id);
         StagingProducts.Remove(SelectedStagingProduct);
         SelectedStagingProduct = null;
     }
@@ -862,7 +863,7 @@ public sealed class MainViewModel : ViewModelBase
             return;
         }
 
-        var ok = await _apiClient.SendToSaeAsync(SelectedStagingProduct.Id);
+        var ok = await _apiClient.SendToSaeAsync(SelectedStagingProduct.Product.Id);
         StatusMessage = ok ? "Envío a SAE realizado." : "SAE SDK no configurado.";
         await LoadAllAsync();
     }
@@ -1066,7 +1067,7 @@ public sealed class MainViewModel : ViewModelBase
         var request = new SelectorAnalysisRequest
         {
             Url = SelectedSite?.BaseUrl,
-            HtmlSnippet = SelectedStagingProduct?.RawData,
+            HtmlSnippet = SelectedStagingProduct?.Product.RawData,
             ImagesBase64 = images,
             Notes = "Identificar prefijos de clase y selectores robustos."
         };
@@ -1167,7 +1168,7 @@ public sealed class MainViewModel : ViewModelBase
             StagingProducts.Clear();
             foreach (var item in products)
             {
-                StagingProducts.Add(item);
+                StagingProducts.Add(new StagingProductUi(item));
             }
         });
     }
