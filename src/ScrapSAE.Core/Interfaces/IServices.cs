@@ -3,6 +3,9 @@ using ScrapSAE.Core.Entities;
 
 namespace ScrapSAE.Core.Interfaces;
 
+// Nota: IPage es de Microsoft.Playwright, pero Core no debe depender de Infrastructure
+// Se usa object como tipo genérico y se hará cast en Infrastructure
+
 /// <summary>
 /// Interface para el servicio de integración con Aspel SAE
 /// </summary>
@@ -245,7 +248,7 @@ public interface IScrapingStrategy
     /// Ejecuta la estrategia de scraping
     /// </summary>
     Task<List<ScrapedProduct>> ExecuteAsync(
-        IPage page,
+        object page,
         SiteProfile site,
         Guid executionId,
         CancellationToken cancellationToken = default);
@@ -260,7 +263,7 @@ public interface IStrategyOrchestrator
     /// Ejecuta las estrategias en orden de prioridad hasta que una tenga éxito
     /// </summary>
     Task<List<ScrapedProduct>> ExecuteStrategiesAsync(
-        IPage page,
+        object page,
         SiteProfile site,
         Guid executionId,
         CancellationToken cancellationToken = default);

@@ -25,11 +25,12 @@ public class FamiliesExtractionStrategy : IScrapingStrategy
     }
 
     public async Task<List<ScrapedProduct>> ExecuteAsync(
-        IPage page,
+        object pageObj,
         SiteProfile site,
         Guid executionId,
         CancellationToken cancellationToken = default)
     {
+        var page = (IPage)pageObj;
         var products = new List<ScrapedProduct>();
         
         try

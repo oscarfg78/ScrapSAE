@@ -23,11 +23,12 @@ public class StrategyOrchestrator : IStrategyOrchestrator
     }
 
     public async Task<List<ScrapedProduct>> ExecuteStrategiesAsync(
-        IPage page,
+        object pageObj,
         SiteProfile site,
         Guid executionId,
         CancellationToken cancellationToken = default)
     {
+        var page = (IPage)pageObj;
         _logger.LogInformation(
             "[Orchestrator] Iniciando ejecución de estrategias para sitio {SiteName}",
             site.Name

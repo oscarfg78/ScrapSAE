@@ -1,6 +1,7 @@
 using Microsoft.Playwright;
 using Microsoft.Extensions.Logging;
 using ScrapSAE.Core.DTOs;
+using ScrapSAE.Core.Entities;
 
 namespace ScrapSAE.Infrastructure.Scraping;
 
