@@ -17,6 +17,7 @@ public sealed class ScrapingRunner
     private readonly IPostExecutionAnalyzer? _postExecutionAnalyzer;
     private readonly IConfigurationUpdater? _configurationUpdater;
     private readonly IPerformanceMetricsCollector? _metricsCollector;
+    private readonly ILearningService? _learningService;
     private readonly ILogger<ScrapingRunner> _logger;
     private static readonly JsonSerializerOptions _jsonOptions = new()
     {
@@ -35,7 +36,8 @@ public sealed class ScrapingRunner
         ILogger<ScrapingRunner> logger,
         IPostExecutionAnalyzer? postExecutionAnalyzer = null,
         IConfigurationUpdater? configurationUpdater = null,
-        IPerformanceMetricsCollector? metricsCollector = null)
+        IPerformanceMetricsCollector? metricsCollector = null,
+        ILearningService? learningService = null)
     {
         _scrapingService = scrapingService;
         _supabase = supabase;
@@ -47,7 +49,9 @@ public sealed class ScrapingRunner
         _postExecutionAnalyzer = postExecutionAnalyzer;
         _configurationUpdater = configurationUpdater;
         _metricsCollector = metricsCollector;
+        _learningService = learningService;
     }
+
 
 
     public async Task<ScrapeRunResult> RunForSiteAsync(Guid siteId, CancellationToken cancellationToken)
@@ -59,15 +63,65 @@ public sealed class ScrapingRunner
             throw new InvalidOperationException($"Site {siteId} not found.");
         }
 
-        await LogAsync(site, "scrape", "start", "Inicio de scraping.");
+        await LogAsync(site, "scrape", "info", $"🚀 Iniciando scraping para {site.Name}...");
+        var scrapingMode = Environment.GetEnvironmentVariable("SCRAPSAE_MODE") ?? "traditional";
+        await LogAsync(site, "scrape", "info", $"⚙️ Modo detectado: {(scrapingMode == "families" ? "Familias (Festo)" : "Tradicional")}");
         site = await EnrichSiteSelectorsAsync(site);
         var controlToken = _scrapeControl.Start(siteId);
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, controlToken);
+        
+        // Cargar URLs aprendidas si el servicio está disponible
+        string? previousLearnedUrls = null;
+        if (_learningService != null)
+        {
+            try
+            {
+                _logger.LogInformation("Consultando LearningService para patrones de sitio {SiteId}", siteId);
+                var patterns = await _learningService.GetLearnedPatternsAsync(siteId);
+                if (patterns != null && (patterns.ExampleProductUrls.Count > 0 || patterns.ExampleListingUrls.Count > 0))
+                {
+                    // Combinar URLs de productos y listados para inspección directa
+                    var learnedUrls = patterns.ExampleProductUrls
+                        .Concat(patterns.ExampleListingUrls)
+                        .Distinct()
+                        .ToList();
+                    
+                    if (learnedUrls.Count > 0)
+                    {
+                        previousLearnedUrls = Environment.GetEnvironmentVariable("SCRAPSAE_LEARNED_URLS");
+                        var urlsJson = JsonSerializer.Serialize(learnedUrls);
+                        Environment.SetEnvironmentVariable("SCRAPSAE_LEARNED_URLS", urlsJson);
+                        _logger.LogInformation("Cargadas {Count} URLs aprendidas para sitio {SiteId}", 
+                            learnedUrls.Count, siteId);
+                        await LogAsync(site, "scrape", "info", 
+                            $"Usando {learnedUrls.Count} URLs aprendidas como punto de partida.");
+                    }
+                    else
+                    {
+                        _logger.LogInformation("No se encontraron URLs individuales en los patrones aprendidos para {SiteId}", siteId);
+                    }
+                }
+                else
+                {
+                    _logger.LogInformation("No se encontraron patrones aprendidos para el sitio {SiteId}", siteId);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error cargando URLs aprendidas para sitio {SiteId}, procediendo con scraping normal", siteId);
+            }
+        }
+        else
+        {
+            _logger.LogWarning("LearningService no está disponible en ScrapingRunner");
+        }
+        
         List<ScrapedProduct> scraped;
         try
         {
             scraped = (await _scrapingService.ScrapeAsync(site, linkedCts.Token)).ToList();
         }
+
         catch (Exception ex)
         {
             _scrapeControl.MarkError(siteId, ex.Message);
@@ -181,6 +235,7 @@ public sealed class ScrapingRunner
             SiteId = siteId,
             SkuSource = item.SkuSource,
             RawData = item.RawHtml,
+            SourceUrl = item.SourceUrl,
             Status = "pending",
             Attempts = 0,
             LastSeenAt = DateTime.UtcNow,
@@ -188,6 +243,7 @@ public sealed class ScrapingRunner
             UpdatedAt = DateTime.UtcNow
         };
     }
+
 
     private async Task LogAsync(SiteProfile site, string operationType, string status, string message, int? durationMs = null)
     {

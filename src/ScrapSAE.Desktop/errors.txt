@@ -1,0 +1,12 @@
+  Determining projects to restore...
+  Todos los proyectos están actualizados para la restauración.
+  ScrapSAE.Core -> C:\Proyectos\ScrapSAE\src\ScrapSAE.Core\bin\Debug\net8.0\ScrapSAE.Core.dll
+C:\Proyectos\ScrapSAE\src\ScrapSAE.Desktop\ViewModels\MainViewModel.cs(848,23): error CS0103: El nombre 'RefreshStagingProductsAsync' no existe en el contexto actual [C:\Proyectos\ScrapSAE\src\ScrapSAE.Desktop\ScrapSAE.Desktop_n0ivnvsd_wpftmp.csproj]
+
+ERROR al compilar.
+
+C:\Proyectos\ScrapSAE\src\ScrapSAE.Desktop\ViewModels\MainViewModel.cs(848,23): error CS0103: El nombre 'RefreshStagingProductsAsync' no existe en el contexto actual [C:\Proyectos\ScrapSAE\src\ScrapSAE.Desktop\ScrapSAE.Desktop_n0ivnvsd_wpftmp.csproj]
+    0 Advertencia(s)
+    1 Errores
+
+Tiempo transcurrido 00:00:03.23

@@ -413,186 +413,232 @@
             </TabItem>
 
             <TabItem Header="Scraping">
-                <Grid Margin="8">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
-                    </Grid.RowDefinitions>
-                    
-                    <!-- Barra de herramientas principal -->
-                    <Border Background="White" Padding="12" CornerRadius="6" BorderBrush="#E5E7EB" BorderThickness="1" Margin="0,0,0,12">
-                        <StackPanel>
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                                <TextBlock Text="Proveedor:" VerticalAlignment="Center" Margin="0,0,8,0" FontWeight="SemiBold" />
-                                <ComboBox ItemsSource="{Binding Sites}"
-                                          SelectedItem="{Binding SelectedSite}"
-                                          DisplayMemberPath="Name"
-                                          Width="260"
-                                          Margin="0,0,12,0" />
-                                <TextBlock Text="Cargados:" VerticalAlignment="Center" Margin="0,0,6,0" />
-                                <TextBlock Text="{Binding Sites.Count}" VerticalAlignment="Center" Margin="0,0,12,0" FontWeight="Bold" />
-                                <Button Content="Iniciar" Command="{Binding RunScrapingCommand}" Background="#10B981" BorderBrush="#059669" />
-                                <Button Content="Pausar" Command="{Binding PauseScrapingCommand}" Background="#F59E0B" BorderBrush="#D97706" />
-                                <Button Content="Reanudar" Command="{Binding ResumeScrapingCommand}" Background="#3B82F6" BorderBrush="#2563EB" />
-                                <Button Content="Detener" Command="{Binding StopScrapingCommand}" Background="#EF4444" BorderBrush="#DC2626" />
-                            </StackPanel>
-                            <StackPanel Orientation="Horizontal">
-                                <Button Content="Refrescar logs" Command="{Binding RefreshLogsCommand}" Margin="0,0,8,0" />
-                                <Button Content="Analizar selectores (IA)" Command="{Binding AnalyzeSelectorsCommand}" />
-                            </StackPanel>
-                        </StackPanel>
-                    </Border>
-                    
-                    <!-- Configuración de modo de scraping -->
-                    <Border Grid.Row="1" Background="#F3F4F6" Padding="12" CornerRadius="6" BorderBrush="#D1D5DB" BorderThickness="1" Margin="0,0,0,12">
-                        <StackPanel>
-                            <TextBlock Text="Configuración de Scraping" FontWeight="SemiBold" FontSize="14" Margin="0,0,0,8" />
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                                <CheckBox Content="Login manual" IsChecked="{Binding ManualLoginEnabled}" Margin="0,0,16,0" />
-                                <CheckBox Content="Headless" IsChecked="{Binding HeadlessEnabled}" IsEnabled="{Binding ManualLoginEnabled, Converter={StaticResource NegateBool}}" Margin="0,0,16,0" />
-                                <TextBlock Text="Modo:" VerticalAlignment="Center" Margin="0,0,8,0" FontWeight="SemiBold" />
-                                <ComboBox SelectedValue="{Binding ScrapingMode}" SelectedValuePath="Content" Width="150" Margin="0,0,16,0">
-                                    <ComboBoxItem Content="Tradicional" />
-                                    <ComboBoxItem Content="Familias (Festo)" />
-                                </ComboBox>
-                                <TextBlock Text="Estado:" VerticalAlignment="Center" Margin="0,0,6,0" />
-                                <TextBlock Text="{Binding ScrapeStatusText}" VerticalAlignment="Center" FontWeight="Bold" />
-                            </StackPanel>
-                        </StackPanel>
-                    </Border>
-                    
-                    <!-- Panel de ayuda para modo Familias -->
-                    <Border Grid.Row="2"
-                            Background="#DBEAFE"
-                            BorderBrush="#3B82F6"
-                            BorderThickness="1"
-                            CornerRadius="6"
-                            Padding="10"
-                            Margin="0,0,0,8"
-                            Visibility="{Binding IsFamiliesMode, Converter={StaticResource BoolToVisibility}}">
-                        <StackPanel>
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
-                                <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE946;" Foreground="#1E40AF" Margin="0,0,8,0" FontSize="16" />
-                                <TextBlock Text="Modo Familias Activado" FontWeight="SemiBold" Foreground="#1E40AF" />
-                            </StackPanel>
-                            <TextBlock Text="Este modo está diseñado para sitios como Festo que organizan productos en familias con variantes. El scraper navegará a las páginas de familias y extraerá cada variante como un producto individual."
-                                       TextWrapping="Wrap"
-                                       Foreground="#1E3A8A"
-                                       FontSize="12" />
-                        </StackPanel>
-                    </Border>
-                    <Border Grid.Row="2"
-                            Background="#FEF3C7"
-                            BorderBrush="#F59E0B"
-                            BorderThickness="1"
-                            CornerRadius="6"
-                            Padding="10"
-                            Margin="0,0,0,8"
-                            Visibility="{Binding NoSites, Converter={StaticResource BoolToVisibility}}">
-                        <TextBlock Text="No hay proveedores cargados. Usa la pestaña 'Proveedores' para crear uno o revisa la conexión del backend."
-                                   TextWrapping="Wrap"
-                                   Foreground="#92400E" />
-                    </Border>
-                    <!-- Panel de estadísticas mejorado -->
-                    <Border Grid.Row="3" Background="White" Padding="16" CornerRadius="6" BorderBrush="#E5E7EB" BorderThickness="1" Margin="0,0,0,12">
+                <Grid Margin="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <!-- SIDEBAR (Column 0) - Now top-side config -->
+                    <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto" Margin="0,0,16,0">
                         <Grid>
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="1*" />
+                                <ColumnDefinition Width="1*" />
                             </Grid.ColumnDefinitions>
-                            
-                            <!-- Encontrados -->
-                            <Border Grid.Column="0" Background="#EFF6FF" Padding="12" CornerRadius="4" Margin="0,0,8,0">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <!-- Panel de Control Principal (Row 0, Col 0) -->
+                            <Border Grid.Row="0" Grid.Column="0" Background="White" Padding="12" CornerRadius="6" BorderBrush="#E5E7EB" BorderThickness="1" Margin="0,0,6,12">
                                 <StackPanel>
-                                    <TextBlock Text="Encontrados" FontSize="12" Foreground="#1E40AF" Margin="0,0,0,4" />
-                                    <TextBlock Text="{Binding ScrapeResult.ProductsFound}" FontSize="24" FontWeight="Bold" Foreground="#1E3A8A" />
+                                    <TextBlock Text="Proveedor" FontWeight="SemiBold" Margin="0,0,0,4" />
+                                    <ComboBox ItemsSource="{Binding Sites}" 
+                                              SelectedItem="{Binding SelectedSite}" 
+                                              DisplayMemberPath="Name" 
+                                              Margin="0,0,0,8" />
+                                    
+                                    <TextBlock Text="Acciones" FontWeight="SemiBold" Margin="0,0,0,4" />
+                                    <Grid Margin="0,0,0,8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+                                        
+                                        <Button Grid.Row="0" Grid.Column="0" Content="Iniciar" Command="{Binding RunScrapingCommand}" Background="#10B981" BorderBrush="#059669" Margin="0,0,4,4" Height="28"/>
+                                        <Button Grid.Row="0" Grid.Column="1" Content="Detener" Command="{Binding StopScrapingCommand}" Background="#EF4444" BorderBrush="#DC2626" Margin="4,0,0,4" Height="28"/>
+                                        <Button Grid.Row="1" Grid.Column="0" Content="Pausar" Command="{Binding PauseScrapingCommand}" Background="#F59E0B" BorderBrush="#D97706" Margin="0,0,4,0" Height="28"/>
+                                        <Button Grid.Row="1" Grid.Column="1" Content="Reanudar" Command="{Binding ResumeScrapingCommand}" Background="#3B82F6" BorderBrush="#2563EB" Margin="4,0,0,0" Height="28"/>
+                                    </Grid>
+
+                                    <Button Content="Confirmar Login Manual" Command="{Binding ConfirmLoginCommand}" Background="#8B5CF6" BorderBrush="#7C3AED" Margin="0,0,0,4" Height="28" Visibility="{Binding ManualLoginEnabled, Converter={StaticResource BoolToVisibility}}" />
+                                    <Button Content="Refrescar logs" Command="{Binding RefreshLogsCommand}" Margin="0,0,0,4" Height="24" FontSize="11" />
                                 </StackPanel>
                             </Border>
-                            
-                            <!-- Creados -->
-                            <Border Grid.Column="1" Background="#ECFDF5" Padding="12" CornerRadius="4" Margin="0,0,8,0">
+
+                            <!-- Estadísticas Compactas (Row 0, Col 1) -->
+                            <Border Grid.Row="0" Grid.Column="1" Background="White" Padding="12" CornerRadius="6" BorderBrush="#E5E7EB" BorderThickness="1" Margin="6,0,0,12">
                                 <StackPanel>
-                                    <TextBlock Text="Creados" FontSize="12" Foreground="#059669" Margin="0,0,0,4" />
-                                    <TextBlock Text="{Binding ScrapeResult.ProductsCreated}" FontSize="24" FontWeight="Bold" Foreground="#047857" />
+                                    <TextBlock Text="Estadísticas de Ejecución" FontWeight="SemiBold" Margin="0,0,0,8" />
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+                                        
+                                        <StackPanel Grid.Row="0" Grid.Column="0" Margin="0,0,0,4">
+                                            <TextBlock Text="Encontrados" FontSize="11" Foreground="#1E40AF" />
+                                            <TextBlock Text="{Binding ScrapeResult.ProductsFound}" FontWeight="Bold" Foreground="#1E3A8A" FontSize="16" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Row="0" Grid.Column="1" Margin="8,0,0,4">
+                                            <TextBlock Text="Creados" FontSize="11" Foreground="#059669" />
+                                            <TextBlock Text="{Binding ScrapeResult.ProductsCreated}" FontWeight="Bold" Foreground="#047857" FontSize="16" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Row="1" Grid.Column="0">
+                                            <TextBlock Text="Actualizados" FontSize="11" Foreground="#D97706" />
+                                            <TextBlock Text="{Binding ScrapeResult.ProductsUpdated}" FontWeight="Bold" Foreground="#B45309" FontSize="16" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Row="1" Grid.Column="1" Margin="8,0,0,0">
+                                            <TextBlock Text="Omitidos" FontSize="11" Foreground="#6B7280" />
+                                            <TextBlock Text="{Binding ScrapeResult.ProductsSkipped}" FontWeight="Bold" Foreground="#4B5563" FontSize="16" />
+                                        </StackPanel>
+                                    </Grid>
+                                    <Separator Margin="0,6" />
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="Duración:" FontSize="11" Foreground="#7C3AED" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                                        <TextBlock Text="{Binding ScrapeResult.DurationMs, StringFormat={}{0} ms}" FontWeight="SemiBold" Foreground="#6D28D9" />
+                                    </StackPanel>
                                 </StackPanel>
                             </Border>
-                            
-                            <!-- Actualizados -->
-                            <Border Grid.Column="2" Background="#FEF3C7" Padding="12" CornerRadius="4" Margin="0,0,8,0">
+
+                            <!-- Configuración (Row 1, Col 0) -->
+                            <Border Grid.Row="1" Grid.Column="0" Background="#F3F4F6" Padding="12" CornerRadius="6" BorderBrush="#D1D5DB" BorderThickness="1" Margin="0,0,6,12">
                                 <StackPanel>
-                                    <TextBlock Text="Actualizados" FontSize="12" Foreground="#D97706" Margin="0,0,0,4" />
-                                    <TextBlock Text="{Binding ScrapeResult.ProductsUpdated}" FontSize="24" FontWeight="Bold" Foreground="#B45309" />
+                                    <TextBlock Text="Configuración" FontWeight="SemiBold" Margin="0,0,0,4" />
+                                    
+                                    <UniformGrid Columns="2">
+                                        <StackPanel Margin="0,0,4,0">
+                                            <TextBlock Text="Modo" FontSize="10" Foreground="#4B5563" />
+                                            <ComboBox SelectedValue="{Binding ScrapingMode}" SelectedValuePath="Content" Height="24" FontSize="11">
+                                                <ComboBoxItem Content="Tradicional" />
+                                                <ComboBoxItem Content="Familias (Festo)" />
+                                            </ComboBox>
+                                        </StackPanel>
+                                        <CheckBox Content="Login manual" IsChecked="{Binding ManualLoginEnabled}" VerticalAlignment="Center" FontSize="11" Margin="4,10,0,0" />
+                                    </UniformGrid>
+
+                                    <Grid Margin="0,8,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0">
+                                            <CheckBox Content="Headless" IsChecked="{Binding HeadlessEnabled}" IsEnabled="{Binding ManualLoginEnabled, Converter={StaticResource NegateBool}}" FontSize="10" />
+                                            <CheckBox Content="Mantener" IsChecked="{Binding KeepBrowserOpen}" FontSize="10" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="1">
+                                            <CheckBox Content="Screenshot IA" IsChecked="{Binding UseScreenshotFallback}" FontSize="10" />
+                                            <Button Content="Analizar IA" Command="{Binding AnalyzeSelectorsCommand}" Height="20" FontSize="10" Margin="0,2,0,0"/>
+                                        </StackPanel>
+                                    </Grid>
+                                    
+                                    <TextBlock Text="Estado:" FontWeight="SemiBold" Margin="0,8,0,2" FontSize="11" />
+                                    <TextBlock Text="{Binding ScrapeStatusText}" Foreground="#2563EB" TextWrapping="Wrap" FontSize="11" />
                                 </StackPanel>
                             </Border>
-                            
-                            <!-- Omitidos -->
-                            <Border Grid.Column="3" Background="#F3F4F6" Padding="12" CornerRadius="4" Margin="0,0,8,0">
+
+                            <!-- URLs de Aprendizaje (Row 1, Col 1) -->
+                            <Border Grid.Row="1" Grid.Column="1" Background="#FFFBEB" Padding="12" CornerRadius="6" BorderBrush="#FCD34D" BorderThickness="1" Margin="6,0,0,12">
                                 <StackPanel>
-                                    <TextBlock Text="Omitidos" FontSize="12" Foreground="#6B7280" Margin="0,0,0,4" />
-                                    <TextBlock Text="{Binding ScrapeResult.ProductsSkipped}" FontSize="24" FontWeight="Bold" Foreground="#4B5563" />
-                                </StackPanel>
-                            </Border>
-                            
-                            <!-- Duración -->
-                            <Border Grid.Column="4" Background="#F5F3FF" Padding="12" CornerRadius="4">
-                                <StackPanel>
-                                    <TextBlock Text="Duración (ms)" FontSize="12" Foreground="#7C3AED" Margin="0,0,0,4" />
-                                    <TextBlock Text="{Binding ScrapeResult.DurationMs}" FontSize="24" FontWeight="Bold" Foreground="#6D28D9" />
+                                    <TextBlock Text="URLs Aprendidas" FontWeight="SemiBold" Foreground="#92400E" Margin="0,0,0,4" />
+                                    <TextBox Text="{Binding LearnedUrlsText, UpdateSourceTrigger=PropertyChanged}" 
+                                             Height="60" 
+                                             AcceptsReturn="True" 
+                                             VerticalScrollBarVisibility="Auto"
+                                             FontFamily="Consolas"
+                                             FontSize="10"
+                                             Margin="0,0,0,8" />
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Button Grid.Column="0" Content="Cargar" Command="{Binding LoadLearnedUrlsCommand}" Background="White" BorderBrush="#FCD34D" Foreground="#92400E" Margin="0,0,2,0" Padding="2" FontSize="10"/>
+                                        <Button Grid.Column="1" Content="Guardar" Command="{Binding SaveLearnedUrlsCommand}" Background="White" BorderBrush="#FCD34D" Foreground="#92400E" Margin="2,0,2,0" Padding="2" FontSize="10"/>
+                                        <Button Grid.Column="2" Content="Probar" Command="{Binding InspectUrlsCommand}" Background="#FCD34D" BorderBrush="#F59E0B" Foreground="#92400E" Margin="2,0,0,0" Padding="2" FontSize="10" FontWeight="Bold"/>
+                                    </Grid>
                                 </StackPanel>
                             </Border>
                         </Grid>
-                    </Border>
-                    <Grid Grid.Row="5" Margin="0,0,0,0">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="3*" />
-                            <ColumnDefinition Width="2*" />
-                        </Grid.ColumnDefinitions>
-                        <Border Grid.Column="0" Background="White" Padding="8" Margin="0,0,8,0" CornerRadius="6" BorderBrush="#E5E7EB" BorderThickness="1">
-                            <DataGrid ItemsSource="{Binding StagingProducts}"
-                                      SelectedItem="{Binding SelectedStagingProduct}"
-                                      AutoGenerateColumns="True"
-                                      IsReadOnly="False"
-                                      CanUserAddRows="False" />
+                    </ScrollViewer>
+
+                    <!-- MAIN CONTENT (Column 1) -->
+                    <Grid Grid.Column="1">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="200" />
+                        </Grid.RowDefinitions>
+
+                        <!-- Mensajes de Ayuda / Estado -->
+                        <Border Grid.Row="0" Margin="0,0,0,12"
+                                Background="#DBEAFE" BorderBrush="#3B82F6" BorderThickness="1" CornerRadius="6" Padding="10"
+                                Visibility="{Binding IsFamiliesMode, Converter={StaticResource BoolToVisibility}}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE946;" Foreground="#1E40AF" Margin="0,0,8,0" FontSize="16" VerticalAlignment="Center" />
+                                <TextBlock Text="Modo Familias activado: Navegará por categorías y extraerá variantes." Foreground="#1E3A8A" VerticalAlignment="Center" />
+                            </StackPanel>
                         </Border>
-                        <Border Grid.Column="1" Background="White" Padding="8" Margin="8,0,0,0" CornerRadius="6" BorderBrush="#E5E7EB" BorderThickness="1">
+
+                        <!-- Consola - AHORA TOMA EL ESPACIO PRINCIPAL -->
+                        <Border Grid.Row="1" Background="#1F2937" Padding="0" CornerRadius="6" BorderBrush="#374151" BorderThickness="1" Margin="0,0,0,12">
                             <Grid>
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="*" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="140" />
                                 </Grid.RowDefinitions>
-                                <TextBlock Text="Traza reciente" FontWeight="SemiBold" Margin="0,0,0,8" />
-                                <DataGrid Grid.Row="1"
-                                          ItemsSource="{Binding RecentSyncLogs}"
-                                          AutoGenerateColumns="False"
-                                          IsReadOnly="True"
-                                          CanUserAddRows="False">
-                                    <DataGrid.Columns>
-                                        <DataGridTextColumn Header="UTC" Binding="{Binding CreatedAt}" Width="120" />
-                                        <DataGridTextColumn Header="Tipo" Binding="{Binding OperationType}" Width="100" />
-                                        <DataGridTextColumn Header="Estado" Binding="{Binding Status}" Width="80" />
-                                        <DataGridTextColumn Header="Mensaje" Binding="{Binding Message}" Width="*" />
-                                    </DataGrid.Columns>
-                                </DataGrid>
-                                <TextBlock Grid.Row="2" Text="IA selectores" FontWeight="SemiBold" Margin="0,8,0,4" />
-                                <TextBox Grid.Row="3"
-                                         Text="{Binding SelectorAnalysisResult}"
-                                         TextWrapping="Wrap"
-                                         VerticalScrollBarVisibility="Auto"
-                                         IsReadOnly="True"
-                                         Background="#F9FAFB"
-                                         BorderBrush="#E5E7EB"
-                                         BorderThickness="1" />
+                                <Border Background="#111827" Padding="12,8" CornerRadius="6,6,0,0" BorderBrush="#374151" BorderThickness="0,0,0,1">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="📡 Consola en tiempo real" Foreground="#10B981" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                        <TextBlock Text=" (scroll auto)" Foreground="#6B7280" FontSize="11" VerticalAlignment="Center" Margin="8,0,0,0" />
+                                    </StackPanel>
+                                </Border>
+                                <ListBox Grid.Row="1" 
+                                         ItemsSource="{Binding LiveLogs}"
+                                         FontFamily="Consolas"
+                                         FontSize="12"
+                                         Background="Transparent"
+                                         Foreground="#D1D5DB"
+                                         BorderThickness="0"
+                                         ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                         ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                         Padding="8">
+                                    <ListBox.ItemContainerStyle>
+                                        <Style TargetType="ListBoxItem">
+                                            <Setter Property="Padding" Value="2,1" />
+                                            <Setter Property="Background" Value="Transparent" />
+                                        </Style>
+                                    </ListBox.ItemContainerStyle>
+                                </ListBox>
                             </Grid>
                         </Border>
+
+                        <GridSplitter Grid.Row="2" Height="4" HorizontalAlignment="Stretch" Background="#E5E7EB" ShowsPreview="True" Margin="0,0,0,12" />
+
+                        <!-- Grid de Staging (Preview) -->
+                        <Grid Grid.Row="3">
+                             <Border Background="White" Padding="0" CornerRadius="6" BorderBrush="#E5E7EB" BorderThickness="1">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="*" />
+                                    </Grid.RowDefinitions>
+                                    <Border Background="#F9FAFB" Padding="12,8" CornerRadius="6,6,0,0" BorderBrush="#E5E7EB" BorderThickness="0,0,0,1">
+                                        <TextBlock Text="Productos en Staging (Vista Previa)" FontWeight="SemiBold" Foreground="#374151" />
+                                    </Border>
+                                    <DataGrid Grid.Row="1"
+                                              ItemsSource="{Binding StagingProducts}"
+                                              SelectedItem="{Binding SelectedStagingProduct}"
+                                              AutoGenerateColumns="True"
+                                              IsReadOnly="False"
+                                              CanUserAddRows="False"
+                                              BorderThickness="0" />
+                                </Grid>
+                            </Border>
+                        </Grid>
                     </Grid>
                 </Grid>
             </TabItem>

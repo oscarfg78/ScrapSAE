@@ -1,0 +1,68 @@
+{
+    "note": "URLs de ejemplo para usar con POST /api/scraping/inspect/{siteId} o POST /api/scraping/learn/{siteId}",
+    "inspectRequest": {
+        "description": "Para usar con POST /api/scraping/inspect/{siteId}",
+        "urls": [
+            "https://www.festo.com/mx/es/a/5249943/",
+            "https://www.festo.com/mx/es/a/5249365/",
+            "https://www.festo.com/mx/es/a/5249367/",
+            "https://www.festo.com/mx/es/a/559301/",
+            "https://www.festo.com/mx/es/a/8031817/",
+            "https://www.festo.com/mx/es/p/valvula-normalizada-id_VSCS/",
+            "https://www.festo.com/mx/es/p/valvula-normalizada-con-conector-central-id_VSVA_R/",
+            "https://www.festo.com/mx/es/a/534781/"
+        ],
+        "inspectOnly": false,
+        "manualLogin": false,
+        "headless": false
+    },
+    "learnRequest": {
+        "description": "Para usar con POST /api/scraping/learn/{siteId}",
+        "urls": [
+            {
+                "url": "https://www.festo.com/mx/es/a/5249943/",
+                "type": "ProductDetail"
+            },
+            {
+                "url": "https://www.festo.com/mx/es/a/5249365/",
+                "type": "ProductDetail"
+            },
+            {
+                "url": "https://www.festo.com/mx/es/a/5249367/",
+                "type": "ProductDetail"
+            },
+            {
+                "url": "https://www.festo.com/mx/es/a/559301/",
+                "type": "ProductDetail"
+            },
+            {
+                "url": "https://www.festo.com/mx/es/a/8031817/",
+                "type": "ProductDetail"
+            },
+            {
+                "url": "https://www.festo.com/mx/es/p/valvula-normalizada-id_VSCS/",
+                "type": "ProductDetail"
+            },
+            {
+                "url": "https://www.festo.com/mx/es/p/valvula-normalizada-con-conector-central-id_VSVA_R/",
+                "type": "ProductDetail"
+            },
+            {
+                "url": "https://www.festo.com/mx/es/a/534781/",
+                "type": "ProductDetail"
+            },
+            {
+                "url": "https://www.festo.com/mx/es/c/productos/valvulas-y-terminales-de-valvulas/valvulas-distribuidoras-de-accionamiento-electrico-y-neumatico/valvulas-distribuidoras-normalizadas-id_pim229/?page=0",
+                "type": "ProductListing"
+            },
+            {
+                "url": "https://www.festo.com/mx/es/c/productos/valvulas-y-terminales-de-valvulas/valvulas-distribuidoras-de-accionamiento-electrico-y-neumatico/valvulas-distribuidoras-universales-id_pim254/?page=0",
+                "type": "ProductListing"
+            },
+            {
+                "url": "https://www.festo.com/mx/es/c/productos/valvulas-y-terminales-de-valvulas/valvulas-distribuidoras-de-accionamiento-electrico-y-neumatico-id_pim115/",
+                "type": "Subcategory"
+            }
+        ]
+    }
+}

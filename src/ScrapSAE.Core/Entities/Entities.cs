@@ -35,7 +35,10 @@ public class StagingProduct
     public string Status { get; set; } = "pending";
     public bool ExcludeFromSae { get; set; }
     public string? ValidationNotes { get; set; }
+    /// <summary>URL de donde se extrajo este producto</summary>
+    public string? SourceUrl { get; set; }
     public int Attempts { get; set; }
+
     public DateTime? LastSeenAt { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }

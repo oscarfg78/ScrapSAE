@@ -17,23 +17,37 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
 {
     private const string ScreenshotDirectoryName = "scrapsae-screens";
     private readonly ILogger<PlaywrightScrapingService> _logger;
+    private readonly IBrowserSharingService _browserSharing;
+    private readonly IScrapingSignalService _signalService;
     private readonly IScrapeControlService _scrapeControl;
-    private readonly ISyncLogService? _syncLogService;
-    private IPlaywright? _playwright;
-    private IBrowser? _browser;
+    private readonly IPostExecutionAnalyzer _analyzer;
+    private readonly IAIProcessorService _aiProcessor;
+    private readonly ISyncLogService _syncLogService;
+    private readonly List<SiteProfile> _sites; // Cache simple for testing
+    private IPlaywright? _playwright; // Only for persistent context overrides
     private IBrowserContext? _context;
     private bool _isPersistentContext;
     private readonly Random _random = new();
 
     public PlaywrightScrapingService(
-        ILogger<PlaywrightScrapingService> logger,
+        ILogger<PlaywrightScrapingService> logger, 
+        IBrowserSharingService browserSharing,
+        IScrapingSignalService signalService,
         IScrapeControlService scrapeControl,
-        ISyncLogService? syncLogService = null)
+        IPostExecutionAnalyzer analyzer,
+        IAIProcessorService aiProcessor,
+        ISyncLogService syncLogService)
     {
         _logger = logger;
+        _browserSharing = browserSharing;
+        _signalService = signalService;
         _scrapeControl = scrapeControl;
+        _analyzer = analyzer;
+        _aiProcessor = aiProcessor;
         _syncLogService = syncLogService;
+        _sites = new List<SiteProfile>(); // Initialize empty
     }
+
 
     private async Task<IBrowserContext> GetContextAsync(BrowserNewContextOptions? options = null)
     {
@@ -60,65 +74,54 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
         _logger.LogInformation("[DEBUG] GetContextAsync: manualLoginEnv={Manual}, forceManual={Force}, headlessEnv={Headless}", manualLoginEnv, forceManualLoginEnv, headlessEnv);
         _logger.LogInformation("[DEBUG] GetContextAsync: shouldBeHeadless calculated as {ShouldBeHeadless}", shouldBeHeadless);
 
-        // Si ya hay un contexto, verificar si coincide con el modo deseado
         if (_context != null)
         {
-            if (!shouldBeHeadless)
-            {
-                _logger.LogInformation("[DEBUG] Re-initializing browser context for manual mode (context was not null)...");
-                await DisposeAsync();
-            }
-            else
-            {
-                _logger.LogInformation("[DEBUG] Reusing existing context (headless requested or already headful)...");
-                return _context;
-            }
+             return _context;
         }
 
-        _playwright = await Playwright.CreateAsync();
-        var headless = shouldBeHeadless;
-
+        var shouldUseSharedBrowser = true;
         var userDataDir = Environment.GetEnvironmentVariable("SCRAPSAE_PROFILE_DIR");
+        
         if (!string.IsNullOrWhiteSpace(userDataDir))
         {
-            var persistentOptions = new BrowserTypeLaunchPersistentContextOptions
-            {
-                Headless = headless
-            };
-            
-            if (options?.StorageStatePath != null)
-            {
-                // Note: LaunchPersistentContextAsync doesn't support StorageStatePath directly in the same way 
-                // as NewContextAsync, it relies on userDataDir. 
-                // We might need to manually load if we are mixing strategies, but for now let's assume one strategy.
-            }
-
-            _context = await _playwright.Chromium.LaunchPersistentContextAsync(userDataDir, persistentOptions);
-            _isPersistentContext = true;
-            return _context;
+            shouldUseSharedBrowser = false;
         }
 
-        // Argumentos anti-detección
-        var launchOptions = new BrowserTypeLaunchOptions
-        {
-            Headless = headless,
-            Args = new[]
-            {
-                "--disable-blink-features=AutomationControlled",
-                "--disable-dev-shm-usage",
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-web-security",
-                "--disable-features=IsolateOrigins,site-per-process",
-                "--disable-site-isolation-trials"
-            }
-        };
-        
-        _browser = await _playwright.Chromium.LaunchAsync(launchOptions);
-
-        // Configuración stealth del contexto
+        // Configuración stealth básica
         var contextOptions = options ?? new BrowserNewContextOptions();
+        PrepareContextOptions(contextOptions);
+
+        if (shouldUseSharedBrowser)
+        {
+            var browser = await _browserSharing.GetBrowserAsync();
+            _context = await browser.NewContextAsync(contextOptions);
+        }
+        else
+        {
+             // Fallback to local persistent context (rare case)
+             _playwright ??= await Playwright.CreateAsync();
+             
+             var persistentOptions = new BrowserTypeLaunchPersistentContextOptions
+             {
+                 Headless = shouldBeHeadless,
+                 UserAgent = contextOptions.UserAgent,
+                 ViewportSize = contextOptions.ViewportSize,
+                 Locale = contextOptions.Locale,
+                 TimezoneId = contextOptions.TimezoneId,
+                 ExtraHTTPHeaders = contextOptions.ExtraHTTPHeaders
+             };
+             persistentOptions.Args = new[] { "--disable-blink-features=AutomationControlled" };
+
+             _context = await _playwright.Chromium.LaunchPersistentContextAsync(userDataDir, persistentOptions);
+             _isPersistentContext = true;
+        }
         
+        await ApplyStealthScriptsAsync(_context);
+        return _context;
+    }
+
+    private void PrepareContextOptions(BrowserNewContextOptions contextOptions)
+    {
         // User-Agent realista y rotado
         if (string.IsNullOrEmpty(contextOptions.UserAgent))
         {
@@ -144,7 +147,7 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
             };
             contextOptions.ViewportSize = viewports[_random.Next(viewports.Length)];
         }
-        
+
         // Locale y timezone
         if (string.IsNullOrEmpty(contextOptions.Locale))
         {
@@ -172,9 +175,10 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
                 ["Sec-Fetch-User"] = "?1"
             };
         }
-        
-        _context = await _browser.NewContextAsync(contextOptions);
-        
+    }
+
+    private async Task ApplyStealthScriptsAsync(IBrowserContext context)
+    {
         // Inyectar script stealth
         var stealthScriptPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "stealth_script.js");
         if (!File.Exists(stealthScriptPath))
@@ -199,7 +203,7 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
         if (File.Exists(stealthScriptPath))
         {
             var stealthScript = await File.ReadAllTextAsync(stealthScriptPath);
-            await _context.AddInitScriptAsync(stealthScript);
+            await context.AddInitScriptAsync(stealthScript);
             _logger.LogInformation("🥷 Stealth mode activated using script at {Path}", stealthScriptPath);
         }
         else
@@ -207,26 +211,33 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
             _logger.LogWarning("Stealth script not found. Searched in: {BaseDir} and {CurrDir}", 
                 AppDomain.CurrentDomain.BaseDirectory, Directory.GetCurrentDirectory());
         }
-        _isPersistentContext = false;
-        return _context;
-    }
-
-    private async Task<IBrowser> GetBrowserAsync()
-    {
-        if (_browser == null)
-        {
-            var context = await GetContextAsync();
-            _browser = context.Browser;
-        }
-        return _browser;
     }
 
     public async Task<IEnumerable<ScrapedProduct>> ScrapeAsync(SiteProfile site, CancellationToken cancellationToken = default)
     {
         var products = new List<ScrapedProduct>();
         
+        // Verificar si hay URLs directas para inspeccionar (modo de inspección manual)
+        var directUrlsJson = Environment.GetEnvironmentVariable("SCRAPSAE_DIRECT_URLS");
+        if (!string.IsNullOrEmpty(directUrlsJson))
+        {
+            _logger.LogInformation("Modo de inspección directa de URLs activado");
+            return await ScrapeDirectUrlsAsync(site, directUrlsJson, cancellationToken);
+        }
+        
+        // Verificar si hay URLs aprendidas (modo automático con aprendizaje)
+        var learnedUrlsJson = Environment.GetEnvironmentVariable("SCRAPSAE_LEARNED_URLS");
+        if (!string.IsNullOrEmpty(learnedUrlsJson))
+        {
+            _logger.LogInformation("Modo de scraping con URLs aprendidas activado");
+            await LogStepAsync(site.Id, "info", "Usando URLs aprendidas para scraping", null);
+            return await ScrapeDirectUrlsAsync(site, learnedUrlsJson, cancellationToken);
+        }
+        
         try
         {
+
+
             string selectorsJson;
             if (site.Selectors is JsonElement jsonElement)
             {
@@ -291,7 +302,18 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
             }
 
             var context = await GetContextAsync(contextOptions);
-            var page = await context.NewPageAsync();
+            IPage page;
+            try
+            {
+                page = await context.NewPageAsync();
+            }
+            catch (Exception ex) when (ex.GetType().Name == "TargetClosedException" || ex.Message.Contains("closed"))
+            {
+                _logger.LogWarning("Browser context closed unexpectedly. Re-initializing context...");
+                _context = null; 
+                context = await GetContextAsync(contextOptions);
+                page = await context.NewPageAsync();
+            }
 
             var initialUrl = site.BaseUrl;
             if (site.RequiresLogin && !string.IsNullOrEmpty(site.LoginUrl))
@@ -380,7 +402,14 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
                 }
             }
             
-            await SaveDebugHtmlAsync(await page.ContentAsync(), $"{site.Name}_after_login_check");
+            try
+            {
+                await SaveDebugHtmlAsync(await page.ContentAsync(), $"{site.Name}_after_login_check");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning("Could not save debug HTML after login check (page navigating?): {Message}", ex.Message);
+            }
 
             var startUrl = Environment.GetEnvironmentVariable("SCRAPSAE_START_URL");
             if (!string.IsNullOrWhiteSpace(startUrl))
@@ -747,8 +776,10 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
 
             if (emailField != null && !emailFilled)
             {
-                await emailField.FillAsync(email);
-                _logger.LogInformation("Filled email field");
+                await HighlightLocatorAsync(emailField);
+                // Usar simulación de escritura humana
+                await SimulateTypingAsync(emailField, email);
+                _logger.LogInformation("Email ingresado correctamente");
                 await Task.Delay(_random.Next(800, 1500), cancellationToken);
             }
             else if (!emailFilled && emailField == null)
@@ -808,8 +839,10 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
             
             if (passwordField != null && !passwordFilled)
             {
-                await passwordField.FillAsync(password);
-                _logger.LogInformation("Filled password field");
+                await HighlightLocatorAsync(passwordField);
+                // Usar simulación de escritura humana para password
+                await SimulateTypingAsync(passwordField, password);
+                _logger.LogInformation("Password ingresado correctamente");
                 await Task.Delay(_random.Next(800, 1500), cancellationToken);
             }
             else if (!passwordFilled && passwordField == null)
@@ -972,8 +1005,64 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
         product.RawHtml = await element.InnerHTMLAsync();
         product.ScrapedAt = DateTime.UtcNow;
 
+        // Validar si la extracción fue exitosa
+        var isValid = !string.IsNullOrEmpty(product.Title) && (product.Price.HasValue || !string.IsNullOrEmpty(product.SkuSource));
+        
+        // Fallback con IA si está habilitado y la extracción falló
+        var useFallback = Environment.GetEnvironmentVariable("SCRAPSAE_SCREENSHOT_FALLBACK") == "true";
+        if (!isValid && useFallback)
+        {
+            _logger.LogInformation("Extracción tradicional insuficiente. Intentando fallback con análisis de captura (AI)...");
+            await TryFallbackWithAiAsync(page, element, product);
+        }
+
         return product;
     }
+
+    private async Task TryFallbackWithAiAsync(IPage page, IElementHandle element, ScrapedProduct product)
+    {
+        try
+        {
+            // Capturar screenshot del elemento
+            var screenshotBytes = await element.ScreenshotAsync(new ElementHandleScreenshotOptions { Type = ScreenshotType.Png });
+            var base64 = Convert.ToBase64String(screenshotBytes);
+            
+            // Crear payload para el procesador
+            var rawDataPayload = new { screenshotBase64 = base64 };
+            var rawDataJson = System.Text.Json.JsonSerializer.Serialize(rawDataPayload);
+            
+            // Procesar con AI
+            try
+            {
+                var processed = await _aiProcessor.ProcessProductAsync(rawDataJson);
+                
+                // Mapear resultados si mejoran lo existente
+                if (string.IsNullOrEmpty(product.Title) && !string.IsNullOrEmpty(processed.Name))
+                    product.Title = processed.Name;
+                    
+                if (!product.Price.HasValue && processed.Price.HasValue)
+                    product.Price = processed.Price;
+                    
+                if (string.IsNullOrEmpty(product.SkuSource) && !string.IsNullOrEmpty(processed.Sku))
+                    product.SkuSource = processed.Sku;
+                    
+                if (string.IsNullOrEmpty(product.Description) && !string.IsNullOrEmpty(processed.Description))
+                    product.Description = processed.Description;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning("AI Fallback analysis skipped: {Message}", ex.Message);
+            }
+                
+            product.AiEnriched = true;
+            _logger.LogInformation("Fallback AI exitoso: Titulo={Title}, Precio={Price}", product.Title, product.Price);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error durante fallback AI");
+        }
+    }
+
 
     private async Task ScrollToBottomAsync(IPage page)
     {
@@ -1044,19 +1133,35 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        // Verificar si se debe mantener el navegador abierto
+        var keepBrowser = Environment.GetEnvironmentVariable("SCRAPSAE_KEEP_BROWSER") == "true";
+        if (keepBrowser)
+        {
+            _logger.LogInformation("Manteniendo navegador abierto para futura reutilización de sesión");
+            return;
+        }
+        
         if (_context != null)
         {
-            await _context.CloseAsync();
+            try 
+            {
+                await _context.CloseAsync();
+                await _context.DisposeAsync();
+            } 
+            catch { }
             _context = null;
         }
-        if (_browser != null)
+
+        // Only dispose _playwright if we created it locally (persistent context case)
+        if (_playwright != null)
         {
-            await _browser.CloseAsync();
-            _browser = null;
+            _playwright.Dispose();
+            _playwright = null;
         }
-        _playwright?.Dispose();
-        _playwright = null;
+        
+        GC.SuppressFinalize(this);
     }
+
 
     private async Task SaveDebugScreenshotAsync(IPage page, string suffix)
     {
@@ -1213,24 +1318,7 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
         }
     }
 
-    private static async Task HighlightLocatorAsync(ILocator locator)
-    {
-        try
-        {
-            var handle = await locator.ElementHandleAsync();
-            if (handle == null)
-            {
-                return;
-            }
 
-            await handle.EvaluateAsync(
-                "el => { el.style.outline = '2px solid #ff9800'; el.style.outlineOffset = '2px'; }");
-        }
-        catch
-        {
-            // Ignore highlight failures
-        }
-    }
 
     private static async Task SaveDebugHtmlAsync(string html, string suffix)
     {
@@ -1528,6 +1616,103 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
         return page.Url.Contains("festo.com/mx/es", StringComparison.OrdinalIgnoreCase) &&
             !page.Url.Contains("loginError", StringComparison.OrdinalIgnoreCase);
     }
+    
+    /// <summary>
+    /// Verifica y refresca la sesión si es necesario (session keepalive)
+    /// </summary>
+    private async Task<bool> EnsureSessionActiveAsync(IPage page, Guid siteId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Verificar si estamos logueados
+            var isLogged = await IsLoggedInAsync(page);
+            
+            if (isLogged)
+            {
+                // Sesión activa - hacer click en el icono de usuario para refrescarla
+                var userIconSelectors = new[]
+                {
+                    "[data-testid='user-menu']",
+                    ".js-account-widget",
+                    "button[aria-label*='cuenta'], button[aria-label*='account']",
+                    "a[href*='/account'], a[href*='/mi-cuenta']",
+                    // Icono de silueta de persona (común en Festo)
+                    "svg[class*='user'], svg[class*='person'], svg[class*='account']",
+                    "[class*='user-icon'], [class*='account-icon']",
+                    // Header icons
+                    "header button:has(svg), nav button:has(svg)"
+                };
+                
+                foreach (var selector in userIconSelectors)
+                {
+                    try
+                    {
+                        var icon = page.Locator(selector).First;
+                        if (await icon.CountAsync() > 0 && await icon.IsVisibleAsync())
+                        {
+                            _logger.LogDebug("Refrescando sesión con click en: {Selector}", selector);
+                            await icon.ClickAsync(new LocatorClickOptions { Timeout = 3000 });
+                            await Task.Delay(1000, cancellationToken);
+                            
+                            // Cerrar cualquier menú que se haya abierto
+                            await page.Keyboard.PressAsync("Escape");
+                            await Task.Delay(500, cancellationToken);
+                            
+                            await LogStepAsync(siteId, "info", "Sesión refrescada exitosamente", null);
+                            return true;
+                        }
+                    }
+                    catch { }
+                }
+                
+                _logger.LogDebug("Sesión activa pero no se encontró icono para refrescar");
+                return true;
+            }
+            
+            // Sesión no activa - intentar click en el icono de login
+            await LogStepAsync(siteId, "warning", "Sesión parece inactiva, intentando recuperar", null);
+            
+            var loginIconSelectors = new[]
+            {
+                "[data-testid='navigation-login-link']",
+                "a:has-text('Inicio de sesión')",
+                "button:has-text('Login')",
+                "[class*='login-link'], [class*='sign-in']"
+            };
+            
+            foreach (var selector in loginIconSelectors)
+            {
+                try
+                {
+                    var icon = page.Locator(selector).First;
+                    if (await icon.CountAsync() > 0 && await icon.IsVisibleAsync())
+                    {
+                        _logger.LogInformation("Encontrado enlace de login, haciendo click para recuperar sesión");
+                        await icon.ClickAsync(new LocatorClickOptions { Timeout = 5000 });
+                        await Task.Delay(2000, cancellationToken);
+                        
+                        // Verificar si ahora estamos en página de login
+                        if (page.Url.Contains("auth.festo.com"))
+                        {
+                            await LogStepAsync(siteId, "warning", "Redirigido a página de login - se requiere re-autenticación", null);
+                            return false;
+                        }
+                        
+                        return await IsLoggedInAsync(page);
+                    }
+                }
+                catch { }
+            }
+            
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error verificando sesión activa");
+            return false;
+        }
+    }
+
 
     private async Task<List<ScrapedProduct>> TryScrapeProductDetailWithVariationsAsync(
         IPage page,
@@ -3215,6 +3400,33 @@ private async Task NavigateAndCollectFromSubcategoriesAsync(
         return Path.Combine(Path.GetTempPath(), $"scrapsae_{safeName}_state.json");
     }
 
+    private async Task<IBrowserContext> CreateBrowserContextAsync(IBrowser browser, string siteName)
+    {
+        var options = new BrowserNewContextOptions
+        {
+            ViewportSize = new ViewportSize { Width = 1920, Height = 1080 },
+            UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+            JavaScriptEnabled = true,
+            AcceptDownloads = true
+        };
+
+        var statePath = GetStorageStatePath(siteName);
+        if (File.Exists(statePath))
+        {
+            try 
+            {
+                options.StorageStatePath = statePath;
+                _logger.LogInformation("Loaded session state from {Path}", statePath);
+            }
+            catch (Exception ex)
+            {
+                 _logger.LogWarning("Failed to load session state: {Message}. Creating fresh context.", ex.Message);
+            }
+        }
+
+        return await browser.NewContextAsync(options);
+    }
+
     private async Task ManualLoginFallbackInExistingPageAsync(IPage page, SiteProfile site, CancellationToken cancellationToken)
     {
         _logger.LogInformation("Starting Manual Login Fallback for {SiteName} in existing browser...", site.Name);
@@ -3232,57 +3444,38 @@ private async Task NavigateAndCollectFromSubcategoriesAsync(
             
             _logger.LogInformation("=============================================================================");
             _logger.LogInformation("PLEASE LOG IN MANUALLY IN THE BROWSER WINDOW.");
-            _logger.LogInformation("The script acts as a 'Logged In' detector. It waits for you.");
+            _logger.LogInformation("Waiting for confirmation signal via API...");
             _logger.LogInformation("=============================================================================");
 
-            // Wait for user to login
-            var maxWait = TimeSpan.FromMinutes(5);
-            var startTime = DateTime.UtcNow;
-            var loggedIn = false;
+            // Wait for signal from API
+            await _signalService.WaitForLoginConfirmationAsync(site.Id.ToString(), cancellationToken);
 
-            while ((DateTime.UtcNow - startTime) < maxWait && !cancellationToken.IsCancellationRequested)
+            _logger.LogInformation("Manual login confirmation received! Saving session state...");
+            var statePath = GetStorageStatePath(site.Name);
+            await context.StorageStateAsync(new() { Path = statePath });
+            _logger.LogInformation("Session state saved to {Path}", statePath);
+
+            try
             {
-                if (await IsLoggedInAsync(page))
+                var landingUrl = site.BaseUrl;
+                if (!string.IsNullOrWhiteSpace(landingUrl))
                 {
-                    loggedIn = true;
-                    break;
-                }
-                await Task.Delay(2000, cancellationToken);
-            }
-
-            if (loggedIn)
-            {
-                _logger.LogInformation("Manual login detected! Saving session state...");
-                var statePath = GetStorageStatePath(site.Name);
-                await context.StorageStateAsync(new() { Path = statePath });
-                _logger.LogInformation("Session state saved to {Path}", statePath);
-
-                try
-                {
-                    var landingUrl = site.BaseUrl;
-                    if (!string.IsNullOrWhiteSpace(landingUrl))
+                    _logger.LogInformation("Navigating to landing URL: {Url}", landingUrl);
+                    await page.GotoAsync(landingUrl, new PageGotoOptions
                     {
-                        _logger.LogInformation("Navigating to landing URL: {Url}", landingUrl);
-                        await page.GotoAsync(landingUrl, new PageGotoOptions
-                        {
-                            WaitUntil = WaitUntilState.DOMContentLoaded,
-                            Timeout = 90000
-                        });
-                        await AcceptCookiesAsync(page, cancellationToken);
-                        await WaitForCategoryOrProductListAsync(page, cancellationToken);
-                        var readyShot = await SaveStepScreenshotAsync(page, $"{site.Name}_manual_login_ready");
-                        await LogStepAsync(site.Id, "success", "Login manual completado. Entorno listo.", new { url = page.Url, screenshotFile = readyShot });
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Manual login completed, but landing page preparation failed.");
-                    await LogStepAsync(site.Id, "warn", "Login manual completado, pero no se pudo preparar la landing.");
+                        WaitUntil = WaitUntilState.DOMContentLoaded,
+                        Timeout = 90000
+                    });
+                    await AcceptCookiesAsync(page, cancellationToken);
+                    
+                    var readyShot = await SaveStepScreenshotAsync(page, $"{site.Name}_manual_login_ready");
+                    await LogStepAsync(site.Id, "success", "Login manual completado y confirmado.", new { url = page.Url, screenshotFile = readyShot });
                 }
             }
-            else
+            catch (Exception ex)
             {
-                throw new Exception("Manual login timed out or failed.");
+                _logger.LogWarning(ex, "Manual login completed, but landing page preparation failed.");
+                await LogStepAsync(site.Id, "warn", "Login manual completado, pero no se pudo preparar la landing.");
             }
         }
         finally
@@ -3290,6 +3483,96 @@ private async Task NavigateAndCollectFromSubcategoriesAsync(
             // Reset env var
             Environment.SetEnvironmentVariable("SCRAPSAE_MANUAL_LOGIN_ACTIVE", null);
         }
+    }
+
+    public async Task<List<DirectUrlResult>> ScrapeDirectUrlsAsync(List<string> urls, Guid siteId, bool inspectOnly, CancellationToken cancellationToken)
+    {
+        var results = new List<DirectUrlResult>();
+        
+        // Ensure browser is open (this might reuse existing session if available)
+        var browser = await _browserSharing.GetBrowserAsync();
+        
+        // Create a new context with stored state if possible
+        var context = await CreateBrowserContextAsync(browser, _sites.FirstOrDefault(s => s.Id == siteId)?.Name ?? "default");
+        var page = await context.NewPageAsync();
+        
+        // Find selectors
+        var site = _sites.FirstOrDefault(s => s.Id == siteId);
+        var selectors = new SiteSelectors();
+        if (site != null && site.Selectors != null)
+        {
+            var json = JsonConvert.SerializeObject(site.Selectors);
+            if (!string.IsNullOrWhiteSpace(json))
+            {
+                FillSelectorsFromJson(selectors, json);
+            }
+        }
+
+        try 
+        {
+            foreach (var url in urls)
+            {
+                if (cancellationToken.IsCancellationRequested) break;
+
+                var result = new DirectUrlResult { Url = url };
+                try 
+                {
+                    await HumanNavigateAsync(page, url, WaitUntilState.DOMContentLoaded);
+                    await AcceptCookiesAsync(page, cancellationToken);
+                    
+                    // Basic info extraction
+                    result.Title = await page.TitleAsync();
+                    result.ScreenshotBase64 = Convert.ToBase64String(await page.ScreenshotAsync());
+                    
+                    // Try to detect product data
+                    var product = await ExtractProductFromDetailPageDeepAsync(page, selectors, siteId, null);
+                    if (product != null && !string.IsNullOrEmpty(product.SkuSource))
+                    {
+                        result.Success = true;
+                        result.DetectedType = "ProductDetail";
+                        result.Sku = product.SkuSource;
+                        result.Price = product.Price?.ToString();
+                        result.ImageUrl = product.ImageUrl;
+                        
+                        // Validar y "aprender" si no es inspectOnly
+                        if (!inspectOnly)
+                        {
+                            // TODO: Guardar en base de datos o actualizar selectores
+                        }
+                    }
+                    else
+                    {
+                        // Check if it's a category/family
+                        var familyLinks = await CollectFamilyLinksAsync(page, selectors);
+                        if (familyLinks.Count > 0)
+                        {
+                            result.Success = true;
+                            result.DetectedType = "Category/Family";
+                            result.ProductsFound = familyLinks.Count;
+                            result.ChildLinks = familyLinks;
+                        }
+                        else
+                        {
+                            result.Success = false;
+                            result.Error = "No identifiable content found";
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    result.Success = false;
+                    result.Error = ex.Message;
+                }
+                
+                results.Add(result);
+            }
+        }
+        finally
+        {
+            await context.CloseAsync();
+        }
+
+        return results;
     }
 
 
@@ -3913,35 +4196,200 @@ private async Task HumanDelayAsync(int minMs = 2000, int maxMs = 5000)
     await Task.Delay(delay);
 }
 
-/// <summary>
-/// Simula movimiento de mouse aleatorio
-/// </summary>
-private async Task SimulateMouseMovementAsync(IPage page)
-{
-    try
+
+    /// <summary>
+    /// Simula movimiento de mouse utilizando curvas de Bezier para mayor naturalidad
+    /// </summary>
+    private async Task SimulateMouseMovementAsync(IPage page)
     {
-        var width = 1920;
-        var height = 1080;
-        
-        // Generar posiciones aleatorias
-        var x1 = _random.Next(100, width - 100);
-        var y1 = _random.Next(100, height - 100);
-        var x2 = _random.Next(100, width - 100);
-        var y2 = _random.Next(100, height - 100);
-        
-        // Mover el mouse en varios pasos para simular movimiento natural
-        await page.Mouse.MoveAsync(x1, y1);
-        await Task.Delay(_random.Next(100, 300));
-        await page.Mouse.MoveAsync(x2, y2);
-        await Task.Delay(_random.Next(100, 300));
-        
-        _logger.LogDebug($"Movimiento de mouse simulado: ({x1},{y1}) -> ({x2},{y2})");
+        try
+        {
+            var viewport = page.ViewportSize;
+            var width = viewport?.Width ?? 1920;
+            var height = viewport?.Height ?? 1080;
+            
+            // Puntos de inicio y fin aleatorios
+            var x1 = _random.Next(100, width - 100);
+            var y1 = _random.Next(100, height - 100);
+            var x2 = _random.Next(100, width - 100);
+            var y2 = _random.Next(100, height - 100);
+            
+            // Mover al inicio (si no estamos ahí ya)
+            await page.Mouse.MoveAsync(x1, y1);
+            
+            // Calcular puntos de control para curva de Bezier cúbica
+            var control1X = x1 + (x2 - x1) * 0.3 + _random.Next(-50, 50);
+            var control1Y = y1 + (y2 - y1) * 0.3 + _random.Next(-50, 50);
+            var control2X = x1 + (x2 - x1) * 0.7 + _random.Next(-50, 50);
+            var control2Y = y1 + (y2 - y1) * 0.7 + _random.Next(-50, 50);
+            
+            // Simular movimiento a lo largo de la curva
+            var steps = _random.Next(20, 50); // Número de pasos
+            for (int i = 1; i <= steps; i++)
+            {
+                var t = (double)i / steps;
+                
+                // Fórmula de Bezier cúbica
+                var cx = Math.Pow(1 - t, 3) * x1 + 
+                         3 * Math.Pow(1 - t, 2) * t * control1X + 
+                         3 * (1 - t) * Math.Pow(t, 2) * control2X + 
+                         Math.Pow(t, 3) * x2;
+                         
+                var cy = Math.Pow(1 - t, 3) * y1 + 
+                         3 * Math.Pow(1 - t, 2) * t * control1Y + 
+                         3 * (1 - t) * Math.Pow(t, 2) * control2Y + 
+                         Math.Pow(t, 3) * y2;
+                
+                await page.Mouse.MoveAsync((float)cx, (float)cy);
+                // Pequeña pausa variable entre pasos para realismo
+                if (i % 5 == 0) await Task.Delay(_random.Next(5, 15)); 
+            }
+
+            
+            _logger.LogDebug($"Movimiento Bezier completado: ({x1},{y1}) -> ({x2},{y2})");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning($"Error en movimiento Bezier: {ex.Message}");
+        }
     }
-    catch (Exception ex)
+
+    /// <summary>
+    /// Simula escritura humana con velocidad variable y errores ocasionales
+    /// </summary>
+    private async Task SimulateTypingAsync(ILocator locator, string text)
     {
-        _logger.LogWarning($"Error simulando movimiento de mouse: {ex.Message}");
+        try 
+        {
+            await locator.ClickAsync();
+            await HumanDelayAsync(200, 600);
+            
+            foreach (char c in text)
+            {
+                // Velocidad de escritura variable (WPM simulado)
+                await Task.Delay(_random.Next(30, 150));
+                
+                // Simular error de tipeo ocasional (2% de probabilidad)
+                if (_random.Next(0, 50) == 0)
+                {
+                    char wrongChar = (char)(c + _random.Next(-1, 2)); // Carácter cercano
+                    await locator.TypeAsync(wrongChar.ToString());
+                    await Task.Delay(_random.Next(100, 300)); // Darse cuenta del error
+                    await locator.PressAsync("Backspace");
+                    await Task.Delay(_random.Next(100, 200)); // Pausa antes de corregir
+                }
+                
+                await locator.TypeAsync(c.ToString());
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning($"Error simulando escritura: {ex.Message}");
+            // Fallback a llenado rápido si falla la simulación
+            await locator.FillAsync(text);
+        }
     }
-}
+
+    /// <summary>
+    /// Simula escritura humana con velocidad variable y errores ocasionales (Overload IElementHandle)
+    /// </summary>
+    private async Task SimulateTypingAsync(IElementHandle handle, string text)
+    {
+        try 
+        {
+            await handle.ClickAsync();
+            await HumanDelayAsync(200, 600);
+            
+            foreach (char c in text)
+            {
+                // Velocidad de escritura variable (WPM simulado)
+                await Task.Delay(_random.Next(30, 150));
+                
+                // Simular error de tipeo ocasional (2% de probabilidad)
+                if (_random.Next(0, 50) == 0)
+                {
+                    char wrongChar = (char)(c + _random.Next(-1, 2)); // Carácter cercano
+                    #pragma warning disable CS0612
+                    await handle.TypeAsync(wrongChar.ToString());
+                    #pragma warning restore CS0612
+                    await Task.Delay(_random.Next(100, 300)); // Darse cuenta del error
+                    await handle.PressAsync("Backspace");
+                    await Task.Delay(_random.Next(100, 200)); // Pausa antes de corregir
+                }
+                
+                #pragma warning disable CS0612
+                await handle.TypeAsync(c.ToString());
+                #pragma warning restore CS0612
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning($"Error simulando escritura: {ex.Message}");
+            await handle.FillAsync(text);
+        }
+    }
+
+    /// <summary>
+    /// Pasa el mouse sobre el elemento antes de hacer clic para simular duda/enfoque
+    /// </summary>
+    private async Task SimulateHoverBeforeClickAsync(ILocator locator)
+    {
+        try
+        {
+            await locator.HoverAsync();
+            await Task.Delay(_random.Next(300, 800)); // Pausa visual
+        }
+        catch 
+        {
+            // Ignorar errores de hover, no es crítico
+        }
+    }
+    
+    /// <summary>
+    /// Pasa el mouse sobre el elemento antes de hacer clic (Overload IElementHandle)
+    /// </summary>
+    private async Task SimulateHoverBeforeClickAsync(IElementHandle handle)
+    {
+        try
+        {
+            await handle.HoverAsync();
+            await Task.Delay(_random.Next(300, 800)); // Pausa visual
+        }
+        catch 
+        {
+            // Ignorar errores de hover
+        }
+    }
+
+    private static async Task HighlightLocatorAsync(ILocator locator)
+    {
+        try
+        {
+            var handle = await locator.ElementHandleAsync();
+            if (handle != null)
+            {
+                await HighlightLocatorAsync(handle);
+            }
+        }
+        catch
+        {
+            // Ignore highlight failures
+        }
+    }
+    
+    private static async Task HighlightLocatorAsync(IElementHandle handle)
+    {
+        try
+        {
+            await handle.EvaluateAsync(
+                "el => { el.style.outline = '2px solid #ff9800'; el.style.outlineOffset = '2px'; }");
+        }
+        catch
+        {
+            // Ignore highlight failures
+        }
+    }
+
 
 /// <summary>
 /// Realiza scroll gradual para simular lectura humana
@@ -4114,4 +4562,125 @@ private async Task HumanClickAsync(ILocator locator)
         throw;
     }
 }
+
+/// <summary>
+/// Scrapea URLs directamente sin navegación por categorías
+/// </summary>
+private async Task<IEnumerable<ScrapedProduct>> ScrapeDirectUrlsAsync(
+    SiteProfile site,
+    string directUrlsJson,
+    CancellationToken cancellationToken)
+{
+    var products = new List<ScrapedProduct>();
+    
+    try
+    {
+        var urls = System.Text.Json.JsonSerializer.Deserialize<List<string>>(directUrlsJson);
+        if (urls == null || urls.Count == 0)
+        {
+            _logger.LogWarning("No se encontraron URLs para inspeccionar");
+            return products;
+        }
+        
+        _logger.LogInformation("Inspeccionando {Count} URLs directamente", urls.Count);
+        await LogStepAsync(site.Id, "info", $"🚀 Iniciando inspección directa de {urls.Count} URLs", new { count = urls.Count });
+        await LogStepAsync(site.Id, "info", "🔍 El scraper intentará extraer datos de cada URL usando los selectores configurados.");
+        
+        // Parsear selectores del sitio
+        string selectorsJson;
+        if (site.Selectors is JsonElement jsonElement)
+            selectorsJson = jsonElement.GetRawText();
+        else if (site.Selectors is string s)
+            selectorsJson = s;
+        else
+            selectorsJson = JsonConvert.SerializeObject(site.Selectors);
+        
+        var selectors = JsonConvert.DeserializeObject<SiteSelectors>(selectorsJson) ?? new SiteSelectors();
+        FillSelectorsFromJson(selectors, selectorsJson);
+        
+        // Obtener contexto del navegador
+        var storageStatePath = GetStorageStatePath(site.Name);
+        var contextOptions = new BrowserNewContextOptions();
+        if (File.Exists(storageStatePath))
+        {
+            contextOptions.StorageStatePath = storageStatePath;
+        }
+        
+        var context = await GetContextAsync(contextOptions);
+        var page = await context.NewPageAsync();
+        
+        // Procesar cada URL
+        foreach (var url in urls)
+        {
+            if (cancellationToken.IsCancellationRequested) break;
+            
+            try
+            {
+                _logger.LogInformation("Inspeccionando URL: {Url}", url);
+                await LogStepAsync(site.Id, "info", $"Inspeccionando: {url}", new { url });
+                
+                // Navegar a la URL
+                await HumanNavigateAsync(page, url, WaitUntilState.NetworkIdle);
+                
+                // Verificar y refrescar sesión si es necesario
+                await EnsureSessionActiveAsync(page, site.Id, cancellationToken);
+                
+                // Tomar screenshot
+                var screenshot = await SaveStepScreenshotAsync(page, $"inspect_{Path.GetFileName(new Uri(url).AbsolutePath)}");
+                
+                // Extraer producto de la página de detalle
+                var product = await ExtractProductFromDetailPageDeepAsync(
+                    page, 
+                    selectors, 
+                    site.Id, 
+                    null);
+
+                
+                if (product != null)
+                {
+                    product.SourceUrl = url;
+                    product.ScreenshotBase64 = screenshot;
+                    products.Add(product);
+                    await LogStepAsync(site.Id, "success", $"Producto extraído: {product.Title}", 
+                        new { sku = product.SkuSource, url });
+                }
+                else
+                {
+                    await LogStepAsync(site.Id, "warning", $"No se pudo extraer producto", new { url });
+                }
+                
+                // Pausa humanizada entre URLs
+                await HumanDelayAsync(2000, 4000);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error inspeccionando URL: {Url}", url);
+                await LogStepAsync(site.Id, "error", $"Error: {ex.Message}", new { url });
+            }
+        }
+        
+        await LogStepAsync(site.Id, "success", $"Inspección completada: {products.Count} productos extraídos", 
+            new { total = urls.Count, extracted = products.Count });
+        
+        // Guardar estado de sesión
+        if (File.Exists(storageStatePath) || products.Count > 0)
+        {
+            try
+            {
+                await context.StorageStateAsync(new BrowserContextStorageStateOptions { Path = storageStatePath });
+            }
+            catch { }
+        }
+    }
+    catch (Exception ex)
+    {
+        _logger.LogError(ex, "Error en modo de inspección directa");
+        await LogStepAsync(site.Id, "error", $"Error crítico: {ex.Message}", null);
+    }
+    
+    return products;
 }
+
+
+}
+

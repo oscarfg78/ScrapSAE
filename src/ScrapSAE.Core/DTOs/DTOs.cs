@@ -14,9 +14,14 @@ public class ScrapedProduct
     public decimal? Price { get; set; }
     public string? Category { get; set; }
     public string? Brand { get; set; }
+    /// <summary>URL de donde se extrajo este producto</summary>
+    public string? SourceUrl { get; set; }
     public Dictionary<string, string> Attributes { get; set; } = new();
     public DateTime ScrapedAt { get; set; } = DateTime.UtcNow;
+    public bool AiEnriched { get; set; }
 }
+
+
 
 /// <summary>
 /// Producto procesado por IA (datos estructurados)
@@ -154,4 +159,29 @@ public class OperationResult<T>
         Success = false,
         ErrorMessage = error
     };
+}
+
+/// <summary>
+/// Resultado de inspección de una URL
+/// </summary>
+public class DirectUrlResult
+{
+    public string Url { get; set; } = string.Empty;
+    public bool Success { get; set; }
+    public string? Error { get; set; }
+    
+    // Datos detectados
+    public string? DetectedType { get; set; }
+    public string? Title { get; set; }
+    public string? Sku { get; set; }
+    public string? Price { get; set; }
+    public string? ImageUrl { get; set; }
+    public string? Breadcrumb { get; set; }
+    
+    // Estadísticas para páginas de listado
+    public int? ProductsFound { get; set; }
+    public List<string>? ChildLinks { get; set; }
+    
+    // Screenshot para debug
+    public string? ScreenshotBase64 { get; set; }
 }

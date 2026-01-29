@@ -1,3 +1,4 @@
+using System;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -50,9 +51,9 @@ public sealed class ApiClient
     public Task<ExecutionReport?> UpdateExecutionReportAsync(Guid id, ExecutionReport report) => PutAsync($"api/execution-reports/{id}", report);
     public Task DeleteExecutionReportAsync(Guid id) => DeleteAsync($"api/execution-reports/{id}");
 
-    public async Task<ScrapeRunResult?> RunScrapingAsync(Guid siteId, bool manualLogin, bool headless)
+    public async Task<ScrapeRunResult?> RunScrapingAsync(Guid siteId, bool manualLogin, bool headless, bool keepBrowser = false, bool screenshotFallback = false, string mode = "traditional")
     {
-        var query = $"api/scraping/run/{siteId}?manualLogin={manualLogin.ToString().ToLowerInvariant()}&headless={headless.ToString().ToLowerInvariant()}";
+        var query = $"api/scraping/run/{siteId}?manualLogin={manualLogin.ToString().ToLowerInvariant()}&headless={headless.ToString().ToLowerInvariant()}&keepBrowser={keepBrowser.ToString().ToLowerInvariant()}&screenshotFallback={screenshotFallback.ToString().ToLowerInvariant()}&mode={Uri.EscapeDataString(mode)}";
         try
         {
             var response = await _httpClient.PostAsync(query, null);
@@ -65,6 +66,15 @@ public sealed class ApiClient
             throw;
         }
     }
+
+    public async Task<List<DirectUrlResult>?> InspectUrlsAsync(Guid siteId, List<string> urls)
+    {
+        var body = new { urls };
+        var response = await _httpClient.PostAsJsonAsync($"api/scraping/inspect/{siteId}", body);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<List<DirectUrlResult>>(_jsonOptions);
+    }
+
 
     public async Task<ScrapeStatus?> GetScrapeStatusAsync(Guid siteId)
     {
@@ -147,6 +157,37 @@ public sealed class ApiClient
         var response = await _httpClient.GetAsync("api/health");
         return response.IsSuccessStatusCode;
     }
+
+    public async Task<LearnedPatterns?> GetLearnedPatternsAsync(Guid siteId)
+    {
+        try
+        {
+            var response = await _httpClient.GetAsync($"api/scraping/patterns/{siteId}");
+            if (!response.IsSuccessStatusCode) return null;
+            return await response.Content.ReadFromJsonAsync<LearnedPatterns>(_jsonOptions);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public async Task LearnUrlsAsync(Guid siteId, List<string> urls)
+    {
+        var body = new
+        {
+            urls = urls.Select(u => new { url = u, type = u.Contains("/a/") || u.Contains("/p/") ? "ProductDetail" : "ProductListing" })
+        };
+        var response = await _httpClient.PostAsJsonAsync($"api/scraping/learn/{siteId}", body);
+        response.EnsureSuccessStatusCode();
+    }
+
+    public async Task ConfirmLoginAsync(Guid siteId)
+    {
+        var response = await _httpClient.PostAsync($"api/scraping/session/confirm/{siteId}", null);
+        response.EnsureSuccessStatusCode();
+    }
+
 
     private async Task<List<T>> GetAllAsync<T>(string path)
     {

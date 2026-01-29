@@ -57,6 +57,13 @@ public sealed class MainViewModel : ViewModelBase
     private string _selectorAnalysisResult = string.Empty;
     private string _scrapingMode = "Tradicional";
     private bool _isFamiliesMode;
+    
+    // Nuevas propiedades para consola en tiempo real y opciones avanzadas
+    private bool _keepBrowserOpen;
+    private bool _useScreenshotFallback;
+    private string _learnedUrlsText = string.Empty;
+    private readonly DispatcherTimer _liveLogTimer;
+    private DateTime _lastLogTimestamp = DateTime.UtcNow.AddDays(-1);
 
     public MainViewModel(ApiClient apiClient)
     {
@@ -67,6 +74,8 @@ public sealed class MainViewModel : ViewModelBase
         _logTimer.Tick += async (_, _) => await RefreshLogsAsync();
         _statusTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
         _statusTimer.Tick += async (_, _) => await RefreshScrapeStatusAsync();
+        _liveLogTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        _liveLogTimer.Tick += async (_, _) => await RefreshLiveLogsAsync();
 
         LoadAllCommand = new AsyncCommand(() => SafeExecuteAsync(LoadAllAsync, "Cargar datos"));
         CreateSiteCommand = new AsyncCommand(() => SafeExecuteAsync(CreateSiteAsync, "Crear proveedor"));
@@ -104,7 +113,16 @@ public sealed class MainViewModel : ViewModelBase
         ResumeScrapingCommand = new AsyncCommand(() => SafeExecuteAsync(ResumeScrapingAsync, "Reanudar scraping"), () => SelectedSite != null);
         StopScrapingCommand = new AsyncCommand(() => SafeExecuteAsync(StopScrapingAsync, "Detener scraping"), () => SelectedSite != null);
         AnalyzeSelectorsCommand = new AsyncCommand(() => SafeExecuteAsync(AnalyzeSelectorsAsync, "Analizar selectores"));
+        InspectUrlsCommand = new AsyncCommand(() => SafeExecuteAsync(InspectUrlsAsync, "Inspeccionar URLs"), () => SelectedSite != null);
+        LoadLearnedUrlsCommand = new AsyncCommand(() => SafeExecuteAsync(LoadLearnedUrlsAsync, "Cargar URLs"), () => SelectedSite != null);
+        SaveLearnedUrlsCommand = new AsyncCommand(() => SafeExecuteAsync(SaveLearnedUrlsAsync, "Guardar URLs"), () => SelectedSite != null);
+        ConfirmLoginCommand = new AsyncCommand(() => SafeExecuteAsync(ConfirmLoginAsync, "Confirmar Login"), () => SelectedSite != null);
+
+        _logTimer.Start();
+        _statusTimer.Start();
+        _liveLogTimer.Start();
     }
+
 
     public ObservableCollection<SiteProfile> Sites { get; } = new();
     public ObservableCollection<StagingProduct> StagingProducts { get; } = new();
@@ -113,7 +131,9 @@ public sealed class MainViewModel : ViewModelBase
     public ObservableCollection<SyncLog> RecentSyncLogs { get; } = new();
     public ObservableCollection<ExecutionReport> ExecutionReports { get; } = new();
     public ObservableCollection<string> AppLogs { get; } = new();
+    public ObservableCollection<string> LiveLogs { get; } = new();
     public string AppLogPath => AppLogger.GetLogPath();
+
 
     public int SelectedTabIndex
     {
@@ -132,6 +152,8 @@ public sealed class MainViewModel : ViewModelBase
                 ((AsyncCommand)PauseScrapingCommand).RaiseCanExecuteChanged();
                 ((AsyncCommand)ResumeScrapingCommand).RaiseCanExecuteChanged();
                 ((AsyncCommand)StopScrapingCommand).RaiseCanExecuteChanged();
+                ((AsyncCommand)ConfirmLoginCommand).RaiseCanExecuteChanged();
+                ((AsyncCommand)InspectUrlsCommand).RaiseCanExecuteChanged();
                 UpdateRecentSyncLogs();
                 _ = SafeExecuteAsync(RefreshScrapeStatusAsync, "Estado scraping");
             }
@@ -353,6 +375,9 @@ public sealed class MainViewModel : ViewModelBase
             {
                 if (value)
                 {
+                    // Iniciar scraping - limpiar y activar timers
+                    LiveLogs.Clear();
+                    _lastLogTimestamp = DateTime.UtcNow.AddSeconds(-5);
                     if (!_logTimer.IsEnabled)
                     {
                         _logTimer.Start();
@@ -361,15 +386,21 @@ public sealed class MainViewModel : ViewModelBase
                     {
                         _statusTimer.Start();
                     }
+                    if (!_liveLogTimer.IsEnabled)
+                    {
+                        _liveLogTimer.Start();
+                    }
                 }
                 else
                 {
                     _logTimer.Stop();
                     _statusTimer.Stop();
+                    _liveLogTimer.Stop();
                 }
             }
         }
     }
+
 
     public string ScrapeStatusText
     {
@@ -382,6 +413,25 @@ public sealed class MainViewModel : ViewModelBase
         get => _selectorAnalysisResult;
         set => SetField(ref _selectorAnalysisResult, value);
     }
+
+    public bool KeepBrowserOpen
+    {
+        get => _keepBrowserOpen;
+        set => SetField(ref _keepBrowserOpen, value);
+    }
+
+    public bool UseScreenshotFallback
+    {
+        get => _useScreenshotFallback;
+        set => SetField(ref _useScreenshotFallback, value);
+    }
+
+    public string LearnedUrlsText
+    {
+        get => _learnedUrlsText;
+        set => SetField(ref _learnedUrlsText, value);
+    }
+
 
     public bool SaeScheduleEnabled
     {
@@ -442,8 +492,13 @@ public sealed class MainViewModel : ViewModelBase
     public AsyncCommand ResumeScrapingCommand { get; }
     public AsyncCommand StopScrapingCommand { get; }
     public AsyncCommand AnalyzeSelectorsCommand { get; }
+    public AsyncCommand InspectUrlsCommand { get; }
+    public AsyncCommand LoadLearnedUrlsCommand { get; }
+    public AsyncCommand SaveLearnedUrlsCommand { get; }
+    public AsyncCommand ConfirmLoginCommand { get; }
 
     public async Task LoadAllAsync()
+
     {
         try
         {
@@ -696,11 +751,19 @@ public sealed class MainViewModel : ViewModelBase
 
         StatusMessage = "Ejecutando scraping...";
         IsScraping = true;
+        _lastLogTimestamp = DateTime.UtcNow.AddSeconds(-2);
+        LiveLogs.Add($"[{DateTime.Now:HH:mm:ss}] → Iniciando sesión de scraping...");
         try
         {
             await RefreshLogsAsync();
             await RefreshScrapeStatusAsync();
-            ScrapeResult = await _apiClient.RunScrapingAsync(SelectedSite.Id, ManualLoginEnabled, HeadlessEnabled);
+            ScrapeResult = await _apiClient.RunScrapingAsync(
+                SelectedSite.Id, 
+                ManualLoginEnabled, 
+                HeadlessEnabled,
+                KeepBrowserOpen,
+                UseScreenshotFallback,
+                ScrapingMode);
             await RefreshLogsAsync();
             await RefreshScrapeStatusAsync();
         }
@@ -711,6 +774,7 @@ public sealed class MainViewModel : ViewModelBase
         StatusMessage = "Scraping finalizado.";
         await LoadAllAsync();
     }
+
 
     private async Task PauseScrapingAsync()
     {
@@ -744,6 +808,50 @@ public sealed class MainViewModel : ViewModelBase
         await _apiClient.StopScrapingAsync(SelectedSite.Id);
         await RefreshScrapeStatusAsync();
         IsScraping = false;
+    }
+
+    private async Task ConfirmLoginAsync()
+    {
+        if (SelectedSite == null) return;
+        
+        await _apiClient.ConfirmLoginAsync(SelectedSite.Id);
+        StatusMessage = "Login confirmado. Scraping debería continuar.";
+        AppLogger.Info($"Login confirmed for site {SelectedSite.Name}");
+    }
+
+    private async Task InspectUrlsAsync()
+    {
+        if (SelectedSite == null || string.IsNullOrWhiteSpace(LearnedUrlsText)) return;
+        
+        var urls = LearnedUrlsText.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                                  .Select(u => u.Trim())
+                                  .Where(u => u.StartsWith("http"))
+                                  .ToList();
+                                  
+        if (urls.Count == 0)
+        {
+            StatusMessage = "No hay URLs válidas para inspeccionar.";
+            return;
+        }
+        
+        StatusMessage = $"Inspeccionando {urls.Count} URLs...";
+        IsScraping = true;
+        _lastLogTimestamp = DateTime.UtcNow.AddSeconds(-2);
+        LiveLogs.Add($"[{DateTime.Now:HH:mm:ss}] → Iniciando inspección de {urls.Count} URLs...");
+        try
+        {
+            var results = await _apiClient.InspectUrlsAsync(SelectedSite.Id, urls);
+            
+            if (results != null)
+            {
+                StatusMessage = $"Inspección completada. Extraídos {results.Count(r => r.Success)} de {urls.Count}.";
+                await RefreshStagingProductsAsync();
+            }
+        }
+        finally
+        {
+            IsScraping = false;
+        }
     }
 
     private async Task SendSelectedToSaeAsync()
@@ -1049,4 +1157,107 @@ public sealed class MainViewModel : ViewModelBase
             AppLogger.Error($"Operation failed: {operationName}", ex);
         }
     }
+
+    private async Task RefreshStagingProductsAsync()
+    {
+        var products = await _apiClient.GetStagingProductsAsync();
+        Application.Current.Dispatcher.Invoke(() =>
+        {
+            StagingProducts.Clear();
+            foreach (var item in products)
+            {
+                StagingProducts.Add(item);
+            }
+        });
+    }
+
+    private async Task RefreshLiveLogsAsync()
+    {
+        if (SelectedSite == null) return;
+        
+        var recentlyActive = (DateTime.UtcNow - _lastLogTimestamp).TotalSeconds < 15;
+        if (!IsScraping && !recentlyActive) return;
+        
+        try
+        {
+            var logs = await _apiClient.GetSyncLogsAsync();
+            var recentLogs = logs
+                .Where(l => l.SiteId == SelectedSite.Id && l.CreatedAt > _lastLogTimestamp.AddSeconds(-30))
+                .OrderBy(l => l.CreatedAt)
+                .ToList();
+            
+            foreach (var log in recentLogs)
+            {
+                var timestamp = log.CreatedAt.ToString("HH:mm:ss");
+                var statusIcon = log.Status switch
+                {
+                    "success" => "✓",
+                    "error" => "✗",
+                    "warning" => "⚠",
+                    _ => "→"
+                };
+                var logLine = $"[{timestamp}] {statusIcon} {log.Message}";
+                
+                Application.Current.Dispatcher.Invoke(() =>
+                {
+                    LiveLogs.Add(logLine);
+                    // Limitar a 200 entradas
+                    while (LiveLogs.Count > 200)
+                        LiveLogs.RemoveAt(0);
+                });
+                
+                if (log.CreatedAt > _lastLogTimestamp)
+                    _lastLogTimestamp = log.CreatedAt;
+            }
+        }
+        catch
+        {
+            // Ignorar errores de refresh silenciosamente
+        }
+    }
+
+    private async Task LoadLearnedUrlsAsync()
+    {
+        if (SelectedSite == null) return;
+        
+        try
+        {
+            var patterns = await _apiClient.GetLearnedPatternsAsync(SelectedSite.Id);
+            if (patterns != null)
+            {
+                var urls = new List<string>();
+                if (patterns.ExampleProductUrls != null)
+                    urls.AddRange(patterns.ExampleProductUrls);
+                if (patterns.ExampleListingUrls != null)
+                    urls.AddRange(patterns.ExampleListingUrls);
+                
+                LearnedUrlsText = string.Join("\n", urls);
+            }
+        }
+        catch
+        {
+            LearnedUrlsText = "Error al cargar URLs";
+        }
+    }
+
+    private async Task SaveLearnedUrlsAsync()
+    {
+        if (SelectedSite == null || string.IsNullOrWhiteSpace(LearnedUrlsText)) return;
+        
+        try
+        {
+            var urls = LearnedUrlsText.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                .Select(u => u.Trim())
+                .Where(u => !string.IsNullOrEmpty(u))
+                .ToList();
+            
+            await _apiClient.LearnUrlsAsync(SelectedSite.Id, urls);
+            StatusMessage = $"Guardadas {urls.Count} URLs de ejemplo";
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Error guardando URLs: {ex.Message}";
+        }
+    }
 }
+

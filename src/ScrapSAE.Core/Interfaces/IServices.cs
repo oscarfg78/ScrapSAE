@@ -57,6 +57,7 @@ public interface ISAEIntegrationService
 /// <summary>
 /// Interface para el servicio de scraping
 /// </summary>
+
 public interface IScrapingService
 {
     /// <summary>
@@ -68,6 +69,11 @@ public interface IScrapingService
     /// Descarga una imagen de producto
     /// </summary>
     Task<byte[]?> DownloadImageAsync(string imageUrl);
+    
+    /// <summary>
+    /// Extrae datos de una lista de URLs específicas directamente
+    /// </summary>
+    Task<List<DirectUrlResult>> ScrapeDirectUrlsAsync(List<string> urls, Guid siteId, bool inspectOnly, CancellationToken cancellationToken = default);
 }
 
 /// <summary>

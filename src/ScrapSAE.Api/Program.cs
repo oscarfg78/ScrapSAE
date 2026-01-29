@@ -25,6 +25,7 @@ builder.Services.AddSingleton<IAIProcessorService, OpenAIProcessorService>();
 builder.Services.AddSingleton<IPerformanceMetricsCollector, PerformanceMetricsCollector>();
 builder.Services.AddSingleton<IPostExecutionAnalyzer, PostExecutionAnalyzerService>();
 builder.Services.AddSingleton<IConfigurationUpdater, ConfigurationUpdaterService>();
+builder.Services.AddSingleton<ILearningService, LearningService>();
 
 builder.Services.AddSingleton(sp => new SupabaseTableService<SiteProfile>(sp.GetRequiredService<ISupabaseRestClient>(), "config_sites"));
 builder.Services.AddSingleton(sp => new SupabaseTableService<StagingProduct>(sp.GetRequiredService<ISupabaseRestClient>(), "staging_products"));
@@ -32,8 +33,12 @@ builder.Services.AddSingleton(sp => new SupabaseTableService<CategoryMapping>(sp
 builder.Services.AddSingleton(sp => new SupabaseTableService<SyncLog>(sp.GetRequiredService<ISupabaseRestClient>(), "sync_logs"));
 builder.Services.AddSingleton(sp => new SupabaseTableService<ExecutionReport>(sp.GetRequiredService<ISupabaseRestClient>(), "execution_reports"));
 
+// Browser sharing for persistence
+builder.Services.AddSingleton<IBrowserSharingService, BrowserSharingService>();
+
 builder.Services.AddSingleton<IScrapingService, PlaywrightScrapingService>();
 builder.Services.AddSingleton<ScrapingRunner>();
+builder.Services.AddSingleton<IScrapingSignalService, ScrapingSignalService>();
 
 var saeProvider = builder.Configuration["SAE:Provider"] ?? "firebird";
 if (string.Equals(saeProvider, "firebird", StringComparison.OrdinalIgnoreCase))
@@ -135,17 +140,27 @@ app.MapPost("/api/scraping/run/{siteId:guid}", async (
 {
     var manualLogin = bool.TryParse(request.Query["manualLogin"], out var manual) && manual;
     var headless = !bool.TryParse(request.Query["headless"], out var headlessParsed) || headlessParsed;
+    var keepBrowser = bool.TryParse(request.Query["keepBrowser"], out var keepBrowserParsed) && keepBrowserParsed;
+    var screenshotFallback = bool.TryParse(request.Query["screenshotFallback"], out var screenshotParsed) && screenshotParsed;
+    var scrapingMode = request.Query["mode"].ToString() ?? "traditional";
+    if (scrapingMode.Contains("Familias")) scrapingMode = "families"; else if (scrapingMode.Contains("Tradicional")) scrapingMode = "traditional";
 
     var previousManual = Environment.GetEnvironmentVariable("SCRAPSAE_MANUAL_LOGIN");
     var previousForceManual = Environment.GetEnvironmentVariable("SCRAPSAE_FORCE_MANUAL_LOGIN");
     var previousHeadless = Environment.GetEnvironmentVariable("SCRAPSAE_HEADLESS");
+    var previousKeepBrowser = Environment.GetEnvironmentVariable("SCRAPSAE_KEEP_BROWSER");
+    var previousScreenshotFallback = Environment.GetEnvironmentVariable("SCRAPSAE_SCREENSHOT_FALLBACK");
+    var previousMode = Environment.GetEnvironmentVariable("SCRAPSAE_MODE");
 
     try
     {
-        Console.WriteLine($"[DEBUG] Scraping request for site {siteId}: manualLogin={manualLogin}, headless={headless}");
+        Console.WriteLine($"[DEBUG] Scraping request for site {siteId}: manualLogin={manualLogin}, headless={headless}, keepBrowser={keepBrowser}, screenshotFallback={screenshotFallback}");
         Environment.SetEnvironmentVariable("SCRAPSAE_MANUAL_LOGIN", manualLogin ? "true" : "false");
         Environment.SetEnvironmentVariable("SCRAPSAE_FORCE_MANUAL_LOGIN", manualLogin ? "true" : "false");
         Environment.SetEnvironmentVariable("SCRAPSAE_HEADLESS", headless ? "true" : "false");
+        Environment.SetEnvironmentVariable("SCRAPSAE_KEEP_BROWSER", keepBrowser ? "true" : "false");
+        Environment.SetEnvironmentVariable("SCRAPSAE_SCREENSHOT_FALLBACK", screenshotFallback ? "true" : "false");
+        Environment.SetEnvironmentVariable("SCRAPSAE_MODE", scrapingMode);
         
         Console.WriteLine($"[DEBUG] Env SCRAPSAE_MANUAL_LOGIN: {Environment.GetEnvironmentVariable("SCRAPSAE_MANUAL_LOGIN")}");
         Console.WriteLine($"[DEBUG] Env SCRAPSAE_HEADLESS: {Environment.GetEnvironmentVariable("SCRAPSAE_HEADLESS")}");
@@ -158,8 +173,68 @@ app.MapPost("/api/scraping/run/{siteId:guid}", async (
         Environment.SetEnvironmentVariable("SCRAPSAE_MANUAL_LOGIN", previousManual);
         Environment.SetEnvironmentVariable("SCRAPSAE_FORCE_MANUAL_LOGIN", previousForceManual);
         Environment.SetEnvironmentVariable("SCRAPSAE_HEADLESS", previousHeadless);
+        Environment.SetEnvironmentVariable("SCRAPSAE_KEEP_BROWSER", previousKeepBrowser);
+        Environment.SetEnvironmentVariable("SCRAPSAE_SCREENSHOT_FALLBACK", previousScreenshotFallback);
+        Environment.SetEnvironmentVariable("SCRAPSAE_MODE", previousMode);
     }
 });
+
+
+// Endpoint para inspeccionar/scrapear URLs específicas directamente
+app.MapPost("/api/scraping/inspect/{siteId:guid}", async (
+    Guid siteId,
+    DirectUrlsRequest request,
+    IScrapingService scrapingService,
+    SupabaseTableService<SiteProfile> siteService,
+    IScrapeControlService control,
+    CancellationToken token) =>
+{
+    var site = await siteService.GetByIdAsync(siteId);
+    if (site == null)
+        return Results.NotFound(new { error = "Site not found" });
+    
+    // Configurar ambiente
+    var previousHeadless = Environment.GetEnvironmentVariable("SCRAPSAE_HEADLESS");
+    var previousManual = Environment.GetEnvironmentVariable("SCRAPSAE_FORCE_MANUAL_LOGIN");
+    
+    try
+    {
+        Environment.SetEnvironmentVariable("SCRAPSAE_HEADLESS", request.Headless ? "true" : "false");
+        Environment.SetEnvironmentVariable("SCRAPSAE_FORCE_MANUAL_LOGIN", request.ManualLogin ? "true" : "false");
+        
+        // Establecer las URLs a inspeccionar como variable de entorno
+        var urlsJson = System.Text.Json.JsonSerializer.Serialize(request.Urls);
+        Environment.SetEnvironmentVariable("SCRAPSAE_DIRECT_URLS", urlsJson);
+        Environment.SetEnvironmentVariable("SCRAPSAE_INSPECT_ONLY", request.InspectOnly ? "true" : "false");
+        
+        Console.WriteLine($"[DEBUG] Direct URL inspection for site {siteId}: {request.Urls.Count} URLs");
+        
+        // Ejecutar scraping con las URLs directas
+        var results = await scrapingService.ScrapeDirectUrlsAsync(request.Urls, siteId, request.InspectOnly, token);
+        
+        return Results.Ok(new 
+        { 
+            totalUrls = request.Urls.Count,
+            successCount = results.Count(r => r.Success),
+            results,
+            inspectOnly = request.InspectOnly
+        });
+    }
+    finally
+    {
+        Environment.SetEnvironmentVariable("SCRAPSAE_HEADLESS", previousHeadless);
+        Environment.SetEnvironmentVariable("SCRAPSAE_FORCE_MANUAL_LOGIN", previousManual);
+        Environment.SetEnvironmentVariable("SCRAPSAE_DIRECT_URLS", null);
+        Environment.SetEnvironmentVariable("SCRAPSAE_INSPECT_ONLY", null);
+    }
+});
+
+app.MapPost("/api/scraping/session/confirm/{siteId}", (string siteId, IScrapingSignalService signal) =>
+{
+    signal.ConfirmLogin(siteId);
+    return Results.Ok(new { message = "Login confirmed" });
+});
+
 
 app.MapPost("/api/scraping/pause/{siteId:guid}", (Guid siteId, IScrapeControlService control) =>
 {
@@ -192,6 +267,37 @@ app.MapPost("/api/ai/analyze-selectors", async (
     var result = await ai.AnalyzeSelectorsAsync(request, token);
     return Results.Ok(result);
 });
+
+// Endpoint para aprender de URLs de ejemplo
+app.MapPost("/api/scraping/learn/{siteId:guid}", async (
+    Guid siteId,
+    LearnUrlsRequest request,
+    ILearningService learningService,
+    CancellationToken token) =>
+{
+    var exampleUrls = request.Urls.Select(u => new ExampleUrl
+    {
+        Url = u.Url,
+        Type = Enum.Parse<UrlType>(u.Type, ignoreCase: true)
+    }).ToList();
+    
+    var results = await learningService.LearnFromUrlsAsync(siteId, exampleUrls, token);
+    var patterns = await learningService.GetLearnedPatternsAsync(siteId);
+    
+    return Results.Ok(new { results, patterns });
+});
+
+app.MapGet("/api/scraping/patterns/{siteId:guid}", async (
+    Guid siteId,
+    ILearningService learningService) =>
+{
+    var patterns = await learningService.GetLearnedPatternsAsync(siteId);
+    return patterns != null ? Results.Ok(patterns) : Results.NotFound();
+});
+
+
+
+
 
 app.MapGet("/api/sync-logs/live", async (
     Guid? siteId,
