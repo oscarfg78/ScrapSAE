@@ -115,7 +115,7 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
              };
              persistentOptions.Args = new[] { "--disable-blink-features=AutomationControlled" };
 
-             _context = await _playwright.Chromium.LaunchPersistentContextAsync(userDataDir, persistentOptions);
+             _context = await _playwright.Chromium.LaunchPersistentContextAsync(userDataDir ?? string.Empty, persistentOptions);
              _isPersistentContext = true;
         }
         
@@ -594,7 +594,7 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
             string email = string.Empty;
             string password = string.Empty;
 
-            if (site.CredentialsEncrypted.Trim().StartsWith("{"))
+            if (site.CredentialsEncrypted != null && site.CredentialsEncrypted.Trim().StartsWith("{"))
             {
                 try
                 {
@@ -608,7 +608,7 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
                 }
             }
 
-            if (string.IsNullOrEmpty(email))
+            if (string.IsNullOrEmpty(email) && site.CredentialsEncrypted != null)
             {
                 var credentials = site.CredentialsEncrypted.Split('|');
                 if (credentials.Length >= 2)
@@ -3108,7 +3108,7 @@ private async Task NavigateAndCollectFromSubcategoriesAsync(
                 if (priceEl != null)
                 {
                     var priceText = (await priceEl.InnerTextAsync())?.Trim();
-                    product.Price = ParsePrice(priceText);
+                    product.Price = ParsePrice(priceText ?? "");
                     product.Attributes["price_text"] = priceText ?? "";
                 }
                 
@@ -4081,7 +4081,7 @@ private async Task<ScrapedProduct?> ExtractProductFromDetailPageDeepAsync(
         if (await priceElem.CountAsync() > 0)
         {
             var priceText = await priceElem.TextContentAsync();
-            product.Price = ParsePrice(priceText);
+            product.Price = ParsePrice(priceText ?? "");
             product.Attributes["price_text"] = priceText ?? "";
         }
         
@@ -4274,13 +4274,13 @@ private async Task HumanDelayAsync(int minMs = 2000, int maxMs = 5000)
                 if (_random.Next(0, 50) == 0)
                 {
                     char wrongChar = (char)(c + _random.Next(-1, 2)); // Carácter cercano
-                    await locator.TypeAsync(wrongChar.ToString());
+                    await locator.PressSequentiallyAsync(wrongChar.ToString());
                     await Task.Delay(_random.Next(100, 300)); // Darse cuenta del error
                     await locator.PressAsync("Backspace");
                     await Task.Delay(_random.Next(100, 200)); // Pausa antes de corregir
                 }
                 
-                await locator.TypeAsync(c.ToString());
+                await locator.PressSequentiallyAsync(c.ToString());
             }
         }
         catch (Exception ex)

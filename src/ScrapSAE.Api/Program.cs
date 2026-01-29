@@ -34,6 +34,7 @@ builder.Services.AddSingleton<ILearningService, LearningService>();
 builder.Services.AddSingleton<ITelemetryService, TelemetryService>();
 
 // Actualización Automática de Configuración
+builder.Services.AddSingleton<IStagingService, ApiStagingService>();
 builder.Services.AddSingleton<IConfigurationUpdaterService, ScrapSAE.Infrastructure.Services.ConfigurationUpdaterService>();
 
 // Estrategias de Scraping Multi-Modo
@@ -241,7 +242,7 @@ app.MapPost("/api/scraping/inspect/{siteId:guid}", async (
         
         // Mapear de vuelta a DirectUrlResult para la respuesta del API (compatibilidad frontend)
         var results = scraped.Select(p => new DirectUrlResult {
-            Url = p.SourceUrl,
+            Url = p.SourceUrl ?? string.Empty,
             Success = !string.IsNullOrEmpty(p.SkuSource),
             Title = p.Title,
             Sku = p.SkuSource,
