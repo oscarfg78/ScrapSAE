@@ -1151,13 +1151,40 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
     {
         if (string.IsNullOrEmpty(priceText)) return null;
         
-        // Remove currency symbols and text
-        var cleaned = new string(priceText.Where(c => char.IsDigit(c) || c == '.' || c == ',').ToArray());
+        // Limpiar texto de precio (ej: "1,234.56 MXN" -> "1234.56")
+        // Festo usa MXN y a veces formatos con comas/puntos invertidos según región
+        var cleaned = priceText.Replace("MXN", "").Replace("$", "").Trim();
         
-        // Handle different decimal separators
-        cleaned = cleaned.Replace(",", ".");
+        // Detectar si el punto es separador de miles (ej: 1.234,56) o decimal (1,234.56)
+        // Regla simple: si hay coma y punto, y el punto está después, el punto es decimal.
+        // En MX/ES festo suele ser 1.234,56 o similar.
         
-        if (decimal.TryParse(cleaned, out var price))
+        bool hasComma = cleaned.Contains(",");
+        bool hasDot = cleaned.Contains(".");
+        
+        if (hasComma && hasDot)
+        {
+            if (cleaned.IndexOf(",") < cleaned.IndexOf("."))
+            {
+                // Formato 1,234.56 -> Quitar coma
+                cleaned = cleaned.Replace(",", "");
+            }
+            else
+            {
+                // Formato 1.234,56 -> Quitar punto y cambiar coma a punto
+                cleaned = cleaned.Replace(".", "").Replace(",", ".");
+            }
+        }
+        else if (hasComma)
+        {
+            // Solo coma -> asumimos decimal (ej: 1234,56)
+            cleaned = cleaned.Replace(",", ".");
+        }
+        
+        // Quitar cualquier otro carácter que no sea dígito o punto
+        cleaned = new string(cleaned.Where(c => char.IsDigit(c) || c == '.').ToArray());
+        
+        if (decimal.TryParse(cleaned, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var price))
             return price;
         
         return null;
@@ -2821,9 +2848,50 @@ private async Task NavigateAndCollectFromSubcategoriesAsync(
             categoryPath,
             cancellationToken);
         
+        // DESCUBRIMIENTO PROACTIVO: Buscar URLs que parezcan productos en el HTML actual (Sugerencia del Usuario)
+        var discoveredUrls = await DiscoverRelatedProductUrlsAsync(page, cancellationToken);
+        if (discoveredUrls.Any())
+        {
+            _logger.LogInformation("Descubiertas {Count} URLs que parecen productos en el HTML", discoveredUrls.Count);
+            foreach (var url in discoveredUrls)
+            {
+                if (products.Count >= maxProducts) break;
+                
+                // Si es una URL que no hemos visto, procesarla
+                if (!seenProducts.Contains(url))
+                {
+                     _logger.LogInformation("Navegando a URL descubierta: {Url}", url);
+                     try 
+                     {
+                         await page.GotoAsync(url, new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 60000 });
+                         await AcceptCookiesAsync(page, cancellationToken);
+                         
+                         // Reutilizar la lógica de extracción profunda
+                         var extractedProducts = await ExtractFestoProductsFromDetailPageAsync(page, selectors, categoryPath, cancellationToken);
+                         foreach (var p in extractedProducts)
+                         {
+                             if (seenProducts.Add(GetProductKey(p)))
+                             {
+                                 products.Add(p);
+                                 _logger.LogInformation("Producto descubierto y extraído: {Title}", p.Title);
+                             }
+                         }
+                         
+                         // Volver atrás para seguir procesando la lista original si es necesario, 
+                         // aunque aquí podríamos simplemente continuar con las siguientes URLs ya que tenemos la lista en memoria.
+                         // No es estrictamente necesario volver atrás a menos que dependamos del estado de la página anterior.
+                     }
+                     catch (Exception ex)
+                     {
+                         _logger.LogWarning(ex, "Error procesando URL descubierta: {Url}", url);
+                     }
+                }
+            }
+        }
+        
         return; // No buscar subcategorías si ya hay productos
     }
-    
+
     // No hay productos, buscar subcategorías o enlaces de navegación
     var subcategorySelectors = new[]
     {
@@ -3065,6 +3133,9 @@ private async Task NavigateAndCollectFromSubcategoriesAsync(
         {
             await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
             await Task.Delay(2000, cancellationToken);
+
+            // Descubrir URLs de navegación una vez por página
+            var navigationUrls = await DiscoverRelatedProductUrlsAsync(page, cancellationToken);
             
             var variantTableSelector = selectors.VariantTableSelector ?? "div[class*='variants-table-container--']";
             var variantTable = await page.QuerySelectorAsync(variantTableSelector);
@@ -3092,7 +3163,8 @@ private async Task NavigateAndCollectFromSubcategoriesAsync(
                         var product = new ScrapedProduct
                         {
                             ScrapedAt = DateTime.UtcNow,
-                            Attributes = new Dictionary<string, string>()
+                            Attributes = new Dictionary<string, string>(),
+                            NavigationUrls = new List<string>(navigationUrls)
                         };
                         
                         var skuLinkSelector = selectors.VariantSkuLinkSelector ?? "a[href*='/p/']";
@@ -3159,7 +3231,8 @@ private async Task NavigateAndCollectFromSubcategoriesAsync(
                 {
                     RawHtml = await page.ContentAsync(),
                     ScrapedAt = DateTime.UtcNow,
-                    Attributes = new Dictionary<string, string>()
+                    Attributes = new Dictionary<string, string>(),
+                    NavigationUrls = new List<string>(navigationUrls)
                 };
                 
                 // Extraer Título (Headline + Order Code)
@@ -3778,14 +3851,46 @@ private async Task NavigateAndCollectFromSubcategoriesAsync(
                     
                     // Extracción Deep
                     await LogStepAsync(siteId, "info", "🧪 Extrayendo información técnica (Deep Extraction)...", null);
-                    var product = await ExtractProductFromDetailPageDeepAsync(page, selectors, siteId, null);
+                    // Update: The error was in ExtractProductFromDetailPageDeepAsync call, but here it says ExtractFestoProductsFromDetailPageAsync.
+                    // Let me check ScrapeDirectUrlsAsync implementation again.
+                    // Ah, line 4376 in the original file (which is ExtractProductFromDetailPageDeepAsync) called DiscoverRelatedProductUrlsAsync(page, cancellationToken).
+                    // This usage was inside ExtractProductFromDetailPageDeepAsync.
+                    // Now I need to update the CALLERS of ExtractProductFromDetailPageDeepAsync.
+                    // Wait, I am looking at ScrapeDirectUrlsAsync (around 3800).
+                    // In the previous view it used ExtractFestoProductsFromDetailPageAsync.
+                    // I need to find where ExtractProductFromDetailPageDeepAsync is CALLED.
                     
-                    if (product != null)
+                    var extractedProducts = await ExtractFestoProductsFromDetailPageAsync(page, selectors, new List<string>(), cancellationToken);
+                    
+                    if (extractedProducts != null && extractedProducts.Any())
                     {
-                        product.SourceUrl = url;
-                        product.ScreenshotBase64 = screenshot;
-                        products.Add(product);
-                        await LogStepAsync(siteId, "success", $"Producto extraído: {product.Title}", new { sku = product.SkuSource, url });
+                        foreach (var product in extractedProducts)
+                        {
+                            product.SourceUrl = url;
+                            product.ScreenshotBase64 = screenshot;
+                            products.Add(product);
+                            await LogStepAsync(siteId, "success", $"Producto extraído: {product.Title}", new { sku = product.SkuSource, url });
+                        }
+
+                        // ESTRATEGIA RECURSIVA: Si es Festo, intentar descubrir hermanos/categoría
+                        if (url.Contains("festo.com") || (site.Name != null && site.Name.Contains("Festo", StringComparison.OrdinalIgnoreCase)))
+                        {
+                            await LogStepAsync(siteId, "info", "🔍 Iniciando descubrimiento recursivo vía breadcrumbs...", null);
+                            if (await NavigateBackViaFestoBreadcrumbAsync(page, cancellationToken))
+                            {
+                                var currentSeenIds = new HashSet<string>(products.Select(p => p.SkuSource ?? "").Where(s => !string.IsNullOrEmpty(s)));
+                                await NavigateAndCollectFromSubcategoriesAsync(
+                                    page,
+                                    siteId,
+                                    selectors,
+                                    products,
+                                    currentSeenIds,
+                                    site.MaxProductsPerScrape > 0 ? site.MaxProductsPerScrape : 50,
+                                    new List<string> { "Recursivo" },
+                                    cancellationToken,
+                                    depth: 0);
+                            }
+                        }
                     }
                     else
                     {
@@ -4128,7 +4233,7 @@ private async Task<List<ScrapedProduct>> ExtractProductsFromFamilyPageAsync(
                 await AcceptCookiesAsync(page, cancellationToken);
                 
                 // Extraer todos los datos desde la página de detalle
-                var product = await ExtractProductFromDetailPageDeepAsync(page, selectors, siteId, familyTitle);
+                var product = await ExtractProductFromDetailPageDeepAsync(page, selectors, siteId, familyTitle, cancellationToken);
                 
                 if (product != null && !string.IsNullOrEmpty(product.SkuSource))
                 {
@@ -4175,7 +4280,8 @@ private async Task<ScrapedProduct?> ExtractProductFromDetailPageDeepAsync(
     IPage page,
     SiteSelectors selectors,
     Guid siteId,
-    string? familyTitle)
+    string? familyTitle,
+    CancellationToken cancellationToken)
 {
     try
     {
@@ -4360,22 +4466,21 @@ private async Task<ScrapedProduct?> ExtractProductFromDetailPageDeepAsync(
             _logger.LogDebug("Error extrayendo atributos adicionales: {Message}", ex.Message);
         }
         
-        // Validar que tengamos datos críticos
-        if (string.IsNullOrEmpty(product.SkuSource) && string.IsNullOrEmpty(product.Title))
+            // 7. Descubrimiento de URLs de navegación/relacionados (Sugerencia del Usuario)
+            product.NavigationUrls = await DiscoverRelatedProductUrlsAsync(page, cancellationToken);
+            if (product.NavigationUrls.Any())
+            {
+                _logger.LogInformation("Asociadas {Count} URLs de navegación al producto {Sku}", product.NavigationUrls.Count, product.SkuSource);
+            }
+
+            return product;
+        }
+        catch (Exception ex)
         {
-            _logger.LogWarning("Producto sin SKU ni título en: {Url}", page.Url);
-            await LogStepAsync(siteId, "warning", "Producto sin datos críticos", new { url = page.Url });
+            _logger.LogWarning(ex, "Error en ExtractProductFromDetailPageDeepAsync");
             return null;
         }
-        
-        return product;
     }
-    catch (Exception ex)
-    {
-        _logger.LogWarning(ex, "Error en ExtractProductFromDetailPageDeepAsync");
-        return null;
-    }
-}
 
 
 /// <summary>
@@ -4913,6 +5018,64 @@ private async Task HumanClickAsync(ILocator locator)
 }
 */
 
+private async Task<List<string>> DiscoverRelatedProductUrlsAsync(IPage page, CancellationToken cancellationToken)
+{
+    var productsLinks = new List<string>();
+    try
+    {
+        // 1. Descubrimiento proactivo por selectores específicos (ej: accesorios, relacionados)
+        var relatedSelectors = new[]
+        {
+            "h4.product-name--syDfy a.product-link--rpGXq",
+            "a[class*='product-link--']",
+            "a[class*='related-product']",
+            ".accessories-table a[href*='/a/'], .accessories-table a[href*='/p/']"
+        };
+
+        foreach (var selector in relatedSelectors)
+        {
+            var elements = await page.Locator(selector).AllAsync();
+            foreach (var el in elements)
+            {
+                var href = await el.GetAttributeAsync("href");
+                if (!string.IsNullOrEmpty(href))
+                {
+                    var fullUrl = href.StartsWith("http") ? href : new Uri(new Uri(page.Url), href).ToString();
+                    if (!productsLinks.Contains(fullUrl)) productsLinks.Add(fullUrl);
+                }
+            }
+        }
+
+        // 2. Descubrimiento por patrones en todos los enlaces del HTML
+        var allLinks = await page.EvaluateAsync<string[]>("() => [...document.querySelectorAll('a')].map(a => a.href)");
+        var productPatterns = new[] { "/p/", "/a/", "/product/", "/producto/", "/art/", "/article/" };
+        
+        foreach (var link in allLinks)
+        {
+            if (string.IsNullOrEmpty(link) || link.Contains("#")) continue;
+            
+            bool matches = false;
+            if (link.Contains("festo.com"))
+            {
+                matches = link.Contains("/p/") || link.Contains("/a/");
+            }
+            else
+            {
+                matches = productPatterns.Any(p => link.Contains(p, StringComparison.OrdinalIgnoreCase));
+            }
+            
+            if (matches && !productsLinks.Contains(link))
+            {
+                productsLinks.Add(link);
+            }
+        }
+    }
+    catch (Exception ex)
+    {
+        _logger.LogWarning(ex, "Error descubriendo URLs en el HTML");
+    }
+    return productsLinks;
+}
 
 }
 

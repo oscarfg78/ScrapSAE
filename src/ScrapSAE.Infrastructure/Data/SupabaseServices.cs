@@ -45,7 +45,7 @@ public class SupabaseStagingService : IStagingService
     {
         try
         {
-            product.Id = Guid.NewGuid();
+            if (product.Id == Guid.Empty) product.Id = Guid.NewGuid();
             product.CreatedAt = DateTime.UtcNow;
             product.UpdatedAt = DateTime.UtcNow;
             
@@ -70,6 +70,46 @@ public class SupabaseStagingService : IStagingService
             _logger.LogError(ex, "Error creating staging product");
             throw;
         }
+    }
+
+    public async Task<StagingProduct> UpsertProductAsync(StagingProduct product)
+    {
+        var existing = await GetProductBySourceSkuAsync(product.SiteId, product.SkuSource ?? "");
+        if (existing != null)
+        {
+            try
+            {
+                var update = new 
+                { 
+                    raw_data = product.RawData, 
+                    ai_processed_json = product.AIProcessedJson, 
+                    source_url = product.SourceUrl,
+                    status = product.Status,
+                    updated_at = DateTime.UtcNow 
+                };
+                
+                var response = await _httpClient.PatchAsJsonAsync(
+                    $"{_baseUrl}/rest/v1/staging_products?id=eq.{existing.Id}", 
+                    update);
+                
+                response.EnsureSuccessStatusCode();
+                
+                existing.RawData = product.RawData;
+                existing.AIProcessedJson = product.AIProcessedJson;
+                existing.SourceUrl = product.SourceUrl;
+                existing.Status = product.Status;
+                existing.UpdatedAt = DateTime.UtcNow;
+                
+                return existing;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error upserting (updating) staging product {Id}", existing.Id);
+                throw;
+            }
+        }
+
+        return await CreateProductAsync(product);
     }
 
     public async Task<StagingProduct?> GetProductBySourceSkuAsync(Guid siteId, string skuSource)

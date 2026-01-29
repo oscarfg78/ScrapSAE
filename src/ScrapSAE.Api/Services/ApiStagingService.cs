@@ -29,6 +29,23 @@ public sealed class ApiStagingService : IStagingService
         return created ?? product;
     }
 
+    public async Task<StagingProduct> UpsertProductAsync(StagingProduct product)
+    {
+        var existing = await GetProductBySourceSkuAsync(product.SiteId, product.SkuSource ?? "");
+        if (existing != null)
+        {
+            existing.RawData = product.RawData;
+            existing.AIProcessedJson = product.AIProcessedJson;
+            existing.SourceUrl = product.SourceUrl;
+            existing.UpdatedAt = DateTime.UtcNow;
+            existing.Status = product.Status; // Mantener estado o resetear a pending? User dijo "actualizar"
+            await _productsTable.UpdateAsync(existing.Id, existing);
+            return existing;
+        }
+
+        return await CreateProductAsync(product);
+    }
+
     public async Task<StagingProduct?> GetProductBySourceSkuAsync(Guid siteId, string skuSource)
     {
         var all = await _productsTable.GetAllAsync();

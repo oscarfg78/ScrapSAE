@@ -81,13 +81,14 @@ public class Worker : BackgroundService
                                 {
                                     SiteId = site.Id,
                                     SkuSource = scrapedProduct.SkuSource,
-                                    RawData = scrapedProduct.RawHtml,
+                                    RawData = JsonSerializer.Serialize(scrapedProduct),
+                                    SourceUrl = scrapedProduct.SourceUrl,
                                     Status = "pending"
                                 };
 
                                 stagingProduct.AIProcessedJson = await BuildAiJsonAsync(scrapedProduct, stoppingToken);
 
-                                await _stagingService.CreateProductAsync(stagingProduct);
+                                await _stagingService.UpsertProductAsync(stagingProduct);
                                 savedCount++;
 
                                 // Small random delay between saving products (100-500ms) to avoid hammering the database

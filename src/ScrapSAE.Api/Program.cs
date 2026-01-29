@@ -140,6 +140,12 @@ MapCrud(app, "/api/staging-products", "StagingProduct",
     },
     entity => entity.UpdatedAt = DateTime.UtcNow);
 
+app.MapPost("/api/staging-products/upsert", async (StagingProduct product, IStagingService stagingService) =>
+{
+    var result = await stagingService.UpsertProductAsync(product);
+    return Results.Ok(result);
+});
+
 MapCrud(app, "/api/category-mappings", "CategoryMapping",
     app.Services.GetRequiredService<SupabaseTableService<CategoryMapping>>(),
     entity => entity.CreatedAt = DateTime.UtcNow,

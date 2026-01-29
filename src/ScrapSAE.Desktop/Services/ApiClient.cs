@@ -33,6 +33,7 @@ public sealed class ApiClient
 
     public Task<List<StagingProduct>> GetStagingProductsAsync() => GetAllAsync<StagingProduct>("api/staging-products");
     public Task<StagingProduct?> CreateStagingProductAsync(StagingProduct product) => PostAsync("api/staging-products", product);
+    public Task<StagingProduct?> UpsertStagingProductAsync(StagingProduct product) => PostAsync("api/staging-products/upsert", product);
     public Task<StagingProduct?> UpdateStagingProductAsync(Guid id, StagingProduct product) => PutAsync($"api/staging-products/{id}", product);
     public Task DeleteStagingProductAsync(Guid id) => DeleteAsync($"api/staging-products/{id}");
 

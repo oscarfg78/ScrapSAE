@@ -106,6 +106,7 @@ public interface IAIProcessorService
 public interface IStagingService
 {
     Task<StagingProduct> CreateProductAsync(StagingProduct product);
+    Task<StagingProduct> UpsertProductAsync(StagingProduct product);
     Task<StagingProduct?> GetProductBySourceSkuAsync(Guid siteId, string skuSource);
     Task<IEnumerable<StagingProduct>> GetPendingProductsAsync();
     Task UpdateProductStatusAsync(Guid id, string status, string? notes = null);

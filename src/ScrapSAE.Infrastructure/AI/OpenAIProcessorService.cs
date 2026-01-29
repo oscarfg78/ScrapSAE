@@ -177,9 +177,16 @@ public sealed class OpenAIProcessorService : IAIProcessorService
     private object BuildProcessedProductRequest(string rawData)
     {
         var systemPrompt = """
-            Eres un asistente que extrae datos de productos desde texto crudo y/o imagenes.
-            Devuelve solo JSON valido que cumpla el esquema indicado. No inventes datos.
-            Si un campo no existe, usa null o un string vacio segun el tipo.
+            Eres un experto en extracción de datos de comercio electrónico. Tu tarea es extraer información precisa de productos desde el HTML crudo y/o imágenes proporcionadas.
+            
+            REGLAS CRÍTICAS:
+            1. SKU/PART NUMBER: Identifica el código de artículo ( SKU, Part Number, Order Code). En Festo suele ser una combinación de letras y números (ej. VAMC-L1-CD).
+            2. BRAND: Identifica la marca (ej: Festo, Siemens, etc.). Si no estás seguro pero el contexto es de un sitio específico, usa esa marca.
+            3. PRECIO: Extrae el valor numérico. Ignora símbolos de moneda pero asegúrate de capturar decimales.
+            4. CATEGORÍA: Sugiere la categoría más adecuada basada en el nombre y descripción del producto.
+            
+            Devuelve SOLO JSON válido que cumpla el esquema. No incluyas explicaciones fuera del JSON.
+            Si un campo no se encuentra, usa null o un valor vacío según corresponda, pero prioriza la búsqueda exhaustiva en el HTML.
             """;
 
         if (TryExtractScreenshot(rawData, out var screenshotBase64, out var sanitizedText))

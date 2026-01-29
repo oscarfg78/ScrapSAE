@@ -17,6 +17,7 @@ public class ScrapedProduct
     /// <summary>URL de donde se extrajo este producto</summary>
     public string? SourceUrl { get; set; }
     public Dictionary<string, string> Attributes { get; set; } = new();
+    public List<string> NavigationUrls { get; set; } = new();
     public DateTime ScrapedAt { get; set; } = DateTime.UtcNow;
     public bool AiEnriched { get; set; }
 }
