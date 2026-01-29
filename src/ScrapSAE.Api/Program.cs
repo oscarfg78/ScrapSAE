@@ -5,6 +5,8 @@ using ScrapSAE.Core.Entities;
 using ScrapSAE.Core.Interfaces;
 using ScrapSAE.Infrastructure.AI;
 using ScrapSAE.Infrastructure.Scraping;
+using ScrapSAE.Infrastructure.Services;
+using ScrapSAE.Infrastructure.Scraping.Strategies;
 
 
 var builder = WebApplication.CreateBuilder(args);
@@ -24,8 +26,28 @@ builder.Services.AddSingleton<IAIProcessorService, OpenAIProcessorService>();
 // Nuevos servicios para arquitectura adaptativa
 builder.Services.AddSingleton<IPerformanceMetricsCollector, PerformanceMetricsCollector>();
 builder.Services.AddSingleton<IPostExecutionAnalyzer, PostExecutionAnalyzerService>();
-builder.Services.AddSingleton<IConfigurationUpdater, ConfigurationUpdaterService>();
+builder.Services.AddSingleton<IConfigurationUpdater, ScrapSAE.Api.Services.ConfigurationUpdaterService>();
 builder.Services.AddSingleton<ILearningService, LearningService>();
+
+// ===== SISTEMA ADAPTATIVO - FASE 1-4 =====
+// Telemetría Enriquecida
+builder.Services.AddSingleton<ITelemetryService, TelemetryService>();
+
+// Actualización Automática de Configuración
+builder.Services.AddSingleton<IConfigurationUpdaterService, ScrapSAE.Infrastructure.Services.ConfigurationUpdaterService>();
+
+// Estrategias de Scraping Multi-Modo
+builder.Services.AddSingleton<IScrapingStrategy, DirectExtractionStrategy>();
+builder.Services.AddSingleton<IScrapingStrategy, ListExtractionStrategy>();
+builder.Services.AddSingleton<IScrapingStrategy, FamiliesExtractionStrategy>();
+
+// Orquestador de Estrategias con Fallback
+builder.Services.AddSingleton<IStrategyOrchestrator>(sp =>
+{
+    var logger = sp.GetRequiredService<ILogger<StrategyOrchestrator>>();
+    var strategies = sp.GetServices<IScrapingStrategy>();
+    return new StrategyOrchestrator(logger, strategies);
+});
 
 builder.Services.AddSingleton(sp => new SupabaseTableService<SiteProfile>(sp.GetRequiredService<ISupabaseRestClient>(), "config_sites"));
 builder.Services.AddSingleton(sp => new SupabaseTableService<StagingProduct>(sp.GetRequiredService<ISupabaseRestClient>(), "staging_products"));
