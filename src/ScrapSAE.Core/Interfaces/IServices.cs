@@ -193,3 +193,75 @@ public interface IScrapeControlService
     void Stop(Guid siteId);
     Task WaitIfPausedAsync(Guid siteId, CancellationToken cancellationToken);
 }
+
+/// <summary>
+/// Interface para el servicio de telemetría enriquecida
+/// </summary>
+public interface ITelemetryService
+{
+    /// <summary>
+    /// Registra un fallo con contexto completo de diagnóstico
+    /// </summary>
+    Task RecordFailureAsync(DiagnosticPackage package);
+    
+    /// <summary>
+    /// Registra un éxito en la extracción
+    /// </summary>
+    Task RecordSuccessAsync(Guid executionId, string message, string url);
+    
+    /// <summary>
+    /// Obtiene todos los paquetes de diagnóstico de una ejecución
+    /// </summary>
+    Task<IEnumerable<DiagnosticPackage>> GetDiagnosticPackagesAsync(Guid executionId);
+}
+
+/// <summary>
+/// Interface para el servicio de actualización de configuración
+/// </summary>
+public interface IConfigurationUpdaterService
+{
+    /// <summary>
+    /// Aplica las sugerencias generadas por el análisis post-ejecución
+    /// </summary>
+    Task ApplySuggestionsAsync(Guid siteId, IEnumerable<Suggestion> suggestions);
+    
+    /// <summary>
+    /// Actualiza un selector primario y mueve el antiguo a secundarios
+    /// </summary>
+    Task UpdateSelectorAsync(Guid siteId, string selectorKey, string newSelector);
+}
+
+/// <summary>
+/// Interface para una estrategia de scraping
+/// </summary>
+public interface IScrapingStrategy
+{
+    /// <summary>
+    /// Nombre de la estrategia
+    /// </summary>
+    string StrategyName { get; }
+    
+    /// <summary>
+    /// Ejecuta la estrategia de scraping
+    /// </summary>
+    Task<List<ScrapedProduct>> ExecuteAsync(
+        IPage page,
+        SiteProfile site,
+        Guid executionId,
+        CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// Interface para el orquestador de estrategias
+/// </summary>
+public interface IStrategyOrchestrator
+{
+    /// <summary>
+    /// Ejecuta las estrategias en orden de prioridad hasta que una tenga éxito
+    /// </summary>
+    Task<List<ScrapedProduct>> ExecuteStrategiesAsync(
+        IPage page,
+        SiteProfile site,
+        Guid executionId,
+        CancellationToken cancellationToken = default);
+}

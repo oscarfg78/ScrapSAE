@@ -13,7 +13,7 @@ namespace ScrapSAE.Infrastructure.Scraping;
 /// <summary>
 /// Servicio de web scraping usando Playwright
 /// </summary>
-public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
+public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
 {
     private const string ScreenshotDirectoryName = "scrapsae-screens";
     private readonly ILogger<PlaywrightScrapingService> _logger;
@@ -23,6 +23,7 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
     private readonly IPostExecutionAnalyzer _analyzer;
     private readonly IAIProcessorService _aiProcessor;
     private readonly ISyncLogService _syncLogService;
+    private readonly ITelemetryService _telemetryService;
     private readonly List<SiteProfile> _sites; // Cache simple for testing
     private IPlaywright? _playwright; // Only for persistent context overrides
     private IBrowserContext? _context;
@@ -36,7 +37,8 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
         IScrapeControlService scrapeControl,
         IPostExecutionAnalyzer analyzer,
         IAIProcessorService aiProcessor,
-        ISyncLogService syncLogService)
+        ISyncLogService syncLogService,
+        ITelemetryService telemetryService)
     {
         _logger = logger;
         _browserSharing = browserSharing;
@@ -45,6 +47,7 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
         _analyzer = analyzer;
         _aiProcessor = aiProcessor;
         _syncLogService = syncLogService;
+        _telemetryService = telemetryService;
         _sites = new List<SiteProfile>(); // Initialize empty
     }
 

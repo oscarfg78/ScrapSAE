@@ -19,6 +19,20 @@ public class SiteProfile
     public int MaxProductsPerScrape { get; set; } = 0; // 0 = unlimited
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
+    
+    // Nuevas propiedades para el sistema adaptativo
+    public Dictionary<string, List<string>> SecondarySelectors { get; set; } = new();
+    public List<ScrapingStrategyDefinition> Strategies { get; set; } = new();
+}
+
+/// <summary>
+/// Definición de una estrategia de scraping
+/// </summary>
+public class ScrapingStrategyDefinition
+{
+    public string StrategyName { get; set; } = string.Empty; // "Direct", "List", "Families"
+    public int Priority { get; set; }
+    public bool IsEnabled { get; set; } = true;
 }
 
 /// <summary>
