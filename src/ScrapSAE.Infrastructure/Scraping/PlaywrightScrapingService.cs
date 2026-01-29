@@ -444,7 +444,7 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
                 var maxProducts = site.MaxProductsPerScrape > 0 ? site.MaxProductsPerScrape : 100;
                 var festoProducts = new List<ScrapedProduct>();
 
-                // Cargar URLs de ejemplo si están disponibles
+                // Cargar URLs de ejemplo si están disponibles (opcional)
                 var exampleUrls = await LoadFestoExampleUrlsAsync();
                 if (exampleUrls.Count > 0)
                 {
@@ -478,16 +478,23 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
                 }
                 else
                 {
-                    // Si no hay URLs de ejemplo, usar la landing actual
+                    // Si no hay URLs de ejemplo, usar la página actual (BaseUrl) como punto de partida
+                    _logger.LogInformation("No se encontraron URLs de ejemplo. Iniciando navegación recursiva desde la página actual: {Url}", page.Url);
                     await NavigateAndCollectFromSubcategoriesAsync(page, site.Id, selectors, festoProducts, seenProducts, maxProducts, new List<string>(), cancellationToken);
                 }
 
+                // Retornar resultados (con o sin productos) - Este es el único flujo para Festo
                 if (festoProducts.Count > 0)
                 {
                     _logger.LogInformation("Scraping mejorado de Festo completado con {Count} productos.", festoProducts.Count);
-                    return festoProducts;
                 }
-                _logger.LogWarning("La navegación mejorada de Festo no encontró productos. Continuando con modos tradicionales...");
+                else
+                {
+                    _logger.LogWarning("La navegación mejorada de Festo no encontró productos. Revisa los selectores y la estructura del sitio.");
+                    await LogStepAsync(site.Id, "warning", "No se encontraron productos en la navegación recursiva de Festo.", null);
+                }
+                
+                return festoProducts;
             }
             // --- FIN GANCHO FESTO ---
 

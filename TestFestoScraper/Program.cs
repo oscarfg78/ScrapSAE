@@ -15,12 +15,12 @@ var logger = loggerFactory.CreateLogger<Program>();
 
 logger.LogInformation("=== INICIANDO PRUEBA DE SCRAPER DE FESTO CON URLS DIRECTAS ===");
 
-// Cargar configuración de Festo
-var configPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "festo_config_families_mode.json");
+// Cargar configuración unificada de Festo
+var configPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "festo_config_unified.json");
 if (!File.Exists(configPath))
 {
     // Probar en el directorio actual
-    configPath = Path.Combine(Directory.GetCurrentDirectory(), "festo_config_families_mode.json");
+    configPath = Path.Combine(Directory.GetCurrentDirectory(), "festo_config_unified.json");
 }
 
 if (!File.Exists(configPath))
@@ -52,10 +52,20 @@ if (config.ContainsKey("categoryUrls"))
 
 logger.LogInformation("URLs de categorías a procesar: {Count}", categoryUrls.Count);
 
-// Crear servicio de scraping
+// Crear servicio de scraping con todas las dependencias
 var scrapingLogger = loggerFactory.CreateLogger<PlaywrightScrapingService>();
 var scrapeControl = new ScrapSAE.Infrastructure.Scraping.NoOpScrapeControlService();
-var scrapingService = new PlaywrightScrapingService(scrapingLogger, scrapeControl, null);
+
+// Crear instancias nulas para las dependencias opcionales en pruebas
+var scrapingService = new PlaywrightScrapingService(
+    scrapingLogger,
+    browserSharing: null!,
+    signalService: null!,
+    scrapeControl: scrapeControl,
+    analyzer: null!,
+    aiProcessor: null!,
+    syncLogService: null!,
+    telemetryService: null!);
 
 var allProducts = new List<ScrapedProduct>();
 
