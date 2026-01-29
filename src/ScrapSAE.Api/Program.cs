@@ -185,6 +185,7 @@ app.MapPost("/api/scraping/inspect/{siteId:guid}", async (
     Guid siteId,
     DirectUrlsRequest request,
     IScrapingService scrapingService,
+    ScrapingRunner runner,
     SupabaseTableService<SiteProfile> siteService,
     IScrapeControlService control,
     CancellationToken token) =>
@@ -210,13 +211,31 @@ app.MapPost("/api/scraping/inspect/{siteId:guid}", async (
         Console.WriteLine($"[DEBUG] Direct URL inspection for site {siteId}: {request.Urls.Count} URLs");
         
         // Ejecutar scraping con las URLs directas
-        var results = await scrapingService.ScrapeDirectUrlsAsync(request.Urls, siteId, request.InspectOnly, token);
+        var scraped = await scrapingService.ScrapeDirectUrlsAsync(request.Urls, siteId, request.InspectOnly, token);
+        
+        // Persistir resultados si no es "solo inspección" o si queremos guardar lo validado (según lo solicitado)
+        // El usuario solicitó que las URLs agregadas para análisis deben agregar el producto
+        var (created, updated, skipped) = await runner.ProcessScrapedProductsAsync(siteId, scraped, token);
+        
+        // Mapear de vuelta a DirectUrlResult para la respuesta del API (compatibilidad frontend)
+        var results = scraped.Select(p => new DirectUrlResult {
+            Url = p.SourceUrl,
+            Success = !string.IsNullOrEmpty(p.SkuSource),
+            Title = p.Title,
+            Sku = p.SkuSource,
+            Price = p.Price?.ToString(),
+            ImageUrl = p.ImageUrl,
+            ScreenshotBase64 = p.ScreenshotBase64,
+            DetectedType = "ProductDetail"
+        }).ToList();
         
         return Results.Ok(new 
         { 
             totalUrls = request.Urls.Count,
             successCount = results.Count(r => r.Success),
-            results,
+            productsCreated = created,
+            productsUpdated = updated,
+            results = results,
             inspectOnly = request.InspectOnly
         });
     }

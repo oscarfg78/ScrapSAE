@@ -222,7 +222,8 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
         if (!string.IsNullOrEmpty(directUrlsJson))
         {
             _logger.LogInformation("Modo de inspección directa de URLs activado");
-            return await ScrapeDirectUrlsAsync(site, directUrlsJson, cancellationToken);
+            var urls = System.Text.Json.JsonSerializer.Deserialize<List<string>>(directUrlsJson) ?? new List<string>();
+            return await ScrapeDirectUrlsAsync(urls, site.Id, false, cancellationToken);
         }
         
         // Verificar si hay URLs aprendidas (modo automático con aprendizaje)
@@ -231,7 +232,8 @@ public class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
         {
             _logger.LogInformation("Modo de scraping con URLs aprendidas activado");
             await LogStepAsync(site.Id, "info", "Usando URLs aprendidas para scraping", null);
-            return await ScrapeDirectUrlsAsync(site, learnedUrlsJson, cancellationToken);
+            var urls = System.Text.Json.JsonSerializer.Deserialize<List<string>>(learnedUrlsJson) ?? new List<string>();
+            return await ScrapeDirectUrlsAsync(urls, site.Id, false, cancellationToken);
         }
         
         try
@@ -3485,86 +3487,82 @@ private async Task NavigateAndCollectFromSubcategoriesAsync(
         }
     }
 
-    public async Task<List<DirectUrlResult>> ScrapeDirectUrlsAsync(List<string> urls, Guid siteId, bool inspectOnly, CancellationToken cancellationToken)
+    public async Task<List<ScrapedProduct>> ScrapeDirectUrlsAsync(List<string> urls, Guid siteId, bool inspectOnly, CancellationToken cancellationToken)
     {
-        var results = new List<DirectUrlResult>();
+        var products = new List<ScrapedProduct>();
         
-        // Ensure browser is open (this might reuse existing session if available)
-        var browser = await _browserSharing.GetBrowserAsync();
-        
-        // Create a new context with stored state if possible
-        var context = await CreateBrowserContextAsync(browser, _sites.FirstOrDefault(s => s.Id == siteId)?.Name ?? "default");
-        var page = await context.NewPageAsync();
-        
-        // Find selectors
+        // Buscar sitio y selectores
         var site = _sites.FirstOrDefault(s => s.Id == siteId);
-        var selectors = new SiteSelectors();
-        if (site != null && site.Selectors != null)
+        if (site == null)
         {
-            var json = JsonConvert.SerializeObject(site.Selectors);
-            if (!string.IsNullOrWhiteSpace(json))
-            {
-                FillSelectorsFromJson(selectors, json);
-            }
+            _logger.LogWarning("Sitio no encontrado para inspección directa: {SiteId}", siteId);
+            return products;
         }
+
+        var selectorsJson = "";
+        if (site.Selectors is JsonElement jsonElement)
+            selectorsJson = jsonElement.GetRawText();
+        else if (site.Selectors is string s)
+            selectorsJson = s;
+        else
+            selectorsJson = JsonConvert.SerializeObject(site.Selectors);
+
+        var selectors = JsonConvert.DeserializeObject<SiteSelectors>(selectorsJson) ?? new SiteSelectors();
+        FillSelectorsFromJson(selectors, selectorsJson);
+
+        // Iniciar navegador
+        var browser = await _browserSharing.GetBrowserAsync();
+        var context = await CreateBrowserContextAsync(browser, site.Name ?? "default");
+        var page = await context.NewPageAsync();
 
         try 
         {
+            await LogStepAsync(siteId, "info", $"🚀 Iniciando inspección directa de {urls.Count} URLs", new { count = urls.Count });
+
             foreach (var url in urls)
             {
                 if (cancellationToken.IsCancellationRequested) break;
 
-                var result = new DirectUrlResult { Url = url };
                 try 
                 {
-                    await HumanNavigateAsync(page, url, WaitUntilState.DOMContentLoaded);
+                    _logger.LogInformation("Inspeccionando URL: {Url}", url);
+                    await LogStepAsync(siteId, "info", $"🌐 Navegando a: {url}", new { url });
+                    
+                    await HumanNavigateAsync(page, url, WaitUntilState.NetworkIdle);
                     await AcceptCookiesAsync(page, cancellationToken);
                     
-                    // Basic info extraction
-                    result.Title = await page.TitleAsync();
-                    result.ScreenshotBase64 = Convert.ToBase64String(await page.ScreenshotAsync());
+                    // Verificar sesión
+                    await LogStepAsync(siteId, "info", "🔒 Verificando estado de la sesión...", null);
+                    await EnsureSessionActiveAsync(page, siteId, cancellationToken);
+                    await LogStepAsync(siteId, "info", "✅ Sesión activa y lista.", null);
+
+                    // Screenshot
+                    var screenshot = await SaveStepScreenshotAsync(page, $"inspect_{Path.GetFileName(new Uri(url).AbsolutePath)}");
                     
-                    // Try to detect product data
+                    // Extracción Deep
+                    await LogStepAsync(siteId, "info", "🧪 Extrayendo información técnica (Deep Extraction)...", null);
                     var product = await ExtractProductFromDetailPageDeepAsync(page, selectors, siteId, null);
-                    if (product != null && !string.IsNullOrEmpty(product.SkuSource))
+                    
+                    if (product != null)
                     {
-                        result.Success = true;
-                        result.DetectedType = "ProductDetail";
-                        result.Sku = product.SkuSource;
-                        result.Price = product.Price?.ToString();
-                        result.ImageUrl = product.ImageUrl;
-                        
-                        // Validar y "aprender" si no es inspectOnly
-                        if (!inspectOnly)
-                        {
-                            // TODO: Guardar en base de datos o actualizar selectores
-                        }
+                        product.SourceUrl = url;
+                        product.ScreenshotBase64 = screenshot;
+                        products.Add(product);
+                        await LogStepAsync(siteId, "success", $"Producto extraído: {product.Title}", new { sku = product.SkuSource, url });
                     }
                     else
                     {
-                        // Check if it's a category/family
-                        var familyLinks = await CollectFamilyLinksAsync(page, selectors);
-                        if (familyLinks.Count > 0)
-                        {
-                            result.Success = true;
-                            result.DetectedType = "Category/Family";
-                            result.ProductsFound = familyLinks.Count;
-                            result.ChildLinks = familyLinks;
-                        }
-                        else
-                        {
-                            result.Success = false;
-                            result.Error = "No identifiable content found";
-                        }
+                        await LogStepAsync(siteId, "warning", $"No se pudo extraer producto", new { url });
                     }
+
+                    // Pausa humanizada
+                    await HumanDelayAsync(1000, 3000);
                 }
                 catch (Exception ex)
                 {
-                    result.Success = false;
-                    result.Error = ex.Message;
+                    _logger.LogWarning(ex, "Error inspeccionando URL: {Url}", url);
+                    await LogStepAsync(siteId, "error", $"Error: {ex.Message}", new { url });
                 }
-                
-                results.Add(result);
             }
         }
         finally
@@ -3572,7 +3570,7 @@ private async Task NavigateAndCollectFromSubcategoriesAsync(
             await context.CloseAsync();
         }
 
-        return results;
+        return products;
     }
 
 
@@ -4563,16 +4561,12 @@ private async Task HumanClickAsync(ILocator locator)
     }
 }
 
+/*
 /// <summary>
-/// Scrapea URLs directamente sin navegación por categorías
-/// </summary>
-private async Task<IEnumerable<ScrapedProduct>> ScrapeDirectUrlsAsync(
-    SiteProfile site,
-    string directUrlsJson,
-    CancellationToken cancellationToken)
-{
     var products = new List<ScrapedProduct>();
+*/
     
+/*
     try
     {
         var urls = System.Text.Json.JsonSerializer.Deserialize<List<string>>(directUrlsJson);
@@ -4680,6 +4674,7 @@ private async Task<IEnumerable<ScrapedProduct>> ScrapeDirectUrlsAsync(
     
     return products;
 }
+*/
 
 
 }

@@ -128,40 +128,7 @@ public sealed class ScrapingRunner
             await LogAsync(site, "scrape", "error", ex.Message);
             throw;
         }
-        var created = 0;
-        var updated = 0;
-        var skipped = 0;
-
-        foreach (var item in scraped)
-        {
-            if (string.IsNullOrWhiteSpace(item.SkuSource))
-            {
-                skipped++;
-                _logger.LogWarning("Producto omitido por SKU vacío. Título: {Title}", item.Title);
-                continue;
-            }
-
-            var existing = await GetStagingBySkuAsync(siteId, item.SkuSource);
-            if (existing == null)
-            {
-                var staging = MapToStaging(siteId, item);
-                staging.AIProcessedJson = await BuildAiJsonAsync(item, cancellationToken);
-                await _supabase.PostAsync("staging_products", staging);
-                created++;
-            }
-            else
-            {
-                var update = new
-                {
-                    raw_data = item.RawHtml,
-                    ai_processed_json = await BuildAiJsonAsync(item, cancellationToken),
-                    updated_at = DateTime.UtcNow,
-                    last_seen_at = DateTime.UtcNow
-                };
-                await _supabase.PatchAsync<StagingProduct>($"staging_products?id=eq.{existing.Id}", update);
-                updated++;
-            }
-        }
+        var (created, updated, skipped) = await ProcessScrapedProductsAsync(siteId, scraped, cancellationToken);
 
         var duration = (int)(DateTime.UtcNow - startedAt).TotalMilliseconds;
         await LogAsync(site, "scrape", "success", $"Scraping finalizado. Productos creados: {created}. Actualizados: {updated}.", duration);
@@ -213,6 +180,65 @@ public sealed class ScrapingRunner
         };
     }
 
+
+    public async Task<(int created, int updated, int skipped)> ProcessScrapedProductsAsync(
+        Guid siteId, 
+        List<ScrapedProduct> scraped, 
+        CancellationToken cancellationToken)
+    {
+        var site = await GetSiteAsync(siteId);
+        if (site == null) return (0, 0, 0);
+
+        var created = 0;
+        var updated = 0;
+        var skipped = 0;
+
+        foreach (var item in scraped)
+        {
+            if (string.IsNullOrWhiteSpace(item.SkuSource))
+            {
+                skipped++;
+                _logger.LogWarning("Producto omitido por SKU vacío. Título: {Title}", item.Title);
+                continue;
+            }
+
+            // Auto-aprendizaje: si extraemos con éxito un producto, la URL es válida
+            if (_learningService != null && !string.IsNullOrEmpty(item.SourceUrl))
+            {
+                try
+                {
+                    await _learningService.LearnFromUrlAsync(siteId, item.SourceUrl, UrlType.ProductDetail, cancellationToken);
+                }
+                catch 
+                { 
+                    // No bloquear el flujo si falla el aprendizaje
+                }
+            }
+
+            var existing = await GetStagingBySkuAsync(siteId, item.SkuSource);
+            if (existing == null)
+            {
+                var staging = MapToStaging(siteId, item);
+                staging.AIProcessedJson = await BuildAiJsonAsync(item, cancellationToken);
+                await _supabase.PostAsync("staging_products", staging);
+                created++;
+            }
+            else
+            {
+                var update = new
+                {
+                    raw_data = item.RawHtml,
+                    ai_processed_json = await BuildAiJsonAsync(item, cancellationToken),
+                    updated_at = DateTime.UtcNow,
+                    last_seen_at = DateTime.UtcNow
+                };
+                await _supabase.PatchAsync<StagingProduct>($"staging_products?id=eq.{existing.Id}", update);
+                updated++;
+            }
+        }
+
+        return (created, updated, skipped);
+    }
 
     private async Task<SiteProfile?> GetSiteAsync(Guid siteId)
     {

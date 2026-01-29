@@ -73,7 +73,7 @@ public interface IScrapingService
     /// <summary>
     /// Extrae datos de una lista de URLs específicas directamente
     /// </summary>
-    Task<List<DirectUrlResult>> ScrapeDirectUrlsAsync(List<string> urls, Guid siteId, bool inspectOnly, CancellationToken cancellationToken = default);
+    Task<List<ScrapedProduct>> ScrapeDirectUrlsAsync(List<string> urls, Guid siteId, bool inspectOnly, CancellationToken cancellationToken = default);
 }
 
 /// <summary>

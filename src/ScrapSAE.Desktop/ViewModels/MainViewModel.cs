@@ -846,6 +846,7 @@ public sealed class MainViewModel : ViewModelBase
             {
                 StatusMessage = $"Inspección completada. Extraídos {results.Count(r => r.Success)} de {urls.Count}.";
                 await RefreshStagingProductsAsync();
+                await LoadLearnedUrlsAsync();
             }
         }
         finally
