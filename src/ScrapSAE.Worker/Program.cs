@@ -11,6 +11,7 @@ builder.Services.AddSingleton<IStagingService, SupabaseStagingService>();
 builder.Services.AddSingleton<ISyncLogService, SupabaseSyncLogService>();
 builder.Services.AddSingleton<IExecutionReportService, SupabaseExecutionReportService>();
 builder.Services.AddSingleton<IScrapingService, PlaywrightScrapingService>();
+builder.Services.AddSingleton<ScrapingProcessManager>();
 builder.Services.AddSingleton<IScrapeControlService, NoOpScrapeControlService>();
 builder.Services.AddHttpClient("OpenAI");
 builder.Services.AddSingleton<IAIProcessorService, OpenAIProcessorService>();

@@ -59,6 +59,7 @@ builder.Services.AddSingleton(sp => new SupabaseTableService<ExecutionReport>(sp
 // Browser sharing for persistence
 builder.Services.AddSingleton<IBrowserSharingService, BrowserSharingService>();
 
+builder.Services.AddSingleton<ScrapingProcessManager>();
 builder.Services.AddSingleton<IScrapingService, PlaywrightScrapingService>();
 builder.Services.AddSingleton<ScrapingRunner>();
 builder.Services.AddSingleton<IScrapingSignalService, ScrapingSignalService>();
