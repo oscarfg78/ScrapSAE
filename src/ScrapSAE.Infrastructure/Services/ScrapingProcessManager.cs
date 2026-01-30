@@ -220,7 +220,7 @@ public class ScrapingProcessManager
 
     // --- HELPERS ---
 
-    private async Task WaitForHydrationAsync(IPage page, Func<string, Task> stepLogger)
+    public async Task WaitForHydrationAsync(IPage page, Func<string, Task> stepLogger)
     {
          try 
         {
@@ -231,8 +231,13 @@ public class ScrapingProcessManager
         }
         catch (TimeoutException)
         {
-             await stepLogger("⚠️ Hydration Warning: Page load slow or crucial elements missing. Proceeding with caution.");
+             if(stepLogger != null) await stepLogger("⚠️ Hydration Warning: Page load slow or crucial elements missing. Proceeding with caution.");
         }
+    }
+
+    public async Task WaitForHydrationAsync(IPage page, CancellationToken cancellationToken)
+    {
+        await WaitForHydrationAsync(page, async (msg) => _logger.LogWarning(msg));
     }
 
     private async Task<bool> IsProductPageAsync(IPage page)

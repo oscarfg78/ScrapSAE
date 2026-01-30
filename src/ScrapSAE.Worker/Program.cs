@@ -2,9 +2,21 @@ using ScrapSAE.Core.Interfaces;
 using ScrapSAE.Infrastructure.AI;
 using ScrapSAE.Infrastructure.Data;
 using ScrapSAE.Infrastructure.Scraping;
+using ScrapSAE.Infrastructure.Services;
 using ScrapSAE.Worker;
 
+using Serilog;
+
 var builder = Host.CreateApplicationBuilder(args);
+
+// Configure Serilog
+Log.Logger = new LoggerConfiguration()
+    .WriteTo.Console()
+    .WriteTo.File("logs/scrapsae_worker-.log", rollingInterval: RollingInterval.Day, outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {Message:lj}{NewLine}{Exception}")
+    .CreateLogger();
+
+builder.Logging.ClearProviders();
+builder.Logging.AddSerilog();
 
 // Register Infrastructure Services
 builder.Services.AddSingleton<IStagingService, SupabaseStagingService>();

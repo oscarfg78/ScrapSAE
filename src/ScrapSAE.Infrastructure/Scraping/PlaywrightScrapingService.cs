@@ -2798,153 +2798,144 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
         List<string> categoryPath,
         CancellationToken cancellationToken)
     {
-        var cards = page.Locator("[class*='single-product-container--'], .single-product-container");
+        // 1. Selector Robusto para Tarjetas de Producto
+        var cards = page.Locator("[class*='single-product-container--'], [class*='article-card--'], .single-product-container, [data-testid='product-card']");
         var count = await cards.CountAsync();
-        await LogStepAsync(siteId, "info", "Productos detectados en listado.", new
+        
+        await LogStepAsync(siteId, "info", $"Productos detectados en listado: {count}", new
         {
             count,
             categoryPath = categoryPath.Count > 0 ? string.Join(" > ", categoryPath) : null
         });
+
+        // Loop de extracción
+        int analyzedCount = 0;
+        int maxAnalysisLimit = 100; // User request: Limit analysis to avoiding cycling
+
         for (var i = 0; i < count && products.Count < maxProducts; i++)
         {
+            if (analyzedCount >= maxAnalysisLimit) 
+            {
+                _logger.LogWarning("Se alcanzó el límite de análisis de {Limit} items por página. Pasando a siguiente estrategia.", maxAnalysisLimit);
+                break;
+            }
+            analyzedCount++;
+
             await _scrapeControl.WaitIfPausedAsync(siteId, cancellationToken);
             var card = cards.Nth(i);
-            var detailButtonSelectors = new List<string>
+            string? productUrl = null;
+            bool navigated = false;
+            
+            try
             {
-                "button:has-text('Detalles')",
-                "[data-testid='button']:has-text('Detalles')",
-                "[role='button']:has-text('Detalles')"
-            };
+                 // A. Intentar obtener HREF directo (Prioridad)
+                 productUrl = await GetDetailHrefFromCardAsync(card, selectors);
+                 
+                 if (!string.IsNullOrWhiteSpace(productUrl))
+                 {
+                     productUrl = NormalizeHref(page.Url, productUrl);
+                     _logger.LogInformation("Procesando en NUEVA PESTAÑA (Link Directo): {Url}", productUrl);
+                     
+                     var detailPage = await page.Context.NewPageAsync();
+                     try 
+                     {
+                         await detailPage.GotoAsync(productUrl, new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 60000 });
+                         await _processManager.WaitForHydrationAsync(detailPage, cancellationToken);
+                         
+                         var extractedProducts = await ExtractFestoProductsFromDetailPageAsync(detailPage, selectors, categoryPath, cancellationToken);
+                         foreach (var product in extractedProducts)
+                         {
+                             var key = GetProductKey(product);
+                             if (seenProducts.Add(key))
+                             {
+                                 if (!string.IsNullOrEmpty(productUrl)) product.SourceUrl = productUrl; 
+                                 products.Add(product);
+                             }
+                         }
+                     }
+                     finally { await detailPage.CloseAsync(); }
+                     continue; 
+                 }
 
-            if (!string.IsNullOrWhiteSpace(selectors.DetailButtonText))
-            {
-                detailButtonSelectors.Add($"button:has-text('{selectors.DetailButtonText}')");
-                detailButtonSelectors.Add($"[role='button']:has-text('{selectors.DetailButtonText}')");
+                 // B. Fallback: Clic en Botón (Solo si no hay link)
+                 // HTML Analysis confirmed Festo main list items use <button class="...product-details-link--...">Detalles</button>
+                 _logger.LogInformation("No se encontró URL directa. Buscando botón 'Detalles'...");
+                 
+                 var detailButtonSelectors = new List<string>
+                 {
+                     "[class*='product-details-link--']", // Verified from HTML
+                     "button:has-text('Detalles')",
+                     "[data-testid='button']:has-text('Detalles')",
+                     "[role='button']:has-text('Detalles')"
+                 };
+
+                 if (!string.IsNullOrWhiteSpace(selectors.DetailButtonText)) 
+                    detailButtonSelectors.Add($"button:has-text('{selectors.DetailButtonText}')");
+                 
+                 var detailButton = card.Locator(string.Join(", ", detailButtonSelectors.Distinct())).First;
+                 if (await detailButton.CountAsync() > 0)
+                 {
+                     await card.ScrollIntoViewIfNeededAsync();
+                     _logger.LogInformation("Botón Detalles encontrado. Intentando clic y abrir nueva pestaña (workaround)...");
+
+                     // Workaround: Opening in new tab via Ctrl+Click is cleaner than back-and-forth
+                     // But verify if Festo supports Ctrl+Click on these buttons (often they are JS onclicks).
+                     // If JS: we must click, wait for nav, process, go back.
+                     // Verified: They are <button>, so likely JS router push.
+                     
+                     // Capture current URL to verify nav
+                     var preClickUrl = page.Url;
+                     
+                     try {
+                        await detailButton.ClickAsync(new LocatorClickOptions { Timeout = 10000 });
+                     } catch {
+                        await detailButton.DispatchEventAsync("click");
+                     }
+                     
+                     await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+                     await _processManager.WaitForHydrationAsync(page, cancellationToken);
+
+                     if (page.Url != preClickUrl)
+                     {
+                         // Navigated successfully
+                         _logger.LogInformation("Navegación por clic exitosa. Extrayendo...");
+                         var extractedProducts = await ExtractFestoProductsFromDetailPageAsync(page, selectors, categoryPath, cancellationToken);
+                         foreach (var product in extractedProducts)
+                         {
+                             var key = GetProductKey(product);
+                             if (seenProducts.Add(key))
+                             {
+                                 products.Add(product);
+                             }
+                         }
+                         
+                         // GO BACK
+                         _logger.LogInformation("Regresando al listado...");
+                         await page.GoBackAsync(new PageGoBackOptions { WaitUntil = WaitUntilState.DOMContentLoaded });
+                         await _processManager.WaitForHydrationAsync(page, cancellationToken);
+                     }
+                     else
+                     {
+                         _logger.LogWarning("Clic realizado pero URL no cambió. Posible modal o fallo.");
+                         await SaveDebugCardHtmlAsync(card, "festo_click_fail");
+                     }
+                 }
+                 else
+                 {
+                    _logger.LogWarning("Ni link ni botón encontrados para tarjeta {Index}", i);
+                    await SaveDebugCardHtmlAsync(card, "festo_card_dead");
+                 }
             }
-
-            if (!string.IsNullOrWhiteSpace(selectors.DetailButtonClassPrefix))
+            catch (Exception ex)
             {
-                var prefixSelector = BuildClassPrefixSelector(selectors.DetailButtonClassPrefix);
-                detailButtonSelectors.Add($"button{prefixSelector}");
-                detailButtonSelectors.Add($"{prefixSelector}");
-            }
-
-            var detailButton = card.Locator(string.Join(", ", detailButtonSelectors.Distinct()));
-            if (await detailButton.CountAsync() > 0)
-            {
-                var previousUrl = page.Url;
-                await card.ScrollIntoViewIfNeededAsync();
-                await card.HoverAsync();
-                var button = detailButton.First;
-                await button.ScrollIntoViewIfNeededAsync();
-                try
-                {
-                    await VerifyAndClickAsync(button, page, "festo_detail_button", cancellationToken);
-                }
-                catch
-                {
-                    try
-                    {
-                        await button.ClickAsync(new LocatorClickOptions { Force = true, Timeout = 15000 });
-                    }
-                    catch
-                    {
-                        var handle = await button.ElementHandleAsync();
-                        if (handle != null)
-                        {
-                            await page.EvaluateAsync("el => el.click()", handle);
-                        }
-                    }
-                }
-                await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
-                await AcceptCookiesAsync(page, cancellationToken);
-
-                if (page.Url == previousUrl)
-                {
-                    var detailHref = await GetDetailHrefFromCardAsync(card, selectors);
-                    if (!string.IsNullOrWhiteSpace(detailHref))
-                    {
-                        detailHref = NormalizeHref(page.Url, detailHref);
-                        _logger.LogInformation("Click no cambió la URL. Navegando directamente a URL de detalle: {Url}", detailHref);
-                        await page.GotoAsync(detailHref, new PageGotoOptions
-                        {
-                            WaitUntil = WaitUntilState.DOMContentLoaded,
-                            Timeout = 90000
-                        });
-                        await AcceptCookiesAsync(page, cancellationToken);
-                    }
-                    else
-                    {
-                        _logger.LogWarning("No se pudo navegar al detalle: Click falló y no se encontró URL en la tarjeta.");
-                        await SaveDebugScreenshotAsync(page, "festo_detail_click_no_nav");
-                        await SaveDebugHtmlAsync(await page.ContentAsync(), "festo_detail_click_no_nav");
-                        await SaveDebugCardHtmlAsync(card, "festo_detail_card_no_link");
-                        var buttonTexts = await card.Locator("button").AllTextContentsAsync();
-                        if (buttonTexts.Count > 0)
-                        {
-                            _logger.LogInformation("Card button texts: {Texts}", string.Join(" | ", buttonTexts));
-                        }
-                    }
-                }
-                else
-                {
-                    _logger.LogInformation("Navegación exitosa vía click a: {Url}", page.Url);
-                }
-
-                // Para Festo, usar el método mejorado que maneja variantes
-                var extractedProducts = await ExtractFestoProductsFromDetailPageAsync(page, selectors, categoryPath, cancellationToken);
-                foreach (var product in extractedProducts)
-                {
-                    var key = GetProductKey(product);
-                    if (seenProducts.Add(key))
-                    {
-                        products.Add(product);
-                    }
-                }
-
-                _logger.LogInformation("Intentando regresar al listado...");
-                if (await NavigateBackViaFestoBreadcrumbAsync(page, cancellationToken))
-                {
-                    _logger.LogInformation("Regreso al listado exitoso vía breadcrumb.");
-                }
-                else
-                {
-                    _logger.LogInformation("Breadcrumb no disponible o falló. Intentando regresar vía historial (GoBack)...");
-                    await page.GoBackAsync(new() { WaitUntil = WaitUntilState.DOMContentLoaded });
-                    _logger.LogInformation("Navegación GoBack completada.");
-                }
-                await AcceptCookiesAsync(page, cancellationToken);
-                continue;
-            }
-
-            var fallbackHref = await GetDetailHrefFromCardAsync(card, selectors);
-            if (!string.IsNullOrWhiteSpace(fallbackHref))
-            {
-                fallbackHref = NormalizeHref(page.Url, fallbackHref);
-                var detailPage = await page.Context.NewPageAsync();
-                await detailPage.GotoAsync(fallbackHref, new PageGotoOptions
-                {
-                    WaitUntil = WaitUntilState.DOMContentLoaded,
-                    Timeout = 90000
-                });
-                await AcceptCookiesAsync(detailPage, cancellationToken);
-                var extractedProducts = await ExtractFestoProductsFromDetailPageAsync(detailPage, selectors, categoryPath, cancellationToken);
-                foreach (var product in extractedProducts)
-                {
-                    var key = GetProductKey(product);
-                    if (seenProducts.Add(key))
-                    {
-                        products.Add(product);
-                    }
-                }
-                await detailPage.CloseAsync();
-            }
-            else
-            {
-                await SaveDebugCardHtmlAsync(card, "festo_card_no_link");
+                _logger.LogError(ex, "Error procesando tarjeta de producto {Index}", i);
+                // Try recovery logic
+                try { if(page.Url.Contains("/p/")) await page.GoBackAsync(); } catch {}
             }
         }
     }
+
+
 // -------------------------------------------------------------------------
 // UNIFIED HYBRID CRAWLER IMPLEMENTATION
 // -------------------------------------------------------------------------
@@ -3229,7 +3220,7 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
         catch { /* Ignore timeout */ }
 
         // 1. Check for Products directly on this page
-        var productContainers = page.Locator("[class*='single-product-container--']");
+        var productContainers = page.Locator("[class*='single-product-container--'], [class*='article-card--']");
         var productCount = await productContainers.CountAsync();
         
         // Check for results counter as secondary indicator
@@ -3538,6 +3529,7 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
         
         try
         {
+            _logger.LogInformation(">>> Iniciando extracción detallada en: {Url}", page.Url);
             await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
             await Task.Delay(2000, cancellationToken);
 
@@ -3726,6 +3718,11 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
                 if (!string.IsNullOrWhiteSpace(product.SkuSource))
                 {
                     products.Add(product);
+                    _logger.LogInformation("OK - Producto Individual: SKU={SKU}, Title='{Title}', Price={Price}", product.SkuSource, product.Title, product.Price);
+                }
+                else
+                {
+                    _logger.LogWarning("FALLO - Producto Individual: No se pudo extraer SKU. Title='{Title}', URL={Url}", product.Title, page.Url);
                 }
             }
         }

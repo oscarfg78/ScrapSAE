@@ -1,0 +1,12 @@
+﻿  Determining projects to restore...
+  Todos los proyectos est├ín actualizados para la restauraci├│n.
+  ScrapSAE.Core -> C:\Proyectos\ScrapSAE\src\ScrapSAE.Core\bin\Debug\net8.0\ScrapSAE.Core.dll
+C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\Scraping\PlaywrightScrapingService.cs(2833,48): error CS0122: 'ScrapingProcessManager.WaitForHydrationAsync(IPage, Func<string, Task>)' no es accesible debido a su nivel de protecci├│n [C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\ScrapSAE.Infrastructure.csproj]
+
+ERROR al compilar.
+
+C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\Scraping\PlaywrightScrapingService.cs(2833,48): error CS0122: 'ScrapingProcessManager.WaitForHydrationAsync(IPage, Func<string, Task>)' no es accesible debido a su nivel de protecci├│n [C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\ScrapSAE.Infrastructure.csproj]
+    0 Advertencia(s)
+    1 Errores
+
+Tiempo transcurrido 00:00:02.07
