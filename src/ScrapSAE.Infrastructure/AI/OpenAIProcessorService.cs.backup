@@ -180,18 +180,13 @@ public sealed class OpenAIProcessorService : IAIProcessorService
             Eres un experto en extracción de datos de comercio electrónico. Tu tarea es extraer información precisa de productos desde el HTML crudo y/o imágenes proporcionadas.
             
             REGLAS CRÍTICAS:
-            1. SKU/PART NUMBER: Identifica el código de artículo (SKU, Part Number, Order Code). En Festo suele ser una combinación de letras y números (ej. VAMC-L1-CD).
+            1. SKU/PART NUMBER: Identifica el código de artículo ( SKU, Part Number, Order Code). En Festo suele ser una combinación de letras y números (ej. VAMC-L1-CD).
             2. BRAND: Identifica la marca (ej: Festo, Siemens, etc.). Si no estás seguro pero el contexto es de un sitio específico, usa esa marca.
             3. PRECIO: Extrae el valor numérico. Ignora símbolos de moneda pero asegúrate de capturar decimales.
-            4. MONEDA: Identifica la moneda del precio (USD, MXN, EUR, etc.). Si no está explícita, infiere del contexto del sitio.
-            5. CATEGORÍAS: Sugiere todas las categorías relevantes basadas en el nombre y descripción del producto (puede ser más de una).
-            6. GALERÍA DE IMÁGENES: Extrae TODAS las URLs de las imágenes del producto, no solo la principal. Busca elementos como galerías, thumbnails, imágenes alternativas.
-            7. STOCK/INVENTARIO: Busca indicadores de stock, cantidad disponible, o estado de disponibilidad. Extrae el valor numérico si está presente.
-            8. ARCHIVOS ADJUNTOS: Identifica enlaces a documentos PDF, fichas técnicas, manuales de usuario, catálogos. Extrae la URL y el nombre del archivo.
-            9. ESPECIFICACIONES: Extrae todas las especificaciones técnicas en formato clave-valor (dimensiones, peso, material, certificaciones, etc.).
+            4. CATEGORÍA: Sugiere la categoría más adecuada basada en el nombre y descripción del producto.
             
             Devuelve SOLO JSON válido que cumpla el esquema. No incluyas explicaciones fuera del JSON.
-            Si un campo no se encuentra, usa null o un array vacío según corresponda, pero prioriza la búsqueda exhaustiva en el HTML.
+            Si un campo no se encuentra, usa null o un valor vacío según corresponda, pero prioriza la búsqueda exhaustiva en el HTML.
             """;
 
         if (TryExtractScreenshot(rawData, out var screenshotBase64, out var sanitizedText))
@@ -245,13 +240,8 @@ public sealed class OpenAIProcessorService : IAIProcessorService
                             "features",
                             "specifications",
                             "suggestedCategory",
-                            "categories",
                             "lineCode",
                             "price",
-                            "currency",
-                            "stock",
-                            "images",
-                            "attachments",
                             "confidenceScore"
                         },
                         properties = new
@@ -272,36 +262,8 @@ public sealed class OpenAIProcessorService : IAIProcessorService
                                 additionalProperties = new { type = "string" }
                             },
                             suggestedCategory = new { type = new[] { "string", "null" } },
-                            categories = new
-                            {
-                                type = "array",
-                                items = new { type = "string" }
-                            },
                             lineCode = new { type = new[] { "string", "null" } },
                             price = new { type = new[] { "number", "null" } },
-                            currency = new { type = new[] { "string", "null" } },
-                            stock = new { type = new[] { "integer", "null" } },
-                            images = new
-                            {
-                                type = "array",
-                                items = new { type = "string" }
-                            },
-                            attachments = new
-                            {
-                                type = "array",
-                                items = new
-                                {
-                                    type = "object",
-                                    required = new[] { "fileName", "fileUrl" },
-                                    properties = new
-                                    {
-                                        fileName = new { type = "string" },
-                                        fileUrl = new { type = "string" },
-                                        fileType = new { type = new[] { "string", "null" } },
-                                        fileSizeBytes = new { type = new[] { "integer", "null" } }
-                                    }
-                                }
-                            },
                             confidenceScore = new { type = new[] { "number", "null" }, minimum = 0, maximum = 1 }
                         }
                     }
@@ -312,7 +274,7 @@ public sealed class OpenAIProcessorService : IAIProcessorService
 
     private object BuildProcessedProductVisionRequest(string systemPrompt, string textContext, string screenshotBase64)
     {
-        var userPrompt = $"Datos del producto (texto):\n{textContext}\n\nAnaliza también la imagen adjunta para extraer información adicional.";
+        var userPrompt = $"Datos del producto (texto):\n{textContext}\n\nAnaliza tambien la imagen adjunta.";
 
         return new
         {
@@ -334,7 +296,7 @@ public sealed class OpenAIProcessorService : IAIProcessorService
                     content = new object[]
                     {
                         new { type = "input_text", text = userPrompt },
-                        new { type = "input_image", source = new { type = "base64", media_type = "image/png", data = screenshotBase64 } }
+                        new { type = "input_image", image_url = $"data:image/png;base64,{screenshotBase64}" }
                     }
                 }
             },
@@ -359,13 +321,8 @@ public sealed class OpenAIProcessorService : IAIProcessorService
                             "features",
                             "specifications",
                             "suggestedCategory",
-                            "categories",
                             "lineCode",
                             "price",
-                            "currency",
-                            "stock",
-                            "images",
-                            "attachments",
                             "confidenceScore"
                         },
                         properties = new
@@ -375,47 +332,11 @@ public sealed class OpenAIProcessorService : IAIProcessorService
                             brand = new { type = new[] { "string", "null" } },
                             model = new { type = new[] { "string", "null" } },
                             description = new { type = "string" },
-                            features = new
-                            {
-                                type = "array",
-                                items = new { type = "string" }
-                            },
-                            specifications = new
-                            {
-                                type = "object",
-                                additionalProperties = new { type = "string" }
-                            },
+                            features = new { type = "array", items = new { type = "string" } },
+                            specifications = new { type = "object", additionalProperties = new { type = "string" } },
                             suggestedCategory = new { type = new[] { "string", "null" } },
-                            categories = new
-                            {
-                                type = "array",
-                                items = new { type = "string" }
-                            },
                             lineCode = new { type = new[] { "string", "null" } },
                             price = new { type = new[] { "number", "null" } },
-                            currency = new { type = new[] { "string", "null" } },
-                            stock = new { type = new[] { "integer", "null" } },
-                            images = new
-                            {
-                                type = "array",
-                                items = new { type = "string" }
-                            },
-                            attachments = new
-                            {
-                                type = "array",
-                                items = new
-                                {
-                                    type = "object",
-                                    required = new[] { "fileName", "fileUrl" },
-                                    properties = new
-                                    {
-                                        fileName = new { type = "string" },
-                                        fileUrl = new { type = "string" },
-                                        fileType = new { type = new[] { "string", "null" } },
-                                        fileSizeBytes = new { type = new[] { "integer", "null" } }
-                                    }
-                                }
-                            },
                             confidenceScore = new { type = new[] { "number", "null" }, minimum = 0, maximum = 1 }
                         }
                     }
@@ -424,49 +345,85 @@ public sealed class OpenAIProcessorService : IAIProcessorService
         };
     }
 
-    private static bool TryExtractScreenshot(string rawData, out string? screenshotBase64, out string? sanitizedText)
+    private static bool TryExtractScreenshot(string rawData, out string? screenshotBase64, out string sanitizedText)
     {
         screenshotBase64 = null;
-        sanitizedText = null;
+        sanitizedText = rawData;
 
-        const string marker = "SCREENSHOT_BASE64:";
-        var index = rawData.IndexOf(marker, StringComparison.Ordinal);
-        if (index < 0)
+        if (string.IsNullOrWhiteSpace(rawData) || !rawData.TrimStart().StartsWith("{", StringComparison.Ordinal))
         {
             return false;
         }
 
-        var endIndex = rawData.IndexOf('\n', index);
-        if (endIndex < 0)
+        try
         {
-            endIndex = rawData.Length;
+            using var doc = JsonDocument.Parse(rawData);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            if (doc.RootElement.TryGetProperty("screenshotBase64", out var screenshot) &&
+                screenshot.ValueKind == JsonValueKind.String)
+            {
+                screenshotBase64 = screenshot.GetString();
+            }
+
+            if (string.IsNullOrWhiteSpace(screenshotBase64))
+            {
+                return false;
+            }
+
+            var sanitized = new Dictionary<string, object?>();
+            foreach (var prop in doc.RootElement.EnumerateObject())
+            {
+                if (string.Equals(prop.Name, "screenshotBase64", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                sanitized[prop.Name] = prop.Value.ValueKind switch
+                {
+                    JsonValueKind.String => prop.Value.GetString(),
+                    JsonValueKind.Number => prop.Value.GetDecimal(),
+                    JsonValueKind.True => true,
+                    JsonValueKind.False => false,
+                    JsonValueKind.Object => prop.Value.ToString(),
+                    JsonValueKind.Array => prop.Value.ToString(),
+                    _ => null
+                };
+            }
+
+            sanitizedText = JsonSerializer.Serialize(sanitized, JsonOptions);
+            return true;
         }
-
-        screenshotBase64 = rawData.Substring(index + marker.Length, endIndex - index - marker.Length).Trim();
-        sanitizedText = rawData.Substring(0, index) + (endIndex < rawData.Length ? rawData.Substring(endIndex) : string.Empty);
-
-        return !string.IsNullOrWhiteSpace(screenshotBase64);
+        catch
+        {
+            return false;
+        }
     }
 
     private object BuildCategorySuggestionRequest(string productDescription, IEnumerable<ProductLine> availableLines)
     {
-        var linesText = string.Join("\n", availableLines.Select(l => $"- {l.CVE_LIN}: {l.DESC_LIN}"));
-
-        var systemPrompt = $"""
-            Eres un experto en clasificación de productos industriales. Tu tarea es sugerir la línea de producto más adecuada para un artículo dado.
-            
-            Líneas disponibles:
-            {linesText}
-            
-            Devuelve SOLO JSON válido con la línea sugerida, un nivel de confianza (0-1) y una breve justificación.
+        var systemPrompt = """
+            Eres un asistente que asigna la linea SAE mas adecuada.
+            Usa solo las lineas proporcionadas. Responde en JSON valido segun el esquema.
             """;
 
-        var userPrompt = $"Producto a clasificar:\n{productDescription}";
+        var lines = availableLines
+            .Select(line => $"{line.CVE_LIN} - {line.DESC_LIN}")
+            .ToArray();
+
+        var userPrompt = $"""
+            Producto: {productDescription}
+            Lineas disponibles:
+            {string.Join("\n", lines)}
+            """;
 
         return new
         {
             model = _model,
-            temperature = 0.3,
+            temperature = 0.1,
             input = new object[]
             {
                 new
@@ -496,6 +453,7 @@ public sealed class OpenAIProcessorService : IAIProcessorService
                     schema = new
                     {
                         type = "object",
+                        additionalProperties = false,
                         required = new[] { "saeLineCode", "saeLineName", "confidenceScore", "reasoning" },
                         properties = new
                         {
@@ -513,36 +471,49 @@ public sealed class OpenAIProcessorService : IAIProcessorService
     private object BuildSelectorAnalysisRequest(SelectorAnalysisRequest request)
     {
         var systemPrompt = """
-            Eres un experto en web scraping y análisis de HTML. Tu tarea es analizar el HTML de una página de e-commerce y sugerir selectores CSS óptimos para extraer información de productos.
-            
-            Busca patrones comunes como:
-            - Clases CSS con prefijos consistentes para listas y tarjetas de productos
-            - Selectores para botones de detalle
-            - Selectores para información del producto (título, precio, SKU, imagen)
-            - Selectores para paginación
-            
-            Devuelve SOLO JSON válido con los selectores sugeridos y un nivel de confianza.
+            Eres un asistente experto en scraping. A partir de las imágenes de la página y un fragmento de HTML,
+            sugiere selectores y prefijos de clase para extraer productos de forma robusta.
+            Devuelve solo JSON válido según el esquema. Si no encuentras algo, usa null.
             """;
 
-        var userPrompt = $"URL: {request.Url}\n\nHTML snippet:\n{request.HtmlSnippet}\n\nNotas: {request.Notes}";
-
-        var content = new List<object>
+        var contentItems = new List<object>
         {
-            new { type = "input_text", text = userPrompt }
+            new { type = "input_text", text = "Analiza la página y sugiere selectores robustos." }
         };
 
-        if (request.ImagesBase64 != null && request.ImagesBase64.Any())
+        if (!string.IsNullOrWhiteSpace(request.Url))
         {
-            foreach (var imgBase64 in request.ImagesBase64.Take(3))
+            contentItems.Add(new { type = "input_text", text = $"URL: {request.Url}" });
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.Notes))
+        {
+            contentItems.Add(new { type = "input_text", text = $"Notas: {request.Notes}" });
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.HtmlSnippet))
+        {
+            contentItems.Add(new { type = "input_text", text = $"HTML snippet:\n{request.HtmlSnippet}" });
+        }
+
+        foreach (var imageBase64 in request.ImagesBase64)
+        {
+            if (string.IsNullOrWhiteSpace(imageBase64))
             {
-                content.Add(new { type = "input_image", source = new { type = "base64", media_type = "image/png", data = imgBase64 } });
+                continue;
             }
+
+            contentItems.Add(new
+            {
+                type = "input_image",
+                image_url = $"data:image/png;base64,{imageBase64}"
+            });
         }
 
         return new
         {
-            model = request.ImagesBase64?.Any() == true ? _visionModel : _model,
-            temperature = 0.3,
+            model = _visionModel,
+            temperature = 0.1,
             input = new object[]
             {
                 new
@@ -556,7 +527,7 @@ public sealed class OpenAIProcessorService : IAIProcessorService
                 new
                 {
                     role = "user",
-                    content = content.ToArray()
+                    content = contentItems.ToArray()
                 }
             },
             text = new
@@ -569,7 +540,21 @@ public sealed class OpenAIProcessorService : IAIProcessorService
                     schema = new
                     {
                         type = "object",
-                        required = new[] { "confidenceScore" },
+                        additionalProperties = false,
+                        required = new[]
+                        {
+                            "productListClassPrefix",
+                            "productCardClassPrefix",
+                            "detailButtonText",
+                            "detailButtonClassPrefix",
+                            "titleSelector",
+                            "priceSelector",
+                            "skuSelector",
+                            "imageSelector",
+                            "nextPageSelector",
+                            "confidenceScore",
+                            "reasoning"
+                        },
                         properties = new
                         {
                             productListClassPrefix = new { type = new[] { "string", "null" } },
@@ -581,7 +566,7 @@ public sealed class OpenAIProcessorService : IAIProcessorService
                             skuSelector = new { type = new[] { "string", "null" } },
                             imageSelector = new { type = new[] { "string", "null" } },
                             nextPageSelector = new { type = new[] { "string", "null" } },
-                            confidenceScore = new { type = "number", minimum = 0, maximum = 1 },
+                            confidenceScore = new { type = new[] { "number", "null" }, minimum = 0, maximum = 1 },
                             reasoning = new { type = new[] { "string", "null" } }
                         }
                     }

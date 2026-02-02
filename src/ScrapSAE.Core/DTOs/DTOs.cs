@@ -11,6 +11,7 @@ public class ScrapedProduct
     public string? RawHtml { get; set; }
     public string? ScreenshotBase64 { get; set; }
     public string? ImageUrl { get; set; }
+    public List<string> ImageUrls { get; set; } = new();
     public decimal? Price { get; set; }
     public string? Category { get; set; }
     public string? Brand { get; set; }
@@ -22,7 +23,16 @@ public class ScrapedProduct
     public bool AiEnriched { get; set; }
 }
 
-
+/// <summary>
+/// Archivo adjunto de producto (PDF, manual, ficha técnica)
+/// </summary>
+public class ProductAttachment
+{
+    public string FileName { get; set; } = string.Empty;
+    public string FileUrl { get; set; } = string.Empty;
+    public string? FileType { get; set; }
+    public long? FileSizeBytes { get; set; }
+}
 
 /// <summary>
 /// Producto procesado por IA (datos estructurados)
@@ -37,8 +47,13 @@ public class ProcessedProduct
     public List<string> Features { get; set; } = new();
     public Dictionary<string, string> Specifications { get; set; } = new();
     public string? SuggestedCategory { get; set; }
+    public List<string> Categories { get; set; } = new();
     public string? LineCode { get; set; }
     public decimal? Price { get; set; }
+    public string? Currency { get; set; }
+    public int? Stock { get; set; }
+    public List<string> Images { get; set; } = new();
+    public List<ProductAttachment> Attachments { get; set; } = new();
     public decimal? ConfidenceScore { get; set; }
     public string? OriginalRawData { get; set; }
 }
@@ -112,6 +127,16 @@ public class SiteSelectors
     public string? DetailTitleSelector { get; set; }        // Selector para el título en la página de detalle
     public string? DetailDescriptionSelector { get; set; }  // Selector para la descripción en la página de detalle
     public string? DetailImageSelector { get; set; }        // Selector para la imagen principal en la página de detalle
+    
+    // Selectores para galería de imágenes
+    public string? ImageGallerySelector { get; set; }       // Selector para el contenedor de la galería
+    public string? ImageGalleryItemSelector { get; set; }   // Selector para cada imagen en la galería
+    
+    // Selectores para archivos adjuntos
+    public string? AttachmentLinkSelector { get; set; }     // Selector para enlaces a PDFs/documentos
+    
+    // Selectores para stock
+    public string? StockSelector { get; set; }              // Selector para información de stock
 }
 
 
