@@ -75,7 +75,12 @@ namespace ScrapSAE.Infrastructure.Scraping
                 _browser = await _playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
                 {
                     Headless = headless,
-                    Args = new[] { "--start-maximized" } // Optional
+                    Args = new[] { 
+                        "--start-maximized",
+                        "--disable-web-security",
+                        "--disable-site-isolation-trials",
+                        "--disable-features=IsolateOrigins,site-per-process" 
+                    }
                 });
 
                 _logger.LogInformation("Browser launched successfully. Headless: {Headless}", headless);

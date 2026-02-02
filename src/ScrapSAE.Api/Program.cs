@@ -9,7 +9,17 @@ using ScrapSAE.Infrastructure.Services;
 using ScrapSAE.Infrastructure.Scraping.Strategies;
 
 
+using Serilog; // Added for file logging
+
+// Configure Serilog early
+Log.Logger = new LoggerConfiguration()
+    .WriteTo.Console()
+    .WriteTo.File("logs/scrapsae_api-.log", rollingInterval: RollingInterval.Day)
+    .CreateLogger();
+
 var builder = WebApplication.CreateBuilder(args);
+builder.Host.UseSerilog(); // Enable Serilog
+
 builder.Configuration.AddJsonFile("appsettings.runtime.json", optional: true, reloadOnChange: true);
 
 builder.Services.AddEndpointsApiExplorer();
@@ -426,6 +436,7 @@ app.MapPost("/api/sae/send-pending", async (
 });
 
 app.Run();
+Log.CloseAndFlush();
 
 static void MapCrud<T>(
     WebApplication app,

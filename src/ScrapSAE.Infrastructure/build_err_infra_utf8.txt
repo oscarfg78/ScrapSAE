@@ -1,0 +1,16 @@
+﻿  Determining projects to restore...
+  Todos los proyectos est├ín actualizados para la restauraci├│n.
+  ScrapSAE.Core -> C:\Proyectos\ScrapSAE\src\ScrapSAE.Core\bin\Debug\net8.0\ScrapSAE.Core.dll
+C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\Services\ScrapingProcessManager.cs(240,55): warning CS1998: El m├®todo asincr├│nico carece de operadores "await" y se ejecutar├í de forma sincr├│nica. Puede usar el operador 'await' para esperar llamadas API que no sean de bloqueo o 'await Task.Run(...)' para hacer tareas enlazadas a la CPU en un subproceso en segundo plano. [C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\ScrapSAE.Infrastructure.csproj]
+C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\Scraping\PlaywrightScrapingService.cs(2827,18): warning CS0219: La variable 'navigated' est├í asignada pero su valor nunca se usa [C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\ScrapSAE.Infrastructure.csproj]
+C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\Scraping\PlaywrightScrapingService.cs(3685,37): error CS0136: Una variable local o un par├ímetro denominados 'skuEl' no se pueden declarar en este ├ímbito porque ese nombre se est├í usando en un ├ímbito local envolvente para definir una variable local o un par├ímetro [C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\ScrapSAE.Infrastructure.csproj]
+
+ERROR al compilar.
+
+C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\Services\ScrapingProcessManager.cs(240,55): warning CS1998: El m├®todo asincr├│nico carece de operadores "await" y se ejecutar├í de forma sincr├│nica. Puede usar el operador 'await' para esperar llamadas API que no sean de bloqueo o 'await Task.Run(...)' para hacer tareas enlazadas a la CPU en un subproceso en segundo plano. [C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\ScrapSAE.Infrastructure.csproj]
+C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\Scraping\PlaywrightScrapingService.cs(2827,18): warning CS0219: La variable 'navigated' est├í asignada pero su valor nunca se usa [C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\ScrapSAE.Infrastructure.csproj]
+C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\Scraping\PlaywrightScrapingService.cs(3685,37): error CS0136: Una variable local o un par├ímetro denominados 'skuEl' no se pueden declarar en este ├ímbito porque ese nombre se est├í usando en un ├ímbito local envolvente para definir una variable local o un par├ímetro [C:\Proyectos\ScrapSAE\src\ScrapSAE.Infrastructure\ScrapSAE.Infrastructure.csproj]
+    2 Advertencia(s)
+    1 Errores
+
+Tiempo transcurrido 00:00:02.06

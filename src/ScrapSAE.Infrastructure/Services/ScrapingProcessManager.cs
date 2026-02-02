@@ -227,7 +227,7 @@ public class ScrapingProcessManager
             // Wait for critical UI elements that indicate React has hydrated
             // We combine product, list, and generic structural elements
             await page.WaitForSelectorAsync("header, footer, [class*='product-page-headline--'], [class*='categories-list-grid--'], .main-navigation", 
-                new PageWaitForSelectorOptions { Timeout = 15000 });
+                new PageWaitForSelectorOptions { Timeout = 30000 });
         }
         catch (TimeoutException)
         {
