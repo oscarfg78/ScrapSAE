@@ -121,6 +121,36 @@ public sealed class MainViewModel : ViewModelBase
         _logTimer.Start();
         _statusTimer.Start();
         _liveLogTimer.Start();
+
+        ShowWindowCommand = new RelayCommand(ShowWindow);
+        ExitApplicationCommand = new RelayCommand(ExitApplication);
+        NavigateCommand = new RelayCommand<string>(NavigateToTab);
+    }
+
+    private void ShowWindow()
+    {
+        var window = Application.Current.MainWindow;
+        if (window != null)
+        {
+            if (window.WindowState == WindowState.Minimized)
+                window.WindowState = WindowState.Normal;
+            window.Show();
+            window.Activate();
+        }
+    }
+
+    private void ExitApplication()
+    {
+        Application.Current.Shutdown();
+    }
+
+    private void NavigateToTab(string tabIndexStr)
+    {
+        if (int.TryParse(tabIndexStr, out int index))
+        {
+            SelectedTabIndex = index;
+            ShowWindow();
+        }
     }
 
 
@@ -496,6 +526,10 @@ public sealed class MainViewModel : ViewModelBase
     public AsyncCommand LoadLearnedUrlsCommand { get; }
     public AsyncCommand SaveLearnedUrlsCommand { get; }
     public AsyncCommand ConfirmLoginCommand { get; }
+    
+    public RelayCommand ShowWindowCommand { get; }
+    public RelayCommand ExitApplicationCommand { get; }
+    public RelayCommand<string> NavigateCommand { get; }
 
     public async Task LoadAllAsync()
 

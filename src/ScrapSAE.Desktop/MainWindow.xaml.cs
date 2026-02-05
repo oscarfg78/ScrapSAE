@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Controls;
 using ScrapSAE.Desktop.ViewModels;
 
 namespace ScrapSAE.Desktop;
@@ -19,6 +20,14 @@ public partial class MainWindow : Window
         {
             viewModel.LoadAllCommand.Execute(null);
         }
+    }
+
+    protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
+    {
+        // Don't close, just hide to tray
+        e.Cancel = true;
+        this.Hide();
+        base.OnClosing(e);
     }
 
     private void Nav_Click(object sender, RoutedEventArgs e)

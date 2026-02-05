@@ -20,6 +20,10 @@ namespace ScrapSAE.Infrastructure.Scraping;
 public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
 {
     private const string ScreenshotDirectoryName = "scrapsae-screens";
+    // Regex para detectar URLs de datasheets de Festo
+    // Ejemplo: https://www.festo.com/mx/es/a/download-document/datasheet/195555
+    private static readonly Regex _datasheetUrlRegex = new(@"download-document/datasheet/(\d+)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    
     private readonly ILogger<PlaywrightScrapingService> _logger;
     private readonly IBrowserSharingService _browserSharing;
     private readonly IScrapingSignalService _signalService;
@@ -3014,6 +3018,22 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
 
             try
             {
+                // --- DATASHEET HANDLING ---
+                // Si es una URL de datasheet, extraemos la info directamente sin navegar (para evitar descargas automáticas/errores)
+                if (IsDatasheetUrl(currentUrl))
+                {
+                    _logger.LogInformation("[Crawler] Datasheet URL detected: {Url}", currentUrl);
+                    var datasheetProduct = ExtractDatasheetProduct(currentUrl);
+                    
+                    var key = GetProductKey(datasheetProduct);
+                    if (seenProducts.Add(key))
+                    {
+                        products.Add(datasheetProduct);
+                        await LogStepAsync(siteId, "success", $"[Crawler] +Datasheet {datasheetProduct.SkuSource}", new { sku = datasheetProduct.SkuSource, is_attachment = true });
+                    }
+                    continue; // Skip navigation
+                }
+
                 await _scrapeControl.WaitIfPausedAsync(siteId, cancellationToken);
                 
                 if (products.Count % 10 == 0) 
@@ -5690,6 +5710,40 @@ private async Task HumanClickAsync(ILocator locator)
         catch { /* Ignore mouse errors */ }
 
         await Task.Delay(delay, token);
+    }
+
+    private bool IsDatasheetUrl(string url)
+    {
+        return !string.IsNullOrWhiteSpace(url) && _datasheetUrlRegex.IsMatch(url);
+    }
+
+    private ScrapedProduct ExtractDatasheetProduct(string url)
+    {
+        var match = _datasheetUrlRegex.Match(url);
+        var sku = match.Success ? match.Groups[1].Value : "unknown";
+        
+        var product = new ScrapedProduct
+        {
+            SkuSource = sku,
+            Title = $"Datasheet {sku}",
+            Description = "Documento técnico / Hoja de datos",
+            SourceUrl = url,
+            ScrapedAt = DateTime.UtcNow,
+            Attributes = new Dictionary<string, string>
+            {
+                ["type"] = "datasheet",
+                ["is_attachment"] = "true"
+            }
+        };
+
+        product.Attachments.Add(new ProductAttachment
+        {
+            FileName = $"datasheet_{sku}.pdf",
+            FileUrl = url,
+            FileType = "application/pdf"
+        });
+
+        return product;
     }
 }
 

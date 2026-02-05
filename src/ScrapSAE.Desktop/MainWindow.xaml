@@ -4,6 +4,7 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:ScrapSAE.Desktop.Infrastructure"
+        xmlns:tb="http://www.hardcodet.net/taskbar"
         mc:Ignorable="d"
         Title="ScrapSAE - Consola"
         Height="900"
@@ -87,6 +88,24 @@
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
+
+        <!-- System Tray Icon -->
+        <tb:TaskbarIcon IconSource="logo scrapsae.ico"
+                        ToolTipText="ScrapSAE Console"
+                        DoubleClickCommand="{Binding ShowWindowCommand}">
+            <tb:TaskbarIcon.ContextMenu>
+                <ContextMenu>
+                    <MenuItem Header="ScrapSAE Dashboard" FontWeight="Bold" Command="{Binding ShowWindowCommand}" />
+                    <Separator />
+                    <MenuItem Header="Monitor de Salud" Command="{Binding NavigateCommand}" CommandParameter="0" />
+                    <MenuItem Header="Configuración" Command="{Binding NavigateCommand}" CommandParameter="1" />
+                    <MenuItem Header="Proveedores" Command="{Binding NavigateCommand}" CommandParameter="2" />
+                    <MenuItem Header="Ejecución de Scraping" Command="{Binding NavigateCommand}" CommandParameter="8" />
+                    <Separator />
+                    <MenuItem Header="Salir" Command="{Binding ExitApplicationCommand}" />
+                </ContextMenu>
+            </tb:TaskbarIcon.ContextMenu>
+        </tb:TaskbarIcon>
 
         <Border Background="#111827" Padding="20">
             <DockPanel>
@@ -353,79 +372,174 @@
                                                 </Style.Triggers>
                                             </Style>
                                         </Border.Style>
-                                        <Grid>
-                                            <Grid.RowDefinitions>
-                                                <RowDefinition Height="Auto" />
-                                                <RowDefinition Height="Auto" />
-                                                <RowDefinition Height="Auto" />
-                                                <RowDefinition Height="*" />
-                                                <RowDefinition Height="Auto" />
-                                            </Grid.RowDefinitions>
+                                            <Grid>
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="*" />
+                                                    <RowDefinition Height="Auto" />
+                                                </Grid.RowDefinitions>
 
-                                            <!-- Status Badge -->
-                                            <Border HorizontalAlignment="Right" Padding="6,2" CornerRadius="4">
-                                                <Border.Style>
-                                                    <Style TargetType="Border">
-                                                        <Setter Property="Background" Value="#F3F4F6" />
-                                                        <Style.Triggers>
-                                                            <DataTrigger Binding="{Binding Status}" Value="pending">
-                                                                <Setter Property="Background" Value="#FEF3C7" />
-                                                            </DataTrigger>
-                                                            <DataTrigger Binding="{Binding Status}" Value="synced">
-                                                                <Setter Property="Background" Value="#D1FAE5" />
-                                                            </DataTrigger>
-                                                        </Style.Triggers>
-                                                    </Style>
-                                                </Border.Style>
-                                                <TextBlock Text="{Binding Status}" FontSize="10" FontWeight="Bold">
-                                                    <TextBlock.Style>
-                                                        <Style TargetType="TextBlock">
-                                                            <Setter Property="Foreground" Value="#374151" />
+                                                <!-- Status Badge (Row 0) -->
+                                                <Border HorizontalAlignment="Right" Padding="6,2" CornerRadius="4">
+                                                    <Border.Style>
+                                                        <Style TargetType="Border">
+                                                            <Setter Property="Background" Value="#F3F4F6" />
                                                             <Style.Triggers>
                                                                 <DataTrigger Binding="{Binding Status}" Value="pending">
-                                                                    <Setter Property="Foreground" Value="#92400E" />
+                                                                    <Setter Property="Background" Value="#FEF3C7" />
                                                                 </DataTrigger>
                                                                 <DataTrigger Binding="{Binding Status}" Value="synced">
-                                                                    <Setter Property="Foreground" Value="#065F46" />
+                                                                    <Setter Property="Background" Value="#D1FAE5" />
                                                                 </DataTrigger>
                                                             </Style.Triggers>
                                                         </Style>
-                                                    </TextBlock.Style>
-                                                </TextBlock>
-                                            </Border>
+                                                    </Border.Style>
+                                                    <TextBlock Text="{Binding Status}" FontSize="10" FontWeight="Bold">
+                                                        <TextBlock.Style>
+                                                            <Style TargetType="TextBlock">
+                                                                <Setter Property="Foreground" Value="#374151" />
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding Status}" Value="pending">
+                                                                        <Setter Property="Foreground" Value="#92400E" />
+                                                                    </DataTrigger>
+                                                                    <DataTrigger Binding="{Binding Status}" Value="synced">
+                                                                        <Setter Property="Foreground" Value="#065F46" />
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </TextBlock.Style>
+                                                    </TextBlock>
+                                                </Border>
 
-                                            <!-- Image Placeholder / AI Image -->
-                                            <Border Grid.Row="1" Height="150" Background="#F9FAFB" Margin="0,8">
-                                                <Image Source="{Binding ImageUrl}" Stretch="Uniform" />
-                                            </Border>
+                                                <!-- Image Gallery (Row 1) -->
+                                                <StackPanel Grid.Row="1" Margin="0,8">
+                                                    <Border Height="180" Background="#F9FAFB" Margin="0,0,0,4" CornerRadius="4" BorderBrush="#F3F4F6" BorderThickness="1">
+                                                        <Image Source="{Binding PrimaryImageUrl}" Stretch="Uniform" />
+                                                    </Border>
+                                                    <ItemsControl ItemsSource="{Binding Images}">
+                                                        <ItemsControl.ItemsPanel>
+                                                            <ItemsPanelTemplate>
+                                                                <WrapPanel Orientation="Horizontal" />
+                                                            </ItemsPanelTemplate>
+                                                        </ItemsControl.ItemsPanel>
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate>
+                                                                <Button Command="{Binding DataContext.ChangeImageCommand, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" 
+                                                                        CommandParameter="{Binding}"
+                                                                        Margin="0,0,4,4" Padding="0" Background="White" BorderBrush="#E5E7EB" Width="32" Height="32">
+                                                                    <Image Source="{Binding}" Stretch="UniformToFill" Margin="2"/>
+                                                                </Button>
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
+                                                </StackPanel>
 
-                                            <StackPanel Grid.Row="2">
-                                                <TextBlock Text="{Binding Sku}" FontSize="11" Foreground="#6B7280" />
-                                                <TextBlock Text="{Binding Title}" FontSize="14" FontWeight="Bold" TextWrapping="Wrap" Margin="0,4" />
-                                                <TextBlock Text="{Binding Price, StringFormat={}{0:C}}" FontSize="16" Foreground="#111827" FontWeight="SemiBold" />
-                                            </StackPanel>
+                                                <!-- Info (Row 2) -->
+                                                <StackPanel Grid.Row="2">
+                                                    <TextBlock Text="{Binding Sku}" FontSize="11" Foreground="#6B7280" />
+                                                    <TextBlock Text="{Binding Title}" FontSize="14" FontWeight="Bold" TextWrapping="Wrap" Margin="0,4" />
+                                                    
+                                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                                        <TextBlock Text="{Binding Price, StringFormat={}{0:C}}" FontSize="16" Foreground="#111827" FontWeight="SemiBold" />
+                                                        <TextBlock Text="{Binding Currency}" FontSize="12" Foreground="#6B7280" VerticalAlignment="Bottom" Margin="4,0,0,2" />
+                                                    </StackPanel>
 
-                                            <!-- Specs List -->
-                                            <ItemsControl Grid.Row="3" ItemsSource="{Binding AllSpecifications}" Margin="0,8">
-                                                <ItemsControl.ItemTemplate>
-                                                    <DataTemplate>
-                                                        <Grid Margin="0,2">
-                                                            <Grid.ColumnDefinitions>
-                                                                <ColumnDefinition Width="*" />
-                                                                <ColumnDefinition Width="2*" />
-                                                            </Grid.ColumnDefinitions>
-                                                            <TextBlock Text="{Binding Key}" FontSize="10" Foreground="#6B7280" TextWrapping="Wrap" />
-                                                            <TextBlock Grid.Column="1" Text="{Binding Value}" FontSize="10" Foreground="#374151" FontWeight="Medium" Margin="4,0,0,0" TextWrapping="Wrap" />
-                                                        </Grid>
-                                                    </DataTemplate>
-                                                </ItemsControl.ItemTemplate>
-                                            </ItemsControl>
+                                                    <!-- Stock Info -->
+                                                    <Grid Margin="0,0,0,4">
+                                                        <TextBlock Text="Agotado" Foreground="#EF4444" FontWeight="SemiBold" FontSize="11">
+                                                            <TextBlock.Style>
+                                                                <Style TargetType="TextBlock">
+                                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding Stock}" Value="0">
+                                                                            <Setter Property="Visibility" Value="Visible"/>
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </TextBlock.Style>
+                                                        </TextBlock>
+                                                        <TextBlock Text="{Binding Stock, StringFormat={}{0} disponibles}" Foreground="#10B981" FontWeight="SemiBold" FontSize="11">
+                                                             <TextBlock.Style>
+                                                                <Style TargetType="TextBlock">
+                                                                    <Setter Property="Visibility" Value="Visible"/> 
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding Stock}" Value="0">
+                                                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                                                        </DataTrigger>
+                                                                        <DataTrigger Binding="{Binding Stock}" Value="{x:Null}">
+                                                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </TextBlock.Style>
+                                                        </TextBlock>
+                                                    </Grid>
+                                                </StackPanel>
 
-                                            <Button Grid.Row="4" Content="Seleccionar" 
-                                                    Command="{Binding DataContext.CreateReportCommand, RelativeSource={RelativeSource AncestorType=Window}}" 
-                                                    CommandParameter="{Binding}" 
-                                                    Margin="0,8,0,0" />
-                                        </Grid>
+                                                <!-- Categories (Row 3) -->
+                                                <ItemsControl Grid.Row="3" ItemsSource="{Binding Categories}" Margin="0,4,0,0">
+                                                    <ItemsControl.ItemsPanel>
+                                                        <ItemsPanelTemplate>
+                                                            <WrapPanel Orientation="Horizontal" />
+                                                        </ItemsPanelTemplate>
+                                                    </ItemsControl.ItemsPanel>
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <Border Background="#E0E7FF" CornerRadius="8" Padding="6,2" Margin="0,0,4,4">
+                                                                <TextBlock Text="{Binding}" FontSize="10" Foreground="#3730A3" />
+                                                            </Border>
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+
+                                                <!-- Attachments (Row 4) -->
+                                                <ItemsControl Grid.Row="4" ItemsSource="{Binding Attachments}" Margin="0,4,0,8">
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate>
+                                                             <Button Command="{Binding DataContext.OpenFileCommand, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" 
+                                                                     CommandParameter="{Binding FileUrl}"
+                                                                     Background="Transparent" BorderThickness="0" Padding="0" Margin="0,2" HorizontalAlignment="Left" Foreground="#2563EB" Cursor="Hand">
+                                                                 <StackPanel Orientation="Horizontal">
+                                                                     <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE160;" Foreground="#4B5563" Margin="0,0,4,0" VerticalAlignment="Center" FontSize="12" />
+                                                                     <TextBlock Text="{Binding FileName}" FontSize="11" TextDecorations="Underline" VerticalAlignment="Center" />
+                                                                 </StackPanel>
+                                                             </Button>
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+
+                                                <!-- Specs List (Row 5) -->
+                                                <ItemsControl Grid.Row="5" ItemsSource="{Binding AllSpecifications}" Margin="0,0,0,8" MaxHeight="200" ScrollViewer.VerticalScrollBarVisibility="Auto">
+                                                    <ItemsControl.Template>
+                                                        <ControlTemplate TargetType="ItemsControl">
+                                                            <ScrollViewer>
+                                                                <ItemsPresenter />
+                                                            </ScrollViewer>
+                                                        </ControlTemplate>
+                                                    </ItemsControl.Template>
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <Grid Margin="0,2">
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="*" />
+                                                                    <ColumnDefinition Width="2*" />
+                                                                </Grid.ColumnDefinitions>
+                                                                <TextBlock Text="{Binding Key}" FontSize="10" Foreground="#6B7280" TextWrapping="Wrap" />
+                                                                <TextBlock Grid.Column="1" Text="{Binding Value}" FontSize="10" Foreground="#374151" FontWeight="Medium" Margin="4,0,0,0" TextWrapping="Wrap" />
+                                                            </Grid>
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+
+                                                <Button Grid.Row="6" Content="Seleccionar" 
+                                                        Command="{Binding DataContext.CreateReportCommand, RelativeSource={RelativeSource AncestorType=Window}}" 
+                                                        CommandParameter="{Binding}" 
+                                                        Margin="0,8,0,0" />
+                                            </Grid>
                                     </Border>
                                 </DataTemplate>
                             </ListBox.ItemTemplate>

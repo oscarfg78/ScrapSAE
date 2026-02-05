@@ -21,6 +21,11 @@ public class ScrapedProduct
     public List<string> NavigationUrls { get; set; } = new();
     public DateTime ScrapedAt { get; set; } = DateTime.UtcNow;
     public bool AiEnriched { get; set; }
+    
+    /// <summary>
+    /// Adjuntos encontrados durante el scraping (ej: datasheets)
+    /// </summary>
+    public List<ProductAttachment> Attachments { get; set; } = new();
 }
 
 /// <summary>

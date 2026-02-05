@@ -6,6 +6,10 @@ using System.Collections.Generic;
 using System.Linq;
 using System;
 
+using ScrapSAE.Desktop.Infrastructure;
+using System.Windows.Input;
+using System.Diagnostics;
+
 namespace ScrapSAE.Desktop.Models;
 
 public class StagingProductUi : ViewModelBase
@@ -14,11 +18,27 @@ public class StagingProductUi : ViewModelBase
     private ProcessedProduct? _processed;
     private Dictionary<string, string>? _fallbackAttributes;
     private bool _isParsed;
+    private string? _overrideImageUrl;
 
     public StagingProductUi(StagingProduct product)
     {
         _product = product;
+        ChangeImageCommand = new RelayCommand<string>(url => PrimaryImageUrl = url);
+        OpenFileCommand = new RelayCommand<string>(url => 
+        {
+            if (!string.IsNullOrEmpty(url))
+            {
+                try 
+                { 
+                    Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); 
+                } 
+                catch { }
+            }
+        });
     }
+
+    public ICommand ChangeImageCommand { get; }
+    public ICommand OpenFileCommand { get; }
 
     public StagingProduct Product => _product;
 
@@ -26,7 +46,23 @@ public class StagingProductUi : ViewModelBase
     
     public string Sku => GetProcessed()?.Sku ?? _product.SkuSource ?? "";
 
-    public string ImageUrl => GetProcessed()?.OriginalRawData ?? GetFallbackValue("ImageUrl") ?? "";
+    public string PrimaryImageUrl
+    {
+        get => _overrideImageUrl ?? Images.FirstOrDefault() ?? GetFallbackValue("ImageUrl") ?? "";
+        set => SetField(ref _overrideImageUrl, value);
+    }
+    
+    public string ImageUrl => PrimaryImageUrl;
+
+    public List<string> Images => GetProcessed()?.Images ?? new List<string>();
+
+    public string Currency => GetProcessed()?.Currency ?? "MXN";
+
+    public int? Stock => GetProcessed()?.Stock;
+
+    public List<ProductAttachment> Attachments => GetProcessed()?.Attachments ?? new List<ProductAttachment>();
+
+    public List<string> Categories => GetProcessed()?.Categories ?? new List<string>();
 
     public string Description => GetProcessed()?.Description ?? GetFallbackValue("Description") ?? "";
 
