@@ -331,21 +331,50 @@
                 <Grid Margin="8">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                        <Button Content="Refrescar" Command="{Binding LoadAllCommand}" Margin="0,0,8,0" />
-                        <Button Content="Eliminar" Command="{Binding DeleteStagingCommand}" />
-                        <Button Content="Enviar a SAE" Command="{Binding SendSelectedToSaeCommand}" Margin="8,0,0,0" Background="#10B981" Foreground="White" />
-                    </StackPanel>
 
-                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-                        <ListBox ItemsSource="{Binding StagingProducts}" 
+                    <!-- Toolbar + Search -->
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <!-- Actions Left -->
+                        <StackPanel Grid.Column="0" Orientation="Horizontal">
+                            <Button Content="Refrescar" Command="{Binding LoadAllCommand}" />
+                            <Button Content="Eliminar" Command="{Binding DeleteStagingCommand}" />
+                        </StackPanel>
+
+                        <!-- Search Center-Right -->
+                        <Grid Grid.Column="1" HorizontalAlignment="Right" Margin="12,0,12,0" Width="400">
+                             <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Buscar:" VerticalAlignment="Center" Margin="0,0,8,0" FontWeight="SemiBold" />
+                            <TextBox Grid.Column="1" Text="{Binding SearchText, UpdateSourceTrigger=Explicit}" Margin="0" Height="30" VerticalContentAlignment="Center">
+                                <TextBox.InputBindings>
+                                    <KeyBinding Key="Enter" Command="{Binding PerformSearchCommand}" CommandParameter="{Binding RelativeSource={RelativeSource AncestorType=TextBox}, Path=Text}"/>
+                                </TextBox.InputBindings>
+                            </TextBox>
+                        </Grid>
+
+                        <!-- Actions Right -->
+                         <Button Grid.Column="2" Content="Enviar a SAE" Command="{Binding SendSelectedToSaeCommand}" Background="#10B981" Foreground="White" Margin="0" Height="30"/>
+                    </Grid>
+
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <ListBox ItemsSource="{Binding StagingProductsView}" 
                                  SelectedItem="{Binding SelectedStagingProduct}"
-                                 BorderThickness="0" Background="Transparent">
+                                 BorderThickness="0" Background="Transparent"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                             <ListBox.ItemsPanel>
                                 <ItemsPanelTemplate>
-                                    <WrapPanel Margin="0,0,10,0" />
+                                    <WrapPanel Margin="0,0,10,0" Orientation="Horizontal" />
                                 </ItemsPanelTemplate>
                             </ListBox.ItemsPanel>
                             <ListBox.ItemContainerStyle>
@@ -361,7 +390,7 @@
                             </ListBox.ItemContainerStyle>
                             <ListBox.ItemTemplate>
                                 <DataTemplate>
-                                    <Border BorderBrush="#E5E7EB" BorderThickness="1" CornerRadius="8" Background="White" Margin="8" Width="280" Padding="12">
+                                    <Border BorderBrush="#E5E7EB" BorderThickness="1" CornerRadius="8" Background="White" Margin="8" Width="260" Padding="10">
                                         <Border.Style>
                                             <Style TargetType="Border">
                                                 <Style.Triggers>
@@ -384,40 +413,51 @@
                                                 </Grid.RowDefinitions>
 
                                                 <!-- Status Badge (Row 0) -->
-                                                <Border HorizontalAlignment="Right" Padding="6,2" CornerRadius="4">
-                                                    <Border.Style>
-                                                        <Style TargetType="Border">
-                                                            <Setter Property="Background" Value="#F3F4F6" />
-                                                            <Style.Triggers>
-                                                                <DataTrigger Binding="{Binding Status}" Value="pending">
-                                                                    <Setter Property="Background" Value="#FEF3C7" />
-                                                                </DataTrigger>
-                                                                <DataTrigger Binding="{Binding Status}" Value="synced">
-                                                                    <Setter Property="Background" Value="#D1FAE5" />
-                                                                </DataTrigger>
-                                                            </Style.Triggers>
-                                                        </Style>
-                                                    </Border.Style>
-                                                    <TextBlock Text="{Binding Status}" FontSize="10" FontWeight="Bold">
-                                                        <TextBlock.Style>
-                                                            <Style TargetType="TextBlock">
-                                                                <Setter Property="Foreground" Value="#374151" />
+                                                <Grid Grid.Row="0" Margin="0,0,0,4">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    
+                                                    <!-- Title moved here (Row 0, Col 0) -->
+                                                    <TextBlock Text="{Binding Title}" FontSize="13" FontWeight="Bold" TextWrapping="Wrap" Margin="0,0,4,0" />
+
+                                                    <!-- Badge (Row 0, Col 1) -->
+                                                    <Border Grid.Column="1" VerticalAlignment="Top" Padding="6,2" CornerRadius="4">
+                                                        <Border.Style>
+                                                            <Style TargetType="Border">
+                                                                <Setter Property="Background" Value="#F3F4F6" />
                                                                 <Style.Triggers>
                                                                     <DataTrigger Binding="{Binding Status}" Value="pending">
-                                                                        <Setter Property="Foreground" Value="#92400E" />
+                                                                        <Setter Property="Background" Value="#FEF3C7" />
                                                                     </DataTrigger>
                                                                     <DataTrigger Binding="{Binding Status}" Value="synced">
-                                                                        <Setter Property="Foreground" Value="#065F46" />
+                                                                        <Setter Property="Background" Value="#D1FAE5" />
                                                                     </DataTrigger>
                                                                 </Style.Triggers>
                                                             </Style>
-                                                        </TextBlock.Style>
-                                                    </TextBlock>
-                                                </Border>
+                                                        </Border.Style>
+                                                        <TextBlock Text="{Binding Status}" FontSize="10" FontWeight="Bold">
+                                                            <TextBlock.Style>
+                                                                <Style TargetType="TextBlock">
+                                                                    <Setter Property="Foreground" Value="#374151" />
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding Status}" Value="pending">
+                                                                            <Setter Property="Foreground" Value="#92400E" />
+                                                                        </DataTrigger>
+                                                                        <DataTrigger Binding="{Binding Status}" Value="synced">
+                                                                            <Setter Property="Foreground" Value="#065F46" />
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </TextBlock.Style>
+                                                        </TextBlock>
+                                                    </Border>
+                                                </Grid>
 
                                                 <!-- Image Gallery (Row 1) -->
-                                                <StackPanel Grid.Row="1" Margin="0,8">
-                                                    <Border Height="180" Background="#F9FAFB" Margin="0,0,0,4" CornerRadius="4" BorderBrush="#F3F4F6" BorderThickness="1">
+                                                <StackPanel Grid.Row="1" Margin="0,4,0,8">
+                                                    <Border Height="120" Background="#F9FAFB" Margin="0,0,0,4" CornerRadius="4" BorderBrush="#F3F4F6" BorderThickness="1">
                                                         <Image Source="{Binding PrimaryImageUrl}" Stretch="Uniform" />
                                                     </Border>
                                                     <ItemsControl ItemsSource="{Binding Images}">
@@ -437,11 +477,10 @@
                                                         </ItemsControl.ItemTemplate>
                                                     </ItemsControl>
                                                 </StackPanel>
-
+                                                
                                                 <!-- Info (Row 2) -->
                                                 <StackPanel Grid.Row="2">
-                                                    <TextBlock Text="{Binding Sku}" FontSize="11" Foreground="#6B7280" />
-                                                    <TextBlock Text="{Binding Title}" FontSize="14" FontWeight="Bold" TextWrapping="Wrap" Margin="0,4" />
+                                                    <TextBlock Text="{Binding Sku}" FontSize="11" Foreground="#6B7280" Margin="0,0,0,4" />
                                                     
                                                     <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
                                                         <TextBlock Text="{Binding Price, StringFormat={}{0:C}}" FontSize="16" Foreground="#111827" FontWeight="SemiBold" />

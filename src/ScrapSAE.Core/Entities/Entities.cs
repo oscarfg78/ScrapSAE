@@ -52,6 +52,9 @@ public class StagingProduct
     /// <summary>URL de donde se extrajo este producto</summary>
     public string? SourceUrl { get; set; }
     public int Attempts { get; set; }
+    public string FlashlySyncStatus { get; set; } = "pending";
+    public Guid? FlashlyProductId { get; set; }
+    public DateTime? FlashlySyncedAt { get; set; }
 
     public DateTime? LastSeenAt { get; set; }
     public DateTime CreatedAt { get; set; }

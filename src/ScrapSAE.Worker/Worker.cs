@@ -1,6 +1,7 @@
 using ScrapSAE.Core.DTOs;
 using ScrapSAE.Core.Entities;
 using ScrapSAE.Core.Interfaces;
+using Microsoft.Extensions.Options;
 using System.Text.Json;
 
 namespace ScrapSAE.Worker;
@@ -12,6 +13,10 @@ public class Worker : BackgroundService
     private readonly IStagingService _stagingService;
     private readonly IAIProcessorService _aiProcessorService;
     private readonly ISyncLogService _syncLogService;
+    private readonly IFlashlySyncService _flashlySyncService;
+    private readonly ICsvExportService _csvExportService;
+    private readonly SyncOptionsConfig _syncOptions;
+    private readonly CsvExportConfig _csvExportConfig;
     // We use a simple tracking dictionary to avoid running the same site multiple times in the same minute
     private readonly Dictionary<Guid, DateTime> _lastRunTimes = new();
     // Random instance for human-like delays
@@ -22,13 +27,21 @@ public class Worker : BackgroundService
         IScrapingService scrapingService,
         IStagingService stagingService,
         IAIProcessorService aiProcessorService,
-        ISyncLogService syncLogService)
+        ISyncLogService syncLogService,
+        IFlashlySyncService flashlySyncService,
+        ICsvExportService csvExportService,
+        IOptions<SyncOptionsConfig> syncOptions,
+        IOptions<CsvExportConfig> csvExportConfig)
     {
         _logger = logger;
         _scrapingService = scrapingService;
         _stagingService = stagingService;
         _aiProcessorService = aiProcessorService;
         _syncLogService = syncLogService;
+        _flashlySyncService = flashlySyncService;
+        _csvExportService = csvExportService;
+        _syncOptions = syncOptions.Value;
+        _csvExportConfig = csvExportConfig.Value;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -104,6 +117,11 @@ public class Worker : BackgroundService
                             _logger.LogInformation("Finished scraping site {SiteName}. Saved {Count} products.", site.Name, savedCount);
                             var durationMs = (int)(DateTime.UtcNow - siteStartedAt).TotalMilliseconds;
                             await LogSyncAsync(site, "scrape", "success", $"Scraping finalizado. Productos guardados: {savedCount}.", durationMs);
+
+                            if (_syncOptions.AutoSync)
+                            {
+                                await ExecuteOutboundSyncAsync(site, stoppingToken);
+                            }
                         }
                         catch (Exception ex)
                         {
@@ -131,6 +149,111 @@ public class Worker : BackgroundService
                 await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
             }
         }
+    }
+
+    private async Task ExecuteOutboundSyncAsync(SiteProfile site, CancellationToken cancellationToken)
+    {
+        var target = (_syncOptions.TargetSystem ?? "Flashly").Trim();
+        var isFlashlyTarget = target.Equals("Flashly", StringComparison.OrdinalIgnoreCase) ||
+                              target.Equals("Both", StringComparison.OrdinalIgnoreCase);
+        var isCsvTarget = target.Equals("CSV", StringComparison.OrdinalIgnoreCase);
+
+        var validatedForSite = (await _stagingService.GetProductsByStatusAsync("validated"))
+            .Where(p => p.SiteId == site.Id)
+            .ToList();
+
+        if (validatedForSite.Count == 0)
+        {
+            _logger.LogInformation("No validated products for site {SiteName}; skipping outbound sync/export.", site.Name);
+            return;
+        }
+
+        if (isFlashlyTarget)
+        {
+            await LogSyncAsync(site, "flashly_sync", "start", $"Iniciando sincronización Flashly de {validatedForSite.Count} productos.");
+            var result = await _flashlySyncService.SyncProductsAsync(validatedForSite, cancellationToken);
+            var details = JsonSerializer.Serialize(new
+            {
+                result.Created,
+                result.Updated,
+                Errors = result.Errors.Select(e => new { e.SourceSku, e.Error }),
+                result.JobId
+            });
+
+            await _syncLogService.LogOperationAsync(new SyncLog
+            {
+                OperationType = "flashly_sync",
+                SiteId = site.Id,
+                Status = result.Success ? "success" : "error",
+                Message = result.Message,
+                Details = details
+            });
+
+            if (result.Success)
+            {
+                var errorsBySku = result.Errors
+                    .Where(e => !string.IsNullOrWhiteSpace(e.SourceSku))
+                    .ToDictionary(e => e.SourceSku.Trim(), e => e.Error, StringComparer.OrdinalIgnoreCase);
+
+                foreach (var product in validatedForSite)
+                {
+                    if (!string.IsNullOrWhiteSpace(product.SkuSource) &&
+                        errorsBySku.TryGetValue(product.SkuSource.Trim(), out var errorMessage))
+                    {
+                        await _stagingService.UpdateFlashlySyncInfoAsync(
+                            product.Id,
+                            "error",
+                            product.FlashlyProductId,
+                            product.FlashlySyncedAt,
+                            errorMessage);
+                        await _stagingService.UpdateProductStatusAsync(product.Id, "error", errorMessage);
+                    }
+                    else
+                    {
+                        await _stagingService.UpdateFlashlySyncInfoAsync(
+                            product.Id,
+                            "synced",
+                            product.FlashlyProductId,
+                            DateTime.UtcNow,
+                            null);
+                        await _stagingService.UpdateProductStatusAsync(product.Id, "synced");
+                    }
+                }
+
+                await LogSyncAsync(site, "flashly_sync", "success", result.Message ?? "Sincronización Flashly completada.");
+            }
+            else
+            {
+                await LogSyncAsync(site, "flashly_sync", "error", result.Message ?? "Error en sincronización Flashly.");
+            }
+        }
+
+        if (isCsvTarget)
+        {
+            var outputPath = GenerateCsvPath(site.Name);
+            await LogSyncAsync(site, "csv_export", "start", $"Generando CSV con {validatedForSite.Count} productos.");
+            await _csvExportService.ExportProductsToCsvAsync(validatedForSite, outputPath, cancellationToken);
+            await _stagingService.UpdateProductsStatusAsync(validatedForSite.Select(p => p.Id), "synced");
+            await LogSyncAsync(site, "csv_export", "success", $"CSV exportado en {outputPath}");
+        }
+    }
+
+    private string GenerateCsvPath(string siteName)
+    {
+        var safeSiteName = string.Concat(siteName.Where(ch => !Path.GetInvalidFileNameChars().Contains(ch)));
+        var pattern = _csvExportConfig.FileNamePattern;
+
+        var fileName = pattern.Contains("{0", StringComparison.Ordinal)
+            ? string.Format(pattern, DateTime.Now)
+            : pattern;
+
+        if (!string.IsNullOrWhiteSpace(safeSiteName))
+        {
+            fileName = $"{Path.GetFileNameWithoutExtension(fileName)}_{safeSiteName}{Path.GetExtension(fileName)}";
+        }
+
+        var outputDirectory = _csvExportConfig.OutputDirectory;
+        return Path.Combine(outputDirectory, fileName);
     }
 
     private bool ShouldRun(SiteProfile site)
@@ -293,7 +416,10 @@ public class Worker : BackgroundService
             scrapedProduct.ImageUrl,
             scrapedProduct.Brand,
             scrapedProduct.Category,
-            scrapedProduct.Attributes
+            scrapedProduct.Attributes,
+            // Include these so the AI *could* use them, but more importantly so we don't lose them if we just use the rawPayload later
+            scrapedProduct.ImageUrls,
+            scrapedProduct.Attachments
         };
 
         var rawData = JsonSerializer.Serialize(rawPayload);
@@ -301,11 +427,43 @@ public class Worker : BackgroundService
         try
         {
             var processed = await _aiProcessorService.ProcessProductAsync(rawData, cancellationToken);
+            
+            // Merge logic: Ensure we don't lose data found by the scraper even if AI misses it or doesn't return it
             processed.Sku ??= scrapedProduct.SkuSource;
             processed.Name = string.IsNullOrWhiteSpace(processed.Name) ? (scrapedProduct.Title ?? string.Empty) : processed.Name;
             processed.Description = string.IsNullOrWhiteSpace(processed.Description) ? (scrapedProduct.Description ?? string.Empty) : processed.Description;
             processed.Brand ??= scrapedProduct.Brand;
             processed.Price ??= scrapedProduct.Price;
+
+            // Merge Images
+            if (scrapedProduct.ImageUrls != null && scrapedProduct.ImageUrls.Any())
+            {
+                processed.Images ??= new List<string>();
+                foreach (var img in scrapedProduct.ImageUrls)
+                {
+                    if (!processed.Images.Contains(img))
+                    {
+                        processed.Images.Add(img);
+                    }
+                }
+            }
+            
+            // Merge Attachments
+            if (scrapedProduct.Attachments != null && scrapedProduct.Attachments.Any())
+            {
+                processed.Attachments ??= new List<ProductAttachment>();
+                // We assume filename/url is the unique key
+                var existingUrls = new HashSet<string>(processed.Attachments.Select(a => a.FileUrl ?? ""));
+                
+                foreach (var att in scrapedProduct.Attachments)
+                {
+                    if (!existingUrls.Contains(att.FileUrl ?? ""))
+                    {
+                        processed.Attachments.Add(att);
+                        existingUrls.Add(att.FileUrl ?? "");
+                    }
+                }
+            }
 
             return JsonSerializer.Serialize(processed);
         }
@@ -318,7 +476,9 @@ public class Worker : BackgroundService
                 scrapedProduct.Price,
                 scrapedProduct.ImageUrl,
                 scrapedProduct.Description,
-                scrapedProduct.Attributes
+                scrapedProduct.Attributes,
+                scrapedProduct.ImageUrls,
+                scrapedProduct.Attachments
             });
         }
     }

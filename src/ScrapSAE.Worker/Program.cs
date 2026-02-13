@@ -1,4 +1,5 @@
 using ScrapSAE.Core.Interfaces;
+using ScrapSAE.Core.DTOs;
 using ScrapSAE.Infrastructure.AI;
 using ScrapSAE.Infrastructure.Data;
 using ScrapSAE.Infrastructure.Scraping;
@@ -6,6 +7,7 @@ using ScrapSAE.Infrastructure.Services;
 using ScrapSAE.Worker;
 
 using Serilog;
+using Microsoft.Extensions.Options;
 
 var builder = Host.CreateApplicationBuilder(args);
 
@@ -18,6 +20,10 @@ Log.Logger = new LoggerConfiguration()
 builder.Logging.ClearProviders();
 builder.Logging.AddSerilog();
 
+builder.Services.Configure<FlashlyApiConfig>(builder.Configuration.GetSection("FlashlyApi"));
+builder.Services.Configure<SyncOptionsConfig>(builder.Configuration.GetSection("SyncOptions"));
+builder.Services.Configure<CsvExportConfig>(builder.Configuration.GetSection("CsvExport"));
+
 // Register Infrastructure Services
 builder.Services.AddSingleton<IStagingService, SupabaseStagingService>();
 builder.Services.AddSingleton<ISyncLogService, SupabaseSyncLogService>();
@@ -27,6 +33,22 @@ builder.Services.AddSingleton<ScrapingProcessManager>();
 builder.Services.AddSingleton<IScrapeControlService, NoOpScrapeControlService>();
 builder.Services.AddHttpClient("OpenAI");
 builder.Services.AddSingleton<IAIProcessorService, OpenAIProcessorService>();
+builder.Services.AddHttpClient<IFlashlySyncService, FlashlySyncService>()
+    .ConfigureHttpClient((sp, client) =>
+    {
+        var config = sp.GetRequiredService<IOptions<FlashlyApiConfig>>().Value;
+        if (!string.IsNullOrWhiteSpace(config.BaseUrl))
+        {
+            client.BaseAddress = new Uri(config.BaseUrl);
+        }
+
+        if (!string.IsNullOrWhiteSpace(config.ApiKey))
+        {
+            client.DefaultRequestHeaders.Remove("X-API-Key");
+            client.DefaultRequestHeaders.Add("X-API-Key", config.ApiKey);
+        }
+    });
+builder.Services.AddSingleton<ICsvExportService, CsvExportService>();
 
 // Register Worker and Initializer
 builder.Services.AddSingleton<DbInitializer>();

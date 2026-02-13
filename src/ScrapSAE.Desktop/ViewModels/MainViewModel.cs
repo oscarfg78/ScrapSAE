@@ -64,6 +64,9 @@ public sealed class MainViewModel : ViewModelBase
     private string _learnedUrlsText = string.Empty;
     private readonly DispatcherTimer _liveLogTimer;
     private DateTime _lastLogTimestamp = DateTime.UtcNow.AddDays(-1);
+    
+    private string _searchText = string.Empty;
+    public System.ComponentModel.ICollectionView StagingProductsView { get; private set; }
 
     public MainViewModel(ApiClient apiClient)
     {
@@ -125,6 +128,51 @@ public sealed class MainViewModel : ViewModelBase
         ShowWindowCommand = new RelayCommand(ShowWindow);
         ExitApplicationCommand = new RelayCommand(ExitApplication);
         NavigateCommand = new RelayCommand<string>(NavigateToTab);
+        
+        // Initialize Collection View for filtering
+        StagingProductsView = System.Windows.Data.CollectionViewSource.GetDefaultView(StagingProducts);
+        StagingProductsView.Filter = FilterStagingProducts;
+
+        PerformSearchCommand = new RelayCommand<string>(PerformSearch);
+    }
+    
+    public string SearchText
+    {
+        get => _searchText;
+        set => SetField(ref _searchText, value);
+    }
+
+    public RelayCommand<string> PerformSearchCommand { get; }
+
+    private void PerformSearch(string query)
+    {
+        SearchText = query; // Ensure property is updated if coming from command parameter
+        StagingProductsView.Refresh();
+    }
+    
+    private bool FilterStagingProducts(object obj)
+    {
+        if (obj is not StagingProductUi product) return false;
+        if (string.IsNullOrWhiteSpace(_searchText)) return true;
+
+        var search = _searchText.ToLower();
+        
+        // Search in Display Fields
+        if ((product.Title?.ToLower().Contains(search) == true) ||
+            (product.Sku?.ToLower().Contains(search) == true) ||
+            (product.Description?.ToLower().Contains(search) == true))
+        {
+            return true;
+        }
+
+        // Search in Raw JSON (Deep Search)
+        if (product.Product?.AIProcessedJson != null && 
+            product.Product.AIProcessedJson.ToLower().Contains(search))
+        {
+            return true;
+        }
+
+        return false;
     }
 
     private void ShowWindow()

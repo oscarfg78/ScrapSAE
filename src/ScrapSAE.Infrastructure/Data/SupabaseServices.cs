@@ -150,6 +150,26 @@ public class SupabaseStagingService : IStagingService
         }
     }
 
+    public async Task<IEnumerable<StagingProduct>> GetProductsByStatusAsync(string status)
+    {
+        try
+        {
+            var encodedStatus = Uri.EscapeDataString(status);
+            var response = await _httpClient.GetAsync(
+                $"{_baseUrl}/rest/v1/staging_products?status=eq.{encodedStatus}");
+
+            response.EnsureSuccessStatusCode();
+
+            var products = await response.Content.ReadFromJsonAsync<StagingProduct[]>(_jsonOptions);
+            return products ?? Array.Empty<StagingProduct>();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting products by status {Status}", status);
+            throw;
+        }
+    }
+
     public async Task UpdateProductStatusAsync(Guid id, string status, string? notes = null)
     {
         try
@@ -165,6 +185,62 @@ public class SupabaseStagingService : IStagingService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error updating product status for {Id}", id);
+            throw;
+        }
+    }
+
+    public async Task UpdateProductsStatusAsync(IEnumerable<Guid> ids, string status, string? notes = null)
+    {
+        var idList = ids
+            .Where(id => id != Guid.Empty)
+            .Distinct()
+            .ToList();
+
+        if (idList.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            var idsQuery = string.Join(",", idList);
+            var update = new { status, validation_notes = notes, updated_at = DateTime.UtcNow };
+
+            var response = await _httpClient.PatchAsJsonAsync(
+                $"{_baseUrl}/rest/v1/staging_products?id=in.({idsQuery})",
+                update);
+
+            response.EnsureSuccessStatusCode();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating products status to {Status}", status);
+            throw;
+        }
+    }
+
+    public async Task UpdateFlashlySyncInfoAsync(Guid id, string syncStatus, Guid? flashlyProductId, DateTime? syncedAt, string? notes = null)
+    {
+        try
+        {
+            var update = new
+            {
+                flashly_sync_status = syncStatus,
+                flashly_product_id = flashlyProductId,
+                flashly_synced_at = syncedAt,
+                validation_notes = notes,
+                updated_at = DateTime.UtcNow
+            };
+
+            var response = await _httpClient.PatchAsJsonAsync(
+                $"{_baseUrl}/rest/v1/staging_products?id=eq.{id}",
+                update);
+
+            response.EnsureSuccessStatusCode();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating Flashly sync info for {Id}", id);
             throw;
         }
     }

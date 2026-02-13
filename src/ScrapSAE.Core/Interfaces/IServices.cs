@@ -109,7 +109,10 @@ public interface IStagingService
     Task<StagingProduct> UpsertProductAsync(StagingProduct product);
     Task<StagingProduct?> GetProductBySourceSkuAsync(Guid siteId, string skuSource);
     Task<IEnumerable<StagingProduct>> GetPendingProductsAsync();
+    Task<IEnumerable<StagingProduct>> GetProductsByStatusAsync(string status);
     Task UpdateProductStatusAsync(Guid id, string status, string? notes = null);
+    Task UpdateProductsStatusAsync(IEnumerable<Guid> ids, string status, string? notes = null);
+    Task UpdateFlashlySyncInfoAsync(Guid id, string syncStatus, Guid? flashlyProductId, DateTime? syncedAt, string? notes = null);
     Task UpdateProductDataAsync(Guid id, string aiProcessedJson);
     /// <summary>
     /// Obtiene los sitios configurados y activos

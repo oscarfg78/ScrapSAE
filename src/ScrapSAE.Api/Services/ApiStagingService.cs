@@ -60,12 +60,50 @@ public sealed class ApiStagingService : IStagingService
         return all.Where(p => p.Status == "pending");
     }
 
+    public async Task<IEnumerable<StagingProduct>> GetProductsByStatusAsync(string status)
+    {
+        var all = await _productsTable.GetAllAsync();
+        return all.Where(p => string.Equals(p.Status, status, StringComparison.OrdinalIgnoreCase));
+    }
+
     public async Task UpdateProductStatusAsync(Guid id, string status, string? notes = null)
     {
         var product = await _productsTable.GetByIdAsync(id);
         if (product != null)
         {
             product.Status = status;
+            product.ValidationNotes = notes;
+            product.UpdatedAt = DateTime.UtcNow;
+            await _productsTable.UpdateAsync(id, product);
+        }
+    }
+
+    public async Task UpdateProductsStatusAsync(IEnumerable<Guid> ids, string status, string? notes = null)
+    {
+        var idSet = ids.Where(id => id != Guid.Empty).ToHashSet();
+        if (idSet.Count == 0)
+        {
+            return;
+        }
+
+        var all = await _productsTable.GetAllAsync();
+        foreach (var product in all.Where(p => idSet.Contains(p.Id)))
+        {
+            product.Status = status;
+            product.ValidationNotes = notes;
+            product.UpdatedAt = DateTime.UtcNow;
+            await _productsTable.UpdateAsync(product.Id, product);
+        }
+    }
+
+    public async Task UpdateFlashlySyncInfoAsync(Guid id, string syncStatus, Guid? flashlyProductId, DateTime? syncedAt, string? notes = null)
+    {
+        var product = await _productsTable.GetByIdAsync(id);
+        if (product != null)
+        {
+            product.FlashlySyncStatus = syncStatus;
+            product.FlashlyProductId = flashlyProductId;
+            product.FlashlySyncedAt = syncedAt;
             product.ValidationNotes = notes;
             product.UpdatedAt = DateTime.UtcNow;
             await _productsTable.UpdateAsync(id, product);
