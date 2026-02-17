@@ -109,10 +109,35 @@ public sealed class ApiClient
         return await response.Content.ReadFromJsonAsync<SelectorSuggestion>(_jsonOptions);
     }
 
-    public async Task<bool> SendToSaeAsync(Guid productId)
+    public async Task<ApiOperationResult> SendToSaeAsync(Guid productId)
     {
-        var response = await _httpClient.PostAsync($"api/sae/send/{productId}", null);
-        return response.IsSuccessStatusCode;
+        var path = $"api/sae/send/{productId}";
+        try
+        {
+            var response = await _httpClient.PostAsync(path, null);
+            if (response.IsSuccessStatusCode)
+            {
+                return new ApiOperationResult { Success = true };
+            }
+
+            var message = await ExtractErrorMessageAsync(response);
+            AppLogger.Error($"POST {path} failed. Status={(int)response.StatusCode}. Message={message}");
+            return new ApiOperationResult
+            {
+                Success = false,
+                StatusCode = (int)response.StatusCode,
+                Message = message
+            };
+        }
+        catch (Exception ex)
+        {
+            AppLogger.Error($"POST {path} exception.", ex);
+            return new ApiOperationResult
+            {
+                Success = false,
+                Message = ex.Message
+            };
+        }
     }
 
     public async Task<SaeSendSummary?> SendPendingToSaeAsync()
@@ -120,6 +145,44 @@ public sealed class ApiClient
         var response = await _httpClient.PostAsync("api/sae/send-pending", null);
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<SaeSendSummary>(_jsonOptions);
+    }
+
+    public async Task<OnlineStoreSendSummary?> SendPendingToOnlineStoreAsync()
+    {
+        var response = await _httpClient.PostAsync("api/online-store/send-pending", null);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<OnlineStoreSendSummary>(_jsonOptions);
+    }
+
+    public async Task<ApiOperationResult> SendToOnlineStoreAsync(Guid productId)
+    {
+        var path = $"api/online-store/send/{productId}";
+        try
+        {
+            var response = await _httpClient.PostAsync(path, null);
+            if (response.IsSuccessStatusCode)
+            {
+                return new ApiOperationResult { Success = true };
+            }
+
+            var message = await ExtractErrorMessageAsync(response);
+            AppLogger.Error($"POST {path} failed. Status={(int)response.StatusCode}. Message={message}");
+            return new ApiOperationResult
+            {
+                Success = false,
+                StatusCode = (int)response.StatusCode,
+                Message = message
+            };
+        }
+        catch (Exception ex)
+        {
+            AppLogger.Error($"POST {path} exception.", ex);
+            return new ApiOperationResult
+            {
+                Success = false,
+                Message = ex.Message
+            };
+        }
     }
 
     public async Task<AppSettingsDto?> GetSettingsAsync()
@@ -267,5 +330,67 @@ public sealed class ApiClient
             AppLogger.Error($"DELETE {path} exception.", ex);
             throw;
         }
+    }
+
+    private async Task<string> ExtractErrorMessageAsync(HttpResponseMessage response)
+    {
+        var body = await response.Content.ReadAsStringAsync();
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            return $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}";
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(body);
+            var root = document.RootElement;
+            var lines = new List<string>();
+
+            if (TryGetJsonString(root, "message", out var message)) lines.Add(message);
+            if (TryGetJsonString(root, "detail", out var detail)) lines.Add(detail);
+            if (TryGetJsonString(root, "title", out var title)) lines.Add(title);
+            if (TryGetJsonString(root, "endpoint", out var endpoint)) lines.Add($"endpoint: {endpoint}");
+            if (TryGetJsonString(root, "payload", out var payload)) lines.Add($"payload: {payload}");
+            if (TryGetJsonString(root, "upstreamResponseBody", out var upstreamBody)) lines.Add($"upstream_response: {upstreamBody}");
+            if (TryGetJsonString(root, "upstream_status", out var upstreamStatusText)) lines.Add($"upstream_status: {upstreamStatusText}");
+            if (root.TryGetProperty("upstreamStatusCode", out var upstreamStatusCode))
+            {
+                lines.Add($"upstream_status: {upstreamStatusCode}");
+            }
+
+            if (lines.Count > 0)
+            {
+                return string.Join(Environment.NewLine, lines);
+            }
+        }
+        catch
+        {
+            // Keep original body if it is not JSON.
+        }
+
+        return body;
+    }
+
+    private static bool TryGetJsonString(JsonElement root, string property, out string value)
+    {
+        value = string.Empty;
+        if (!root.TryGetProperty(property, out var element))
+        {
+            return false;
+        }
+
+        if (element.ValueKind != JsonValueKind.String)
+        {
+            return false;
+        }
+
+        var parsed = element.GetString();
+        if (string.IsNullOrWhiteSpace(parsed))
+        {
+            return false;
+        }
+
+        value = parsed;
+        return true;
     }
 }

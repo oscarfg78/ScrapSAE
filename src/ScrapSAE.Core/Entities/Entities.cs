@@ -48,6 +48,8 @@ public class StagingProduct
     public string? AIProcessedJson { get; set; }
     public string Status { get; set; } = "pending";
     public bool ExcludeFromSae { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool IsApartado { get; set; }
     public string? ValidationNotes { get; set; }
     /// <summary>URL de donde se extrajo este producto</summary>
     public string? SourceUrl { get; set; }

@@ -101,6 +101,7 @@
                     <MenuItem Header="Configuración" Command="{Binding NavigateCommand}" CommandParameter="1" />
                     <MenuItem Header="Proveedores" Command="{Binding NavigateCommand}" CommandParameter="2" />
                     <MenuItem Header="Ejecución de Scraping" Command="{Binding NavigateCommand}" CommandParameter="8" />
+                    <MenuItem Header="Tienda en línea" Command="{Binding NavigateCommand}" CommandParameter="10" />
                     <Separator />
                     <MenuItem Header="Salir" Command="{Binding ExitApplicationCommand}" />
                 </ContextMenu>
@@ -192,6 +193,12 @@
                     <StackPanel Orientation="Horizontal">
                         <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE126;" Margin="0,0,6,0" />
                         <TextBlock Text="SAE" />
+                    </StackPanel>
+                </Button>
+                <Button Click="Nav_Click" Tag="10">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xEC25;" Margin="0,0,6,0" />
+                        <TextBlock Text="Tienda en linea" />
                     </StackPanel>
                 </Button>
                 <Button Command="{Binding ExitCommand}" Background="#EF4444" BorderBrush="#B91C1C" Margin="12,0,0,0">
@@ -291,6 +298,19 @@
                         </Border>
                         <Border Grid.Column="1" Background="White" Padding="12" Margin="8,0,0,0" CornerRadius="6" BorderBrush="#E5E7EB" BorderThickness="1">
                             <StackPanel>
+                                <TextBlock Text="Sistema destino" FontWeight="SemiBold" />
+                                <ComboBox SelectedValue="{Binding TargetSystem}" SelectedValuePath="Content">
+                                    <ComboBoxItem Content="Flashly" />
+                                    <ComboBoxItem Content="CSV" />
+                                    <ComboBoxItem Content="Both" />
+                                    <ComboBoxItem Content="SAE" />
+                                </ComboBox>
+                                <TextBlock Text="Tienda en línea (nombre)" FontWeight="SemiBold" />
+                                <TextBox Text="{Binding OnlineStoreName}" />
+                                <TextBlock Text="Tienda en línea (Base URL)" FontWeight="SemiBold" />
+                                <TextBox Text="{Binding OnlineStoreBaseUrl}" />
+                                <TextBlock Text="API Key tienda en línea" FontWeight="SemiBold" />
+                                <TextBox Text="{Binding OnlineStoreApiKey}" />
                                 <TextBlock Text="Usuario SAE" FontWeight="SemiBold" />
                                 <TextBox Text="{Binding SaeUser}" />
                                 <TextBlock Text="Password SAE" FontWeight="SemiBold" />
@@ -710,14 +730,14 @@
                                             <RowDefinition Height="Auto" />
                                         </Grid.RowDefinitions>
                                         
-                                        <Button Grid.Row="0" Grid.Column="0" Content="Iniciar" Command="{Binding RunScrapingCommand}" Background="#10B981" BorderBrush="#059669" Margin="0,0,4,4" Height="28"/>
-                                        <Button Grid.Row="0" Grid.Column="1" Content="Detener" Command="{Binding StopScrapingCommand}" Background="#EF4444" BorderBrush="#DC2626" Margin="4,0,0,4" Height="28"/>
-                                        <Button Grid.Row="1" Grid.Column="0" Content="Pausar" Command="{Binding PauseScrapingCommand}" Background="#F59E0B" BorderBrush="#D97706" Margin="0,0,4,0" Height="28"/>
-                                        <Button Grid.Row="1" Grid.Column="1" Content="Reanudar" Command="{Binding ResumeScrapingCommand}" Background="#3B82F6" BorderBrush="#2563EB" Margin="4,0,0,0" Height="28"/>
+                                        <Button Grid.Row="0" Grid.Column="0" Content="Iniciar" Command="{Binding RunScrapingCommand}" Background="#10B981" BorderBrush="#059669" Margin="0,0,4,4" MinHeight="34" Padding="8,4"/>
+                                        <Button Grid.Row="0" Grid.Column="1" Content="Detener" Command="{Binding StopScrapingCommand}" Background="#EF4444" BorderBrush="#DC2626" Margin="4,0,0,4" MinHeight="34" Padding="8,4"/>
+                                        <Button Grid.Row="1" Grid.Column="0" Content="Pausar" Command="{Binding PauseScrapingCommand}" Background="#F59E0B" BorderBrush="#D97706" Margin="0,0,4,0" MinHeight="34" Padding="8,4"/>
+                                        <Button Grid.Row="1" Grid.Column="1" Content="Reanudar" Command="{Binding ResumeScrapingCommand}" Background="#3B82F6" BorderBrush="#2563EB" Margin="4,0,0,0" MinHeight="34" Padding="8,4"/>
                                     </Grid>
 
-                                    <Button Content="Confirmar Login Manual" Command="{Binding ConfirmLoginCommand}" Background="#8B5CF6" BorderBrush="#7C3AED" Margin="0,0,0,4" Height="28" Visibility="{Binding ManualLoginEnabled, Converter={StaticResource BoolToVisibility}}" />
-                                    <Button Content="Refrescar logs" Command="{Binding RefreshLogsCommand}" Margin="0,0,0,4" Height="24" FontSize="11" />
+                                    <Button Content="Confirmar Login Manual" Command="{Binding ConfirmLoginCommand}" Background="#8B5CF6" BorderBrush="#7C3AED" Margin="0,0,0,4" MinHeight="34" Padding="8,4" Visibility="{Binding ManualLoginEnabled, Converter={StaticResource BoolToVisibility}}" />
+                                    <Button Content="Refrescar logs" Command="{Binding RefreshLogsCommand}" Margin="0,0,0,4" MinHeight="30" Padding="8,3" FontSize="11" />
                                 </StackPanel>
                             </Border>
 
@@ -787,7 +807,7 @@
                                         </StackPanel>
                                         <StackPanel Grid.Column="1">
                                             <CheckBox Content="Screenshot IA" IsChecked="{Binding UseScreenshotFallback}" FontSize="10" />
-                                            <Button Content="Analizar IA" Command="{Binding AnalyzeSelectorsCommand}" Height="20" FontSize="10" Margin="0,2,0,0"/>
+                                            <Button Content="Analizar IA" Command="{Binding AnalyzeSelectorsCommand}" MinHeight="28" Padding="8,2" FontSize="10" Margin="0,2,0,0"/>
                                         </StackPanel>
                                     </Grid>
                                     
@@ -909,7 +929,11 @@
                     </Grid.RowDefinitions>
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                         <Button Content="Enviar seleccionado" Command="{Binding SendSelectedToSaeCommand}" Margin="0,0,8,0" />
+                        <Button Content="Enviar seleccionados" Command="{Binding SendCheckedToSaeCommand}" Margin="0,0,8,0" />
                         <Button Content="Enviar pendientes" Command="{Binding SendPendingToSaeCommand}" Margin="0,0,8,0" />
+                        <Border Background="#E5E7EB" CornerRadius="4" Padding="10,4" Margin="4,0,8,0">
+                            <TextBlock Text="{Binding SelectedForSaeCount, StringFormat=Seleccionados: {0}}" FontWeight="SemiBold" />
+                        </Border>
                         <CheckBox Content="Programar envío"
                                   IsChecked="{Binding SaeScheduleEnabled}"
                                   Margin="12,0,8,0" />
@@ -919,9 +943,97 @@
                     <DataGrid Grid.Row="1"
                               ItemsSource="{Binding StagingProducts}"
                               SelectedItem="{Binding SelectedStagingProduct}"
-                              AutoGenerateColumns="True"
+                              AutoGenerateColumns="False"
                               IsReadOnly="False"
-                              CanUserAddRows="False" />
+                              CanUserAddRows="False">
+                        <DataGrid.Columns>
+                            <DataGridCheckBoxColumn Header="Sel" Binding="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="50" />
+                            <DataGridTextColumn Header="SKU" Binding="{Binding Sku}" Width="180" />
+                            <DataGridTextColumn Header="Título" Binding="{Binding Title}" Width="3*" />
+                            <DataGridTextColumn Header="Estado" Binding="{Binding Status}" Width="120" />
+                            <DataGridTextColumn Header="Precio" Binding="{Binding Price}" Width="120" />
+                            <DataGridTextColumn Header="Moneda" Binding="{Binding Currency}" Width="90" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="Tienda en linea">
+                <Grid Margin="8">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <WrapPanel Margin="0,0,0,8">
+                        <Button Content="Enviar seleccionados"
+                                Command="{Binding SendSelectedToOnlineStoreCommand}" />
+                        <Button Content="Enviar pendientes"
+                                Command="{Binding SendPendingToOnlineStoreCommand}" />
+                        <Button Content="Guardar cambios"
+                                Command="{Binding SaveSelectedOnlineStoreRecordCommand}" />
+                        <Button Content="Eliminar seleccionados"
+                                Command="{Binding DeleteSelectedOnlineStoreRecordsCommand}"
+                                Background="#EF4444"
+                                BorderBrush="#B91C1C" />
+                        <Button Content="Marcar apartado"
+                                Command="{Binding MarkSelectedAsApartadoCommand}"
+                                Background="#F59E0B"
+                                BorderBrush="#D97706" />
+                        <Button Content="Quitar apartado"
+                                Command="{Binding UnmarkSelectedAsApartadoCommand}" />
+                        <CheckBox Content="Mostrar apartados"
+                                  IsChecked="{Binding ShowApartadosOnly}"
+                                  VerticalAlignment="Center"
+                                  Margin="12,0,8,0" />
+                        <Border Background="#E5E7EB" CornerRadius="4" Padding="10,4" Margin="4,0,8,0">
+                            <TextBlock Text="{Binding OnlineStorePendingCount, StringFormat=Pendientes: {0}}" FontWeight="SemiBold" />
+                        </Border>
+                        <Border Background="#E5E7EB" CornerRadius="4" Padding="10,4" Margin="4,0,8,0">
+                            <TextBlock Text="{Binding OnlineStoreSelectedCount, StringFormat=Seleccionados: {0}}" FontWeight="SemiBold" />
+                        </Border>
+                        <Border Background="#E5E7EB" CornerRadius="4" Padding="10,4" Margin="4,0,8,0">
+                            <TextBlock Text="{Binding OnlineStoreApartadosCount, StringFormat=Apartados: {0}}" FontWeight="SemiBold" />
+                        </Border>
+                    </WrapPanel>
+                    <DataGrid Grid.Row="1"
+                              ItemsSource="{Binding OnlineStoreProducts}"
+                              SelectedItem="{Binding SelectedStagingProduct}"
+                              AutoGenerateColumns="False"
+                              IsReadOnly="False"
+                              SelectionUnit="FullRow"
+                              CanUserAddRows="False">
+                        <DataGrid.Columns>
+                            <DataGridTemplateColumn Header="Sel" Width="50">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                  HorizontalAlignment="Center"
+                                                  VerticalAlignment="Center"
+                                                  IsHitTestVisible="True"
+                                                  Focusable="False" />
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTemplateColumn Header="Apartado" Width="80">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <CheckBox IsChecked="{Binding IsApartado, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                  HorizontalAlignment="Center"
+                                                  VerticalAlignment="Center"
+                                                  IsHitTestVisible="True"
+                                                  Focusable="False" />
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTextColumn Header="SKU" Binding="{Binding Product.SkuSource, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="160" />
+                            <DataGridTextColumn Header="Nombre" Binding="{Binding ProductName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="3*" />
+                            <DataGridTextColumn Header="Precio" Binding="{Binding EditablePrice, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, StringFormat={}{0:F2}}" Width="110" />
+                            <DataGridTextColumn Header="URL origen" Binding="{Binding SourceUrl, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="2*" />
+                            <DataGridTextColumn Header="Estado" Binding="{Binding Status}" Width="120" />
+                            <DataGridTextColumn Header="Sync tienda" Binding="{Binding FlashlySyncStatus}" Width="120" />
+                            <DataGridTextColumn Header="Ultimo envio" Binding="{Binding FlashlySyncedAt}" Width="180" />
+                        </DataGrid.Columns>
+                    </DataGrid>
                 </Grid>
             </TabItem>
         </TabControl>
@@ -931,5 +1043,70 @@
                 <TextBlock Text="{Binding StatusMessage}" Foreground="White" />
             </StatusBarItem>
         </StatusBar>
+
+        <Grid Grid.RowSpan="4"
+              Visibility="{Binding IsSendProgressVisible, Converter={StaticResource BoolToVisibility}}"
+              Background="#80000000"
+              Panel.ZIndex="999">
+            <Border Width="760"
+                    Height="500"
+                    Background="White"
+                    CornerRadius="8"
+                    BorderBrush="#D1D5DB"
+                    BorderThickness="1"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Padding="16">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Text="{Binding SendProgressTitle}" FontSize="20" FontWeight="SemiBold" />
+                    <TextBlock Grid.Row="1" Text="{Binding SendProgressStatus}" Margin="0,8,0,12" Foreground="#374151" />
+
+                    <Grid Grid.Row="2" Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <ProgressBar Grid.Column="0"
+                                     Minimum="0"
+                                     Maximum="{Binding SendProgressMaximum}"
+                                     Value="{Binding SendProgressValue}"
+                                     Height="20"
+                                     Margin="0,0,10,0" />
+                        <TextBlock Grid.Column="1"
+                                   VerticalAlignment="Center"
+                                   Text="{Binding SendProgressValue, StringFormat={}{0:0}}"/>
+                    </Grid>
+
+                    <Border Grid.Row="3" BorderBrush="#E5E7EB" BorderThickness="1" CornerRadius="6">
+                        <TextBox Text="{Binding SendProgressText}"
+                                 FontFamily="Consolas"
+                                 FontSize="12"
+                                 Padding="8"
+                                 IsReadOnly="True"
+                                 TextWrapping="NoWrap"
+                                 AcceptsReturn="True"
+                                 VerticalScrollBarVisibility="Auto"
+                                 HorizontalScrollBarVisibility="Auto" />
+                    </Border>
+
+                    <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+                        <Button Content="Copiar todo"
+                                Command="{Binding CopySendProgressCommand}"
+                                Margin="0,0,8,0" />
+                        <Button Content="Cerrar"
+                                Command="{Binding CloseSendProgressCommand}"
+                                IsEnabled="{Binding IsSendProgressCompleted}" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </Grid>
     </Grid>
 </Window>

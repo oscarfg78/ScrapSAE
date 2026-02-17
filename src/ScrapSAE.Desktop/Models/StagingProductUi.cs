@@ -1,14 +1,14 @@
-using System.Text.Json;
-using ScrapSAE.Core.Entities;
-using ScrapSAE.Core.DTOs;
-using ScrapSAE.Desktop.ViewModels;
+﻿using System;
 using System.Collections.Generic;
-using System.Linq;
-using System;
-
-using ScrapSAE.Desktop.Infrastructure;
-using System.Windows.Input;
 using System.Diagnostics;
+using System.Linq;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Windows.Input;
+using ScrapSAE.Core.DTOs;
+using ScrapSAE.Core.Entities;
+using ScrapSAE.Desktop.Infrastructure;
+using ScrapSAE.Desktop.ViewModels;
 
 namespace ScrapSAE.Desktop.Models;
 
@@ -19,20 +19,24 @@ public class StagingProductUi : ViewModelBase
     private Dictionary<string, string>? _fallbackAttributes;
     private bool _isParsed;
     private string? _overrideImageUrl;
+    private bool _isSelected;
 
     public StagingProductUi(StagingProduct product)
     {
         _product = product;
         ChangeImageCommand = new RelayCommand<string>(url => PrimaryImageUrl = url);
-        OpenFileCommand = new RelayCommand<string>(url => 
+        OpenFileCommand = new RelayCommand<string>(url =>
         {
             if (!string.IsNullOrEmpty(url))
             {
-                try 
-                { 
-                    Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); 
-                } 
-                catch { }
+                try
+                {
+                    Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+                }
+                catch
+                {
+                    // Ignore open-file errors.
+                }
             }
         });
     }
@@ -42,16 +46,45 @@ public class StagingProductUi : ViewModelBase
 
     public StagingProduct Product => _product;
 
-    public string Title => GetProcessed()?.Name ?? GetFallbackValue("Title") ?? _product.SkuSource ?? "Sin título";
-    
+    public bool IsSelected
+    {
+        get => _isSelected;
+        set => SetField(ref _isSelected, value);
+    }
+
+    public string Title => GetProcessed()?.Name ?? GetFallbackValue("Title") ?? _product.SkuSource ?? "Sin titulo";
+
+    public string ProductName
+    {
+        get => Title;
+        set
+        {
+            UpsertAiString("Name", value);
+            UpsertAiString("Title", value);
+            InvalidateParsed();
+            OnPropertyChanged(nameof(Title));
+            OnPropertyChanged();
+        }
+    }
+
     public string Sku => GetProcessed()?.Sku ?? _product.SkuSource ?? "";
+
+    public string SourceUrl
+    {
+        get => _product.SourceUrl ?? string.Empty;
+        set
+        {
+            _product.SourceUrl = value;
+            OnPropertyChanged();
+        }
+    }
 
     public string PrimaryImageUrl
     {
         get => _overrideImageUrl ?? Images.FirstOrDefault() ?? GetFallbackValue("ImageUrl") ?? "";
         set => SetField(ref _overrideImageUrl, value);
     }
-    
+
     public string ImageUrl => PrimaryImageUrl;
 
     public List<string> Images => GetProcessed()?.Images ?? new List<string>();
@@ -68,7 +101,33 @@ public class StagingProductUi : ViewModelBase
 
     public decimal? Price => GetProcessed()?.Price ?? TryGetFallbackPrice();
 
+    public decimal? EditablePrice
+    {
+        get => Price;
+        set
+        {
+            UpsertAiDecimal("Price", value);
+            InvalidateParsed();
+            OnPropertyChanged(nameof(Price));
+            OnPropertyChanged();
+        }
+    }
+
     public string Status => _product.Status;
+
+    public string FlashlySyncStatus => _product.FlashlySyncStatus;
+
+    public DateTime? FlashlySyncedAt => _product.FlashlySyncedAt;
+
+    public bool IsApartado
+    {
+        get => _product.IsApartado;
+        set
+        {
+            _product.IsApartado = value;
+            OnPropertyChanged();
+        }
+    }
 
     public List<KeyValuePair<string, string>> AllSpecifications
     {
@@ -83,7 +142,7 @@ public class StagingProductUi : ViewModelBase
                     specs.Add(new KeyValuePair<string, string>(spec.Key, spec.Value));
                 }
             }
-            
+
             if (specs.Count == 0 && _fallbackAttributes != null)
             {
                 foreach (var attr in _fallbackAttributes)
@@ -104,10 +163,7 @@ public class StagingProductUi : ViewModelBase
         {
             try
             {
-                // Intentar como ProcessedProduct
                 _processed = JsonSerializer.Deserialize<ProcessedProduct>(_product.AIProcessedJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-                
-                // Si no tiene Name, tal vez es el fallback
                 if (string.IsNullOrEmpty(_processed?.Name))
                 {
                     ParseFallback(_product.AIProcessedJson);
@@ -118,6 +174,7 @@ public class StagingProductUi : ViewModelBase
                 ParseFallback(_product.AIProcessedJson);
             }
         }
+
         _isParsed = true;
         return _processed;
     }
@@ -133,7 +190,10 @@ public class StagingProductUi : ViewModelBase
                 _fallbackAttributes = JsonSerializer.Deserialize<Dictionary<string, string>>(attrs.GetRawText());
             }
         }
-        catch { }
+        catch
+        {
+            // Ignore parse errors.
+        }
     }
 
     private string? GetFallbackValue(string key)
@@ -147,7 +207,11 @@ public class StagingProductUi : ViewModelBase
                 return prop.GetString();
             }
         }
-        catch { }
+        catch
+        {
+            // Ignore parse errors.
+        }
+
         return null;
     }
 
@@ -162,7 +226,50 @@ public class StagingProductUi : ViewModelBase
                 return prop.GetDecimal();
             }
         }
-        catch { }
+        catch
+        {
+            // Ignore parse errors.
+        }
+
         return null;
+    }
+
+    private void InvalidateParsed()
+    {
+        _isParsed = false;
+        _processed = null;
+        _fallbackAttributes = null;
+    }
+
+    private void UpsertAiString(string key, string? value)
+    {
+        var node = ParseOrCreateAiNode();
+        node[key] = value ?? string.Empty;
+        _product.AIProcessedJson = node.ToJsonString();
+    }
+
+    private void UpsertAiDecimal(string key, decimal? value)
+    {
+        var node = ParseOrCreateAiNode();
+        node[key] = value.HasValue ? JsonValue.Create(value.Value) : null;
+        _product.AIProcessedJson = node.ToJsonString();
+    }
+
+    private JsonObject ParseOrCreateAiNode()
+    {
+        if (string.IsNullOrWhiteSpace(_product.AIProcessedJson))
+        {
+            return new JsonObject();
+        }
+
+        try
+        {
+            var parsed = JsonNode.Parse(_product.AIProcessedJson) as JsonObject;
+            return parsed ?? new JsonObject();
+        }
+        catch
+        {
+            return new JsonObject();
+        }
     }
 }

@@ -1,4 +1,4 @@
-using ScrapSAE.Api.Models;
+﻿using ScrapSAE.Api.Models;
 using ScrapSAE.Api.Services;
 using ScrapSAE.Core.DTOs;
 using ScrapSAE.Core.Entities;
@@ -7,6 +7,9 @@ using ScrapSAE.Infrastructure.AI;
 using ScrapSAE.Infrastructure.Scraping;
 using ScrapSAE.Infrastructure.Services;
 using ScrapSAE.Infrastructure.Scraping.Strategies;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 
 
 using Serilog; // Added for file logging
@@ -31,6 +34,7 @@ builder.Services.AddSingleton<ISupabaseRestClient, SupabaseRestClient>();
 builder.Services.AddSingleton<IScrapeControlService, ScrapeControlService>();
 builder.Services.AddSingleton<ISyncLogService, ApiSyncLogService>();
 builder.Services.AddHttpClient("OpenAI");
+builder.Services.AddHttpClient("OnlineStore");
 builder.Services.AddSingleton<IAIProcessorService, OpenAIProcessorService>();
 
 // Nuevos servicios para arquitectura adaptativa
@@ -40,10 +44,10 @@ builder.Services.AddSingleton<IConfigurationUpdater, ScrapSAE.Api.Services.Confi
 builder.Services.AddSingleton<ILearningService, LearningService>();
 
 // ===== SISTEMA ADAPTATIVO - FASE 1-4 =====
-// Telemetría Enriquecida
+// TelemetrÃ­a Enriquecida
 builder.Services.AddSingleton<ITelemetryService, TelemetryService>();
 
-// Actualización Automática de Configuración
+// ActualizaciÃ³n AutomÃ¡tica de ConfiguraciÃ³n
 builder.Services.AddSingleton<IStagingService, ApiStagingService>();
 builder.Services.AddSingleton<IConfigurationUpdaterService, ScrapSAE.Infrastructure.Services.ConfigurationUpdaterService>();
 
@@ -220,7 +224,7 @@ app.MapPost("/api/scraping/run/{siteId:guid}", async (
 });
 
 
-// Endpoint para inspeccionar/scrapear URLs específicas directamente
+// Endpoint para inspeccionar/scrapear URLs especÃ­ficas directamente
 app.MapPost("/api/scraping/inspect/{siteId:guid}", async (
     Guid siteId,
     DirectUrlsRequest request,
@@ -253,8 +257,8 @@ app.MapPost("/api/scraping/inspect/{siteId:guid}", async (
         // Ejecutar scraping con las URLs directas
         var scraped = await scrapingService.ScrapeDirectUrlsAsync(request.Urls, siteId, request.InspectOnly, token);
         
-        // Persistir resultados si no es "solo inspección" o si queremos guardar lo validado (según lo solicitado)
-        // El usuario solicitó que las URLs agregadas para análisis deben agregar el producto
+        // Persistir resultados si no es "solo inspecciÃ³n" o si queremos guardar lo validado (segÃºn lo solicitado)
+        // El usuario solicitÃ³ que las URLs agregadas para anÃ¡lisis deben agregar el producto
         var (created, updated, skipped) = await runner.ProcessScrapedProductsAsync(siteId, scraped, token);
         
         // Mapear de vuelta a DirectUrlResult para la respuesta del API (compatibilidad frontend)
@@ -386,28 +390,41 @@ app.MapPost("/api/sae/send/{productId:guid}", async (
     ISaeSdkService saeSdk,
     CancellationToken token) =>
 {
-    var product = await stagingService.GetByIdAsync(productId);
-    if (product == null)
+    try
     {
-        return Results.NotFound();
-    }
+        var product = await stagingService.GetByIdAsync(productId);
+        if (product == null)
+        {
+            return Results.NotFound(new { message = "Producto no encontrado." });
+        }
 
-    if (product.ExcludeFromSae)
+        if (product.ExcludeFromSae)
+        {
+            return Results.BadRequest(new { message = "El producto estÃ¡ excluido de sincronizaciÃ³n SAE." });
+        }
+
+        var ok = await saeSdk.SendProductAsync(product, token);
+        if (!ok)
+        {
+            return Results.Problem(
+                title: "No fue posible enviar el producto a SAE.",
+                detail: "Verifica configuraciÃ³n SAE (ruta SDK o conexiÃ³n DB), credenciales y logs del backend.",
+                statusCode: StatusCodes.Status502BadGateway);
+        }
+
+        product.Status = "synced";
+        product.UpdatedAt = DateTime.UtcNow;
+        await stagingService.UpdateAsync(product.Id, product);
+
+        return Results.Ok(new { success = true });
+    }
+    catch (Exception ex)
     {
-        return Results.BadRequest(new { message = "Product is excluded from SAE sync." });
+        return Results.Problem(
+            title: "Error inesperado al enviar a SAE.",
+            detail: ex.Message,
+            statusCode: StatusCodes.Status500InternalServerError);
     }
-
-    var ok = await saeSdk.SendProductAsync(product, token);
-    if (!ok)
-    {
-        return Results.StatusCode(StatusCodes.Status501NotImplemented);
-    }
-
-    product.Status = "synced";
-    product.UpdatedAt = DateTime.UtcNow;
-    await stagingService.UpdateAsync(product.Id, product);
-
-    return Results.Ok(new { success = true });
 });
 
 app.MapPost("/api/sae/send-pending", async (
@@ -433,6 +450,273 @@ app.MapPost("/api/sae/send-pending", async (
     }
 
     return Results.Ok(new { total = toSend.Count, sent });
+});
+
+app.MapPost("/api/online-store/send-pending", async (
+    SupabaseTableService<StagingProduct> stagingService,
+    IStagingService stagingOps,
+    ISyncLogService syncLogService,
+    SettingsStore settingsStore,
+    IConfiguration configuration,
+    IHttpClientFactory httpClientFactory,
+    CancellationToken token) =>
+{
+    var settings = settingsStore.Get();
+    var endpoint = ResolveOnlineStoreEndpoint(settings?.OnlineStoreBaseUrl, configuration["FlashlyApi:BaseUrl"]);
+    var apiKey = FirstNonEmpty(settings?.OnlineStoreApiKey, configuration["FlashlyApi:ApiKey"]);
+
+    if (endpoint == null || string.IsNullOrWhiteSpace(apiKey))
+    {
+        return Results.BadRequest(new
+        {
+            message = "ConfiguraciÃ³n incompleta de tienda en lÃ­nea. Revisa Base URL y API Key."
+        });
+    }
+
+    var products = await stagingService.GetAllAsync();
+    var toSend = products
+        .Where(p => string.Equals(p.Status, "validated", StringComparison.OrdinalIgnoreCase))
+        .Where(p => !p.IsApartado)
+        .Where(p => !string.Equals(p.FlashlySyncStatus, "synced", StringComparison.OrdinalIgnoreCase))
+        .Where(p => !string.IsNullOrWhiteSpace(p.SkuSource))
+        .ToList();
+
+    if (toSend.Count == 0)
+    {
+        return Results.Ok(new
+        {
+            total = 0,
+            sent = 0,
+            failed = 0,
+            message = "No hay productos pendientes por enviar a tienda en lÃ­nea.",
+            results = Array.Empty<object>()
+        });
+    }
+
+    var client = httpClientFactory.CreateClient("OnlineStore");
+    client.DefaultRequestHeaders.Remove("X-API-Key");
+    client.DefaultRequestHeaders.Add("X-API-Key", apiKey);
+
+    var sent = 0;
+    var failed = 0;
+    var results = new List<object>(toSend.Count);
+
+    foreach (var product in toSend)
+    {
+        var sku = (product.SkuSource ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(sku))
+        {
+            failed++;
+            var noSkuMessage = "SKU fuente vacÃ­o.";
+            await stagingOps.UpdateFlashlySyncInfoAsync(product.Id, "error", product.FlashlyProductId, product.FlashlySyncedAt, noSkuMessage);
+            results.Add(new { productId = product.Id, sourceSku = product.SkuSource, success = false, message = noSkuMessage });
+            continue;
+        }
+
+        try
+        {
+            var payloadProduct = BuildOnlineStoreProductPayload(product, settings?.OnlineStoreName);
+            if (!ValidateOnlineStorePayload(payloadProduct, out var validationError))
+            {
+                var invalidPayload = JsonSerializer.Serialize(new { products = new[] { payloadProduct } });
+                failed++;
+                var validationMessage = BuildOnlineStoreErrorMessage(validationError!, endpoint, invalidPayload, null, null);
+                await stagingOps.UpdateFlashlySyncInfoAsync(product.Id, "error", product.FlashlyProductId, product.FlashlySyncedAt, validationMessage);
+                results.Add(new { productId = product.Id, sourceSku = sku, success = false, message = validationMessage });
+                continue;
+            }
+
+            var requestPayload = JsonSerializer.Serialize(new { products = new[] { payloadProduct } });
+            using var content = new StringContent(requestPayload, Encoding.UTF8, "application/json");
+            using var response = await client.PostAsync(endpoint, content, token);
+            var upstreamResponseBody = await response.Content.ReadAsStringAsync(token);
+
+            var ok = response.IsSuccessStatusCode;
+            string? message = null;
+
+            if (ok)
+            {
+                var parsed = TryParseFlashlyResponse(upstreamResponseBody);
+                var error = parsed?.Results?.Errors?.FirstOrDefault();
+                if (error != null && !string.IsNullOrWhiteSpace(error.Error))
+                {
+                    ok = false;
+                    message = BuildOnlineStoreErrorMessage(
+                        error.Error,
+                        endpoint,
+                        requestPayload,
+                        (int)response.StatusCode,
+                        upstreamResponseBody);
+                }
+                else
+                {
+                    message = parsed?.Message ?? "Enviado correctamente.";
+                }
+            }
+            else
+            {
+                message = BuildOnlineStoreErrorMessage(
+                    $"HTTP {(int)response.StatusCode}",
+                    endpoint,
+                    requestPayload,
+                    (int)response.StatusCode,
+                    upstreamResponseBody);
+            }
+
+            if (ok)
+            {
+                sent++;
+                await stagingOps.UpdateFlashlySyncInfoAsync(product.Id, "synced", product.FlashlyProductId, DateTime.UtcNow, null);
+            }
+            else
+            {
+                failed++;
+                await stagingOps.UpdateFlashlySyncInfoAsync(product.Id, "error", product.FlashlyProductId, product.FlashlySyncedAt, message);
+            }
+
+            results.Add(new { productId = product.Id, sourceSku = sku, success = ok, message });
+        }
+        catch (Exception ex)
+        {
+            failed++;
+            var exceptionMessage = BuildOnlineStoreErrorMessage(ex.Message, endpoint, null, null, null);
+            await stagingOps.UpdateFlashlySyncInfoAsync(product.Id, "error", product.FlashlyProductId, product.FlashlySyncedAt, exceptionMessage);
+            results.Add(new { productId = product.Id, sourceSku = sku, success = false, message = exceptionMessage });
+        }
+    }
+
+    var summaryMessage = $"Envio tienda en linea finalizado. Enviados: {sent}. Fallidos: {failed}.";
+    await syncLogService.LogOperationAsync(new SyncLog
+    {
+        OperationType = "online_store_sync",
+        Status = failed == 0 ? "success" : "warning",
+        Message = summaryMessage,
+        Details = JsonSerializer.Serialize(results),
+        CreatedAt = DateTime.UtcNow
+    });
+
+    return Results.Ok(new
+    {
+        total = toSend.Count,
+        sent,
+        failed,
+        message = summaryMessage,
+        results
+    });
+});
+
+app.MapPost("/api/online-store/send/{productId:guid}", async (
+    Guid productId,
+    SupabaseTableService<StagingProduct> stagingService,
+    IStagingService stagingOps,
+    SettingsStore settingsStore,
+    IConfiguration configuration,
+    IHttpClientFactory httpClientFactory,
+    CancellationToken token) =>
+{
+    var product = await stagingService.GetByIdAsync(productId);
+    if (product == null)
+    {
+        return Results.NotFound(new { message = "Producto no encontrado." });
+    }
+
+    if (product.IsApartado)
+    {
+        return Results.BadRequest(new { message = "El producto esta apartado y no puede enviarse." });
+    }
+
+    var settings = settingsStore.Get();
+    var endpoint = ResolveOnlineStoreEndpoint(settings?.OnlineStoreBaseUrl, configuration["FlashlyApi:BaseUrl"]);
+    var apiKey = FirstNonEmpty(settings?.OnlineStoreApiKey, configuration["FlashlyApi:ApiKey"]);
+
+    if (endpoint == null || string.IsNullOrWhiteSpace(apiKey))
+    {
+        return Results.BadRequest(new { message = "Configuracion incompleta de tienda en linea (Base URL / API Key)." });
+    }
+
+    if (!string.Equals(product.Status, "validated", StringComparison.OrdinalIgnoreCase))
+    {
+        return Results.BadRequest(new { message = "Solo se pueden enviar productos con estado validated." });
+    }
+
+    if (string.IsNullOrWhiteSpace(product.SkuSource))
+    {
+        return Results.BadRequest(new { message = "SKU fuente vacio." });
+    }
+
+    try
+    {
+        var client = httpClientFactory.CreateClient("OnlineStore");
+        client.DefaultRequestHeaders.Remove("X-API-Key");
+        client.DefaultRequestHeaders.Add("X-API-Key", apiKey);
+
+        var payloadProduct = BuildOnlineStoreProductPayload(product, settings?.OnlineStoreName);
+        if (!ValidateOnlineStorePayload(payloadProduct, out var validationError))
+        {
+            var invalidPayload = JsonSerializer.Serialize(new { products = new[] { payloadProduct } });
+            var validationMessage = BuildOnlineStoreErrorMessage(validationError!, endpoint, invalidPayload, null, null);
+            await stagingOps.UpdateFlashlySyncInfoAsync(product.Id, "error", product.FlashlyProductId, product.FlashlySyncedAt, validationMessage);
+            return Results.BadRequest(new { message = validationMessage, payload = invalidPayload });
+        }
+
+        var requestPayload = JsonSerializer.Serialize(new { products = new[] { payloadProduct } });
+        using var content = new StringContent(requestPayload, Encoding.UTF8, "application/json");
+        using var response = await client.PostAsync(endpoint, content, token);
+        var upstreamResponseBody = await response.Content.ReadAsStringAsync(token);
+
+        var ok = response.IsSuccessStatusCode;
+        string? message = null;
+        if (ok)
+        {
+            var parsed = TryParseFlashlyResponse(upstreamResponseBody);
+            var error = parsed?.Results?.Errors?.FirstOrDefault();
+            if (error != null && !string.IsNullOrWhiteSpace(error.Error))
+            {
+                ok = false;
+                message = BuildOnlineStoreErrorMessage(
+                    error.Error,
+                    endpoint,
+                    requestPayload,
+                    (int)response.StatusCode,
+                    upstreamResponseBody);
+            }
+            else
+            {
+                message = parsed?.Message ?? "Enviado correctamente.";
+            }
+        }
+        else
+        {
+            message = BuildOnlineStoreErrorMessage(
+                $"HTTP {(int)response.StatusCode}",
+                endpoint,
+                requestPayload,
+                (int)response.StatusCode,
+                upstreamResponseBody);
+        }
+
+        if (ok)
+        {
+            await stagingOps.UpdateFlashlySyncInfoAsync(product.Id, "synced", product.FlashlyProductId, DateTime.UtcNow, null);
+            return Results.Ok(new { success = true, message });
+        }
+
+        await stagingOps.UpdateFlashlySyncInfoAsync(product.Id, "error", product.FlashlyProductId, product.FlashlySyncedAt, message);
+        return Results.BadRequest(new
+        {
+            message = message ?? "Error al enviar producto.",
+            endpoint = endpoint.ToString(),
+            payload = requestPayload,
+            upstreamStatusCode = (int)response.StatusCode,
+            upstreamResponseBody
+        });
+    }
+    catch (Exception ex)
+    {
+        var message = BuildOnlineStoreErrorMessage(ex.Message, endpoint, null, null, null);
+        await stagingOps.UpdateFlashlySyncInfoAsync(product.Id, "error", product.FlashlyProductId, product.FlashlySyncedAt, message);
+        return Results.Problem(title: "Error inesperado en envio a tienda en linea.", detail: message);
+    }
 });
 
 app.Run();
@@ -473,6 +757,462 @@ static void MapCrud<T>(
     });
 }
 
+static string BuildOnlineStoreErrorMessage(
+    string headline,
+    Uri endpoint,
+    string? requestPayload,
+    int? upstreamStatusCode,
+    string? upstreamResponseBody)
+{
+    var lines = new List<string> { headline };
+    lines.Add($"endpoint: {endpoint}");
+    if (upstreamStatusCode.HasValue)
+    {
+        lines.Add($"upstream_status: {upstreamStatusCode.Value}");
+    }
+
+    if (!string.IsNullOrWhiteSpace(requestPayload))
+    {
+        lines.Add($"payload: {requestPayload}");
+    }
+
+    if (!string.IsNullOrWhiteSpace(upstreamResponseBody))
+    {
+        lines.Add($"upstream_response: {upstreamResponseBody}");
+    }
+
+    return string.Join(Environment.NewLine, lines);
+}
+
+static bool ValidateOnlineStorePayload(JsonObject payload, out string? error)
+{
+    var missing = new List<string>();
+    var invalid = new List<string>();
+
+    bool MissingString(string key)
+    {
+        if (!payload.TryGetPropertyValue(key, out var node) || node == null)
+        {
+            return true;
+        }
+
+        if (node is JsonValue valueNode && valueNode.TryGetValue<string>(out var value))
+        {
+            return string.IsNullOrWhiteSpace(value);
+        }
+
+        return true;
+    }
+
+    bool MissingNumber(string key, Func<decimal, bool>? predicate = null)
+    {
+        if (!payload.TryGetPropertyValue(key, out var node) || node == null)
+        {
+            return true;
+        }
+
+        if (node is JsonValue valueNode && valueNode.TryGetValue<decimal>(out _))
+        {
+            if (predicate == null)
+            {
+                return false;
+            }
+
+            return !valueNode.TryGetValue<decimal>(out var numericValue) || !predicate(numericValue);
+        }
+
+        return true;
+    }
+
+    bool InvalidArrayContent(string key)
+    {
+        if (!payload.TryGetPropertyValue(key, out var node) || node is not JsonArray arr)
+        {
+            return true;
+        }
+
+        return arr.Count == 0 || arr.Any(x =>
+        {
+            if (x is not JsonValue valueNode || !valueNode.TryGetValue<string>(out var value))
+            {
+                return true;
+            }
+
+            return string.IsNullOrWhiteSpace(value);
+        });
+    }
+
+    bool MissingArray(string key)
+    {
+        if (!payload.TryGetPropertyValue(key, out var node) || node == null)
+        {
+            return true;
+        }
+
+        return node is not JsonArray;
+    }
+
+    bool MissingObject(string key)
+    {
+        if (!payload.TryGetPropertyValue(key, out var node) || node == null)
+        {
+            return true;
+        }
+
+        return node is not JsonObject;
+    }
+
+    if (MissingString("source_sku")) missing.Add("source_sku");
+    if (MissingString("name")) missing.Add("name");
+    if (MissingString("description")) missing.Add("description");
+    if (MissingNumber("purchase_price", x => x >= 0m)) missing.Add("purchase_price");
+    if (MissingString("supplier_name")) missing.Add("supplier_name");
+    if (MissingString("supplier_sku")) missing.Add("supplier_sku");
+    if (MissingArray("category_path")) missing.Add("category_path");
+    if (MissingArray("images")) missing.Add("images");
+    if (MissingObject("specifications")) missing.Add("specifications");
+    if (MissingNumber("stock", x => x >= 0m)) missing.Add("stock");
+    if (!MissingArray("category_path") && InvalidArrayContent("category_path")) invalid.Add("category_path");
+
+    if (missing.Count == 0 && invalid.Count == 0)
+    {
+        error = null;
+        return true;
+    }
+
+    var problems = new List<string>();
+    if (missing.Count > 0)
+    {
+        problems.Add($"faltantes/invalidos: {string.Join(", ", missing)}");
+    }
+
+    if (invalid.Count > 0)
+    {
+        problems.Add($"contenido invalido: {string.Join(", ", invalid)}");
+    }
+
+    error = $"Payload invalido. Campos requeridos con error -> {string.Join(" | ", problems)}";
+    return false;
+}
+
+static Uri? ResolveOnlineStoreEndpoint(string? runtimeUrl, string? fallbackBaseUrl)
+{
+    const string syncPath = "/api/v1/products/sync";
+    var raw = FirstNonEmpty(runtimeUrl, fallbackBaseUrl);
+    if (string.IsNullOrWhiteSpace(raw))
+    {
+        return null;
+    }
+
+    if (!Uri.TryCreate(raw, UriKind.Absolute, out var uri))
+    {
+        return null;
+    }
+
+    if (!string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) &&
+        !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+    {
+        return null;
+    }
+
+    if (string.Equals(uri.AbsolutePath, syncPath, StringComparison.OrdinalIgnoreCase))
+    {
+        var normalized = new UriBuilder(uri)
+        {
+            Path = syncPath,
+            Query = string.Empty
+        };
+        return normalized.Uri;
+    }
+
+    // The integration contract requires posting to /api/v1/products/sync.
+    // Normalize any base/admin URL to the required endpoint to avoid 404.
+    var builder = new UriBuilder(uri)
+    {
+        Path = syncPath,
+        Query = string.Empty
+    };
+    return builder.Uri;
+}
+
+static string? FirstNonEmpty(params string?[] values)
+{
+    return values.FirstOrDefault(v => !string.IsNullOrWhiteSpace(v));
+}
+
+static FlashlySyncResponse? TryParseFlashlyResponse(string payload)
+{
+    if (string.IsNullOrWhiteSpace(payload))
+    {
+        return null;
+    }
+
+    try
+    {
+        return JsonSerializer.Deserialize<FlashlySyncResponse>(payload, new JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true
+        });
+    }
+    catch
+    {
+        return null;
+    }
+}
+
+static JsonObject BuildOnlineStoreProductPayload(StagingProduct product, string? defaultSupplierName)
+{
+    var sourceSku = (product.SkuSource ?? string.Empty).Trim();
+    var name = sourceSku;
+    var description = sourceSku;
+    var purchasePrice = 0m;
+    var supplierName = string.IsNullOrWhiteSpace(defaultSupplierName) ? "Proveedor" : defaultSupplierName!.Trim();
+    var supplierSku = sourceSku;
+    var categoryPath = new List<string> { "General" };
+    var images = new List<string>();
+    var specificationsObject = new JsonObject();
+    var stock = 0;
+
+    if (!string.IsNullOrWhiteSpace(product.AIProcessedJson))
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(product.AIProcessedJson);
+            var root = document.RootElement;
+
+            sourceSku = FirstNonEmpty(
+                ReadJsonString(root, "sourceSku", "source_sku", "skuSource", "sku_source"),
+                ReadJsonString(root, "sku", "Sku"),
+                sourceSku) ?? sourceSku;
+
+            name = FirstNonEmpty(ReadJsonString(root, "name", "Name", "title", "Title"), name) ?? name;
+            description = FirstNonEmpty(ReadJsonString(root, "description", "Description"), description, name) ?? name;
+            purchasePrice = ReadJsonDecimal(root, "purchasePrice", "purchase_price", "price", "Price");
+            supplierName = FirstNonEmpty(ReadJsonString(root, "supplierName", "supplier_name", "supplier", "brand", "Brand"), supplierName) ?? supplierName;
+            supplierSku = FirstNonEmpty(
+                ReadJsonString(root, "supplierSku", "supplier_sku"),
+                ReadJsonString(root, "skuSupplier", "supplier_code"),
+                sourceSku) ?? sourceSku;
+            categoryPath = ReadJsonStringArray(root, "category_path", "categoryPath", "categories", "Categories");
+            if (categoryPath.Count == 0)
+            {
+                var category = ReadJsonString(root, "category", "Category");
+                if (!string.IsNullOrWhiteSpace(category))
+                {
+                    categoryPath = SplitCategoryPath(category!);
+                }
+            }
+
+            images = ReadJsonStringArray(root, "images", "Images", "imageUrls", "image_urls");
+            if (images.Count == 0)
+            {
+                var imageUrl = ReadJsonString(root, "imageUrl", "image_url", "ImageUrl");
+                if (!string.IsNullOrWhiteSpace(imageUrl))
+                {
+                    images.Add(imageUrl!.Trim());
+                }
+            }
+
+            stock = ReadJsonInt(root, "stock", "Stock");
+
+            if (TryGetPropertyIgnoreCase(root, "specifications", out var specs) ||
+                TryGetPropertyIgnoreCase(root, "Specifications", out specs))
+            {
+                var parsedSpecs = JsonNode.Parse(specs.GetRawText());
+                if (parsedSpecs is JsonObject jsonObject)
+                {
+                    specificationsObject = jsonObject;
+                }
+            }
+        }
+        catch
+        {
+            // Invalid JSON should not block outbound sync.
+        }
+    }
+
+    if (string.IsNullOrWhiteSpace(name))
+    {
+        name = sourceSku;
+    }
+
+    if (string.IsNullOrWhiteSpace(description))
+    {
+        description = name;
+    }
+
+    if (string.IsNullOrWhiteSpace(supplierName))
+    {
+        supplierName = "Proveedor";
+    }
+
+    if (string.IsNullOrWhiteSpace(supplierSku))
+    {
+        supplierSku = sourceSku;
+    }
+
+    if (categoryPath.Count == 0)
+    {
+        categoryPath.Add("General");
+    }
+
+    if (string.IsNullOrWhiteSpace(description))
+    {
+        description = name;
+    }
+
+    if (!string.IsNullOrWhiteSpace(product.SourceUrl))
+    {
+        specificationsObject["source_url"] = product.SourceUrl;
+    }
+
+    var payload = new JsonObject
+    {
+        ["source_sku"] = sourceSku,
+        ["name"] = name,
+        ["description"] = description,
+        ["purchase_price"] = purchasePrice,
+        ["supplier_name"] = supplierName,
+        ["supplier_sku"] = supplierSku,
+        ["category_path"] = new JsonArray(categoryPath.Select(v => JsonValue.Create(v)).ToArray()),
+        ["images"] = new JsonArray(images.Select(v => JsonValue.Create(v)).ToArray()),
+        ["specifications"] = specificationsObject,
+        ["stock"] = stock
+    };
+
+    return payload;
+}
+
+static List<string> SplitCategoryPath(string rawCategory)
+{
+    return rawCategory
+        .Split(new[] { '>', '|', ';', ',' }, StringSplitOptions.RemoveEmptyEntries)
+        .Select(v => v.Trim())
+        .Where(v => !string.IsNullOrWhiteSpace(v))
+        .ToList();
+}
+
+static string? ReadJsonString(JsonElement root, params string[] names)
+{
+    foreach (var name in names)
+    {
+        if (!TryGetPropertyIgnoreCase(root, name, out var element))
+        {
+            continue;
+        }
+
+        if (element.ValueKind == JsonValueKind.String)
+        {
+            return element.GetString();
+        }
+
+        if (element.ValueKind == JsonValueKind.Number || element.ValueKind == JsonValueKind.True || element.ValueKind == JsonValueKind.False)
+        {
+            return element.ToString();
+        }
+    }
+
+    return null;
+}
+
+static decimal ReadJsonDecimal(JsonElement root, params string[] names)
+{
+    foreach (var name in names)
+    {
+        if (!TryGetPropertyIgnoreCase(root, name, out var element))
+        {
+            continue;
+        }
+
+        if (element.ValueKind == JsonValueKind.Number && element.TryGetDecimal(out var value))
+        {
+            return value;
+        }
+
+        if (element.ValueKind == JsonValueKind.String && decimal.TryParse(element.GetString(), out var parsed))
+        {
+            return parsed;
+        }
+    }
+
+    return 0m;
+}
+
+static int ReadJsonInt(JsonElement root, params string[] names)
+{
+    foreach (var name in names)
+    {
+        if (!TryGetPropertyIgnoreCase(root, name, out var element))
+        {
+            continue;
+        }
+
+        if (element.ValueKind == JsonValueKind.Number && element.TryGetInt32(out var value))
+        {
+            return value;
+        }
+
+        if (element.ValueKind == JsonValueKind.String && int.TryParse(element.GetString(), out var parsed))
+        {
+            return parsed;
+        }
+    }
+
+    return 0;
+}
+
+static List<string> ReadJsonStringArray(JsonElement root, params string[] names)
+{
+    foreach (var name in names)
+    {
+        if (!TryGetPropertyIgnoreCase(root, name, out var element))
+        {
+            continue;
+        }
+
+        if (element.ValueKind == JsonValueKind.Array)
+        {
+            return element.EnumerateArray()
+                .Select(x => x.ValueKind == JsonValueKind.String ? x.GetString() : x.ToString())
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Select(x => x!)
+                .ToList();
+        }
+
+        if (element.ValueKind == JsonValueKind.String)
+        {
+            var raw = element.GetString();
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                return new List<string>();
+            }
+
+            return raw.Split('|', ';', ',')
+                .Select(x => x.Trim())
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .ToList();
+        }
+    }
+
+    return new List<string>();
+}
+
+static bool TryGetPropertyIgnoreCase(JsonElement root, string propertyName, out JsonElement value)
+{
+    foreach (var property in root.EnumerateObject())
+    {
+        if (string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase))
+        {
+            value = property.Value;
+            return true;
+        }
+    }
+
+    value = default;
+    return false;
+}
+
 public partial class Program
 {
 }
+

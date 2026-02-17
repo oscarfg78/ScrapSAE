@@ -31,6 +31,10 @@ public sealed class MainViewModel : ViewModelBase
     private int _saeScheduleMinutes = 30;
     private string _supabaseUrl = string.Empty;
     private string _supabaseServiceKey = string.Empty;
+    private string _targetSystem = "Flashly";
+    private string _onlineStoreName = string.Empty;
+    private string _onlineStoreBaseUrl = string.Empty;
+    private string _onlineStoreApiKey = string.Empty;
     private string _saeSdkPath = string.Empty;
     private string _saeUser = string.Empty;
     private string _saePassword = string.Empty;
@@ -66,6 +70,14 @@ public sealed class MainViewModel : ViewModelBase
     private DateTime _lastLogTimestamp = DateTime.UtcNow.AddDays(-1);
     
     private string _searchText = string.Empty;
+    private bool _isSendProgressVisible;
+    private bool _isSendProgressCompleted;
+    private string _sendProgressTitle = "Envio a SAE";
+    private string _sendProgressStatus = string.Empty;
+    private string _sendProgressText = string.Empty;
+    private double _sendProgressValue;
+    private double _sendProgressMaximum = 1;
+    private bool _showApartadosOnly;
     public System.ComponentModel.ICollectionView StagingProductsView { get; private set; }
 
     public MainViewModel(ApiClient apiClient)
@@ -103,7 +115,14 @@ public sealed class MainViewModel : ViewModelBase
 
         RunScrapingCommand = new AsyncCommand(() => SafeExecuteAsync(RunScrapingAsync, "Ejecutar scraping"), () => SelectedSite != null);
         SendSelectedToSaeCommand = new AsyncCommand(() => SafeExecuteAsync(SendSelectedToSaeAsync, "Enviar seleccionado a SAE"), () => SelectedStagingProduct != null);
+        SendCheckedToSaeCommand = new AsyncCommand(() => SafeExecuteAsync(SendCheckedToSaeAsync, "Enviar seleccionados a SAE"), () => SelectedForSaeCount > 0);
         SendPendingToSaeCommand = new AsyncCommand(() => SafeExecuteAsync(SendPendingToSaeAsync, "Enviar pendientes a SAE"));
+        SendPendingToOnlineStoreCommand = new AsyncCommand(() => SafeExecuteAsync(SendPendingToOnlineStoreAsync, "Enviar pendientes a tienda en línea"));
+        SendSelectedToOnlineStoreCommand = new AsyncCommand(() => SafeExecuteAsync(SendSelectedToOnlineStoreAsync, "Enviar seleccionados a tienda en línea"));
+        SaveSelectedOnlineStoreRecordCommand = new AsyncCommand(() => SafeExecuteAsync(SaveSelectedOnlineStoreRecordAsync, "Guardar cambios en registro"));
+        DeleteSelectedOnlineStoreRecordsCommand = new AsyncCommand(() => SafeExecuteAsync(DeleteSelectedOnlineStoreRecordsAsync, "Eliminar registros seleccionados"));
+        MarkSelectedAsApartadoCommand = new AsyncCommand(() => SafeExecuteAsync(MarkSelectedAsApartadoAsync, "Marcar apartados"));
+        UnmarkSelectedAsApartadoCommand = new AsyncCommand(() => SafeExecuteAsync(UnmarkSelectedAsApartadoAsync, "Quitar apartado"));
 
         LoadSettingsCommand = new AsyncCommand(() => SafeExecuteAsync(LoadSettingsAsync, "Cargar configuración"));
         SaveSettingsCommand = new AsyncCommand(() => SafeExecuteAsync(SaveSettingsAsync, "Guardar configuración"));
@@ -128,6 +147,8 @@ public sealed class MainViewModel : ViewModelBase
         ShowWindowCommand = new RelayCommand(ShowWindow);
         ExitApplicationCommand = new RelayCommand(ExitApplication);
         NavigateCommand = new RelayCommand<string>(NavigateToTab);
+        CloseSendProgressCommand = new RelayCommand(() => IsSendProgressVisible = false);
+        CopySendProgressCommand = new RelayCommand(CopySendProgressToClipboard);
         
         // Initialize Collection View for filtering
         StagingProductsView = System.Windows.Data.CollectionViewSource.GetDefaultView(StagingProducts);
@@ -142,7 +163,85 @@ public sealed class MainViewModel : ViewModelBase
         set => SetField(ref _searchText, value);
     }
 
+    public bool IsSendProgressVisible
+    {
+        get => _isSendProgressVisible;
+        set => SetField(ref _isSendProgressVisible, value);
+    }
+
+    public bool IsSendProgressCompleted
+    {
+        get => _isSendProgressCompleted;
+        set => SetField(ref _isSendProgressCompleted, value);
+    }
+
+    public string SendProgressTitle
+    {
+        get => _sendProgressTitle;
+        set => SetField(ref _sendProgressTitle, value);
+    }
+
+    public string SendProgressStatus
+    {
+        get => _sendProgressStatus;
+        set => SetField(ref _sendProgressStatus, value);
+    }
+
+    public string SendProgressText
+    {
+        get => _sendProgressText;
+        set => SetField(ref _sendProgressText, value);
+    }
+
+    public double SendProgressValue
+    {
+        get => _sendProgressValue;
+        set => SetField(ref _sendProgressValue, value);
+    }
+
+    public double SendProgressMaximum
+    {
+        get => _sendProgressMaximum;
+        set => SetField(ref _sendProgressMaximum, value);
+    }
+
     public RelayCommand<string> PerformSearchCommand { get; }
+
+    public int SelectedForSaeCount => StagingProducts.Count(p => p.IsSelected);
+    public int OnlineStorePendingCount => StagingProducts.Count(IsPendingForOnlineStore);
+    public int OnlineStoreApartadosCount => StagingProducts.Count(p => p.IsApartado);
+    public int OnlineStoreSelectedCount => OnlineStoreProducts.Count(p => p.IsSelected);
+    public IEnumerable<StagingProductUi> OnlineStoreProducts => StagingProducts.Where(FilterOnlineStoreProducts);
+
+    public bool ShowApartadosOnly
+    {
+        get => _showApartadosOnly;
+        set
+        {
+            if (SetField(ref _showApartadosOnly, value))
+            {
+                OnPropertyChanged(nameof(OnlineStoreProducts));
+                OnPropertyChanged(nameof(OnlineStoreSelectedCount));
+            }
+        }
+    }
+
+    private bool FilterOnlineStoreProducts(StagingProductUi p)
+    {
+        if (ShowApartadosOnly)
+        {
+            return p.IsApartado;
+        }
+
+        return IsPendingForOnlineStore(p);
+    }
+
+    private static bool IsPendingForOnlineStore(StagingProductUi p)
+    {
+        return string.Equals(p.Status, "validated", StringComparison.OrdinalIgnoreCase)
+            && !p.IsApartado
+            && !string.Equals(p.FlashlySyncStatus, "synced", StringComparison.OrdinalIgnoreCase);
+    }
 
     private void PerformSearch(string query)
     {
@@ -210,6 +309,7 @@ public sealed class MainViewModel : ViewModelBase
     public ObservableCollection<ExecutionReport> ExecutionReports { get; } = new();
     public ObservableCollection<string> AppLogs { get; } = new();
     public ObservableCollection<string> LiveLogs { get; } = new();
+    public ObservableCollection<string> SendProgressLogs { get; } = new();
     public string AppLogPath => AppLogger.GetLogPath();
 
 
@@ -290,6 +390,30 @@ public sealed class MainViewModel : ViewModelBase
     {
         get => _supabaseServiceKey;
         set => SetField(ref _supabaseServiceKey, value);
+    }
+
+    public string TargetSystem
+    {
+        get => _targetSystem;
+        set => SetField(ref _targetSystem, value);
+    }
+
+    public string OnlineStoreName
+    {
+        get => _onlineStoreName;
+        set => SetField(ref _onlineStoreName, value);
+    }
+
+    public string OnlineStoreBaseUrl
+    {
+        get => _onlineStoreBaseUrl;
+        set => SetField(ref _onlineStoreBaseUrl, value);
+    }
+
+    public string OnlineStoreApiKey
+    {
+        get => _onlineStoreApiKey;
+        set => SetField(ref _onlineStoreApiKey, value);
     }
 
     public string SaeSdkPath
@@ -558,7 +682,14 @@ public sealed class MainViewModel : ViewModelBase
 
     public AsyncCommand RunScrapingCommand { get; }
     public AsyncCommand SendSelectedToSaeCommand { get; }
+    public AsyncCommand SendCheckedToSaeCommand { get; }
     public AsyncCommand SendPendingToSaeCommand { get; }
+    public AsyncCommand SendPendingToOnlineStoreCommand { get; }
+    public AsyncCommand SendSelectedToOnlineStoreCommand { get; }
+    public AsyncCommand SaveSelectedOnlineStoreRecordCommand { get; }
+    public AsyncCommand DeleteSelectedOnlineStoreRecordsCommand { get; }
+    public AsyncCommand MarkSelectedAsApartadoCommand { get; }
+    public AsyncCommand UnmarkSelectedAsApartadoCommand { get; }
     public AsyncCommand LoadSettingsCommand { get; }
     public AsyncCommand SaveSettingsCommand { get; }
     public AsyncCommand RunDiagnosticsCommand { get; }
@@ -578,6 +709,8 @@ public sealed class MainViewModel : ViewModelBase
     public RelayCommand ShowWindowCommand { get; }
     public RelayCommand ExitApplicationCommand { get; }
     public RelayCommand<string> NavigateCommand { get; }
+    public RelayCommand CloseSendProgressCommand { get; }
+    public RelayCommand CopySendProgressCommand { get; }
 
     public async Task LoadAllAsync()
 
@@ -593,11 +726,13 @@ public sealed class MainViewModel : ViewModelBase
             HasSites = Sites.Count > 0;
             AppLogger.Info($"Sites loaded: {Sites.Count}");
 
-            StagingProducts.Clear();
-            foreach (var item in await _apiClient.GetStagingProductsAsync())
-            {
-                StagingProducts.Add(new StagingProductUi(item));
-            }
+            ResetStagingProducts(await _apiClient.GetStagingProductsAsync());
+            OnPropertyChanged(nameof(SelectedForSaeCount));
+            OnPropertyChanged(nameof(OnlineStorePendingCount));
+            OnPropertyChanged(nameof(OnlineStoreApartadosCount));
+            OnPropertyChanged(nameof(OnlineStoreSelectedCount));
+            OnPropertyChanged(nameof(OnlineStoreProducts));
+            SendCheckedToSaeCommand.RaiseCanExecuteChanged();
 
             CategoryMappings.Clear();
             foreach (var item in await _apiClient.GetCategoryMappingsAsync())
@@ -682,9 +817,15 @@ public sealed class MainViewModel : ViewModelBase
         var created = await _apiClient.CreateStagingProductAsync(product);
         if (created != null)
         {
-            var uiModel = new StagingProductUi(created);
+            var uiModel = CreateStagingProductUi(created);
             StagingProducts.Add(uiModel);
             SelectedStagingProduct = uiModel;
+            OnPropertyChanged(nameof(SelectedForSaeCount));
+            OnPropertyChanged(nameof(OnlineStorePendingCount));
+            OnPropertyChanged(nameof(OnlineStoreApartadosCount));
+            OnPropertyChanged(nameof(OnlineStoreSelectedCount));
+            OnPropertyChanged(nameof(OnlineStoreProducts));
+            SendCheckedToSaeCommand.RaiseCanExecuteChanged();
         }
     }
 
@@ -710,8 +851,15 @@ public sealed class MainViewModel : ViewModelBase
         }
 
         await _apiClient.DeleteStagingProductAsync(SelectedStagingProduct.Product.Id);
+        SelectedStagingProduct.PropertyChanged -= OnStagingProductPropertyChanged;
         StagingProducts.Remove(SelectedStagingProduct);
         SelectedStagingProduct = null;
+        OnPropertyChanged(nameof(SelectedForSaeCount));
+        OnPropertyChanged(nameof(OnlineStorePendingCount));
+        OnPropertyChanged(nameof(OnlineStoreApartadosCount));
+        OnPropertyChanged(nameof(OnlineStoreSelectedCount));
+        OnPropertyChanged(nameof(OnlineStoreProducts));
+        SendCheckedToSaeCommand.RaiseCanExecuteChanged();
     }
 
     private async Task CreateCategoryAsync()
@@ -945,20 +1093,265 @@ public sealed class MainViewModel : ViewModelBase
             return;
         }
 
-        var ok = await _apiClient.SendToSaeAsync(SelectedStagingProduct.Product.Id);
-        StatusMessage = ok ? "Envío a SAE realizado." : "SAE SDK no configurado.";
-        await LoadAllAsync();
+        await SendProductsWithProgressAsync(new List<StagingProductUi> { SelectedStagingProduct }, "Envio seleccionado a SAE");
+    }
+
+    private async Task SendCheckedToSaeAsync()
+    {
+        var selected = StagingProducts.Where(p => p.IsSelected).ToList();
+        if (selected.Count == 0)
+        {
+            StatusMessage = "No hay productos seleccionados.";
+            return;
+        }
+
+        await SendProductsWithProgressAsync(selected, "Envio de seleccionados a SAE");
     }
 
     private async Task SendPendingToSaeAsync()
     {
-        var summary = await _apiClient.SendPendingToSaeAsync();
-        if (summary != null)
+        var pending = StagingProducts
+            .Where(p => !p.Product.ExcludeFromSae && string.Equals(p.Product.Status, "validated", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (pending.Count == 0)
         {
-            StatusMessage = $"SAE: enviados {summary.Sent} de {summary.Total}.";
+            StatusMessage = "No hay registros pendientes por enviar.";
+            return;
         }
 
+        await SendProductsWithProgressAsync(pending, "Envio de pendientes a SAE");
+    }
+
+    private async Task SendPendingToOnlineStoreAsync()
+    {
+        var pending = OnlineStoreProducts
+            .Where(p => !p.IsApartado)
+            .Where(p => string.Equals(p.Status, "validated", StringComparison.OrdinalIgnoreCase))
+            .Where(p => !string.Equals(p.FlashlySyncStatus, "synced", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (pending.Count == 0)
+        {
+            StatusMessage = "No hay productos pendientes por enviar a tienda en línea.";
+            return;
+        }
+
+        await SendOnlineStoreProductsWithProgressAsync(pending, "Envio de pendientes a tienda en linea");
+    }
+
+    private async Task SendSelectedToOnlineStoreAsync()
+    {
+        var selected = OnlineStoreProducts.Where(p => p.IsSelected).ToList();
+        if (selected.Count == 0)
+        {
+            StatusMessage = "No hay productos seleccionados para enviar.";
+            return;
+        }
+
+        await SendOnlineStoreProductsWithProgressAsync(selected, "Envio de seleccionados a tienda en linea");
+    }
+
+    private async Task SendOnlineStoreProductsWithProgressAsync(List<StagingProductUi> products, string title)
+    {
+        IsSendProgressVisible = true;
+        IsSendProgressCompleted = false;
+        SendProgressTitle = title;
+        ClearSendProgressLogs();
+        SendProgressMaximum = Math.Max(1, products.Count);
+        SendProgressValue = 0;
+        SendProgressStatus = $"Preparando envio de {products.Count} registro(s)...";
+
+        var sent = 0;
+        var failed = 0;
+        for (int i = 0; i < products.Count; i++)
+        {
+            var product = products[i];
+            var current = i + 1;
+            var label = string.IsNullOrWhiteSpace(product.Sku) ? product.Product.Id.ToString() : product.Sku;
+            var start = $"[{current}/{products.Count}] Enviando {label}...";
+            AppendSendProgressLog(start);
+            SendProgressStatus = start;
+
+            var result = await _apiClient.SendToOnlineStoreAsync(product.Product.Id);
+            if (result.Success)
+            {
+                sent++;
+                AppendSendProgressLog($"[{current}/{products.Count}] OK {label}");
+            }
+            else
+            {
+                failed++;
+                AppendSendProgressLog($"[{current}/{products.Count}] ERROR {label}");
+                AppendSendErrorDetails(current, products.Count, result);
+            }
+
+            SendProgressValue = current;
+        }
+
+        SendProgressStatus = $"Finalizado. Enviados: {sent}. Fallidos: {failed}.";
+        IsSendProgressCompleted = true;
+        StatusMessage = SendProgressStatus;
+        await RefreshStagingProductsAsync();
+    }
+
+    private async Task SaveSelectedOnlineStoreRecordAsync()
+    {
+        if (SelectedStagingProduct == null)
+        {
+            StatusMessage = "Selecciona un registro para guardar cambios.";
+            return;
+        }
+
+        var updated = await _apiClient.UpdateStagingProductAsync(SelectedStagingProduct.Product.Id, SelectedStagingProduct.Product);
+        StatusMessage = updated != null ? "Registro actualizado." : "No se pudo actualizar el registro.";
+        await RefreshStagingProductsAsync();
+    }
+
+    private async Task DeleteSelectedOnlineStoreRecordsAsync()
+    {
+        var selected = OnlineStoreProducts.Where(p => p.IsSelected).ToList();
+        if (selected.Count == 0)
+        {
+            StatusMessage = "No hay registros seleccionados para eliminar.";
+            return;
+        }
+
+        foreach (var item in selected)
+        {
+            await _apiClient.DeleteStagingProductAsync(item.Product.Id);
+        }
+
+        StatusMessage = $"Registros eliminados: {selected.Count}.";
+        await RefreshStagingProductsAsync();
+    }
+
+    private async Task MarkSelectedAsApartadoAsync()
+    {
+        var selected = OnlineStoreProducts.Where(p => p.IsSelected).ToList();
+        if (selected.Count == 0)
+        {
+            StatusMessage = "No hay registros seleccionados para apartar.";
+            return;
+        }
+
+        foreach (var item in selected)
+        {
+            item.IsApartado = true;
+            await _apiClient.UpdateStagingProductAsync(item.Product.Id, item.Product);
+        }
+
+        StatusMessage = $"Registros apartados: {selected.Count}.";
+        await RefreshStagingProductsAsync();
+    }
+
+    private async Task UnmarkSelectedAsApartadoAsync()
+    {
+        var selected = OnlineStoreProducts.Where(p => p.IsSelected).ToList();
+        if (selected.Count == 0)
+        {
+            StatusMessage = "No hay registros seleccionados para quitar apartado.";
+            return;
+        }
+
+        foreach (var item in selected)
+        {
+            item.IsApartado = false;
+            await _apiClient.UpdateStagingProductAsync(item.Product.Id, item.Product);
+        }
+
+        StatusMessage = $"Registros reactivados: {selected.Count}.";
+        await RefreshStagingProductsAsync();
+    }
+
+    private async Task SendProductsWithProgressAsync(List<StagingProductUi> products, string title)
+    {
+        IsSendProgressVisible = true;
+        IsSendProgressCompleted = false;
+        SendProgressTitle = title;
+        ClearSendProgressLogs();
+        SendProgressMaximum = Math.Max(1, products.Count);
+        SendProgressValue = 0;
+        SendProgressStatus = $"Preparando envio de {products.Count} registro(s)...";
+
+        int sent = 0;
+        int failed = 0;
+        for (int i = 0; i < products.Count; i++)
+        {
+            var product = products[i];
+            var current = i + 1;
+            var sku = string.IsNullOrWhiteSpace(product.Sku) ? product.Product.SkuSource : product.Sku;
+            var label = string.IsNullOrWhiteSpace(sku) ? product.Product.Id.ToString() : sku;
+
+            var startMessage = $"[{current}/{products.Count}] Enviando {label}...";
+            AppendSendProgressLog(startMessage);
+            SendProgressStatus = startMessage;
+
+            var result = await _apiClient.SendToSaeAsync(product.Product.Id);
+            if (result.Success)
+            {
+                sent++;
+                AppendSendProgressLog($"[{current}/{products.Count}] OK {label}");
+            }
+            else
+            {
+                failed++;
+                AppendSendProgressLog($"[{current}/{products.Count}] ERROR {label}");
+                AppendSendErrorDetails(current, products.Count, result);
+            }
+
+            SendProgressValue = current;
+        }
+
+        SendProgressStatus = $"Finalizado. Enviados: {sent}. Fallidos: {failed}.";
+        IsSendProgressCompleted = true;
+        StatusMessage = SendProgressStatus;
         await LoadAllAsync();
+    }
+
+    private void AppendSendErrorDetails(int current, int total, ApiOperationResult result)
+    {
+        if (result.StatusCode.HasValue)
+        {
+            AppendSendProgressLog($"[{current}/{total}]   HTTP {result.StatusCode.Value}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(result.Message))
+        {
+            var lines = result.Message
+                .Split(new[] { "\r\n", "\n" }, StringSplitOptions.None)
+                .Select(line => line.Trim())
+                .Where(line => !string.IsNullOrWhiteSpace(line));
+            foreach (var line in lines)
+            {
+                AppendSendProgressLog($"[{current}/{total}]   {line}");
+            }
+        }
+    }
+
+    private void ClearSendProgressLogs()
+    {
+        SendProgressLogs.Clear();
+        SendProgressText = string.Empty;
+    }
+
+    private void AppendSendProgressLog(string line)
+    {
+        SendProgressLogs.Add(line);
+        SendProgressText = string.IsNullOrEmpty(SendProgressText)
+            ? line
+            : $"{SendProgressText}{Environment.NewLine}{line}";
+    }
+
+    private void CopySendProgressToClipboard()
+    {
+        if (string.IsNullOrWhiteSpace(SendProgressText))
+        {
+            return;
+        }
+
+        Clipboard.SetText(SendProgressText);
+        StatusMessage = "Log de envío copiado al portapapeles.";
     }
 
     private void UpdateSaeTimer()
@@ -986,6 +1379,10 @@ public sealed class MainViewModel : ViewModelBase
 
             SupabaseUrl = settings.SupabaseUrl ?? string.Empty;
             SupabaseServiceKey = settings.SupabaseServiceKey ?? string.Empty;
+            TargetSystem = settings.TargetSystem ?? "Flashly";
+            OnlineStoreName = settings.OnlineStoreName ?? string.Empty;
+            OnlineStoreBaseUrl = settings.OnlineStoreBaseUrl ?? string.Empty;
+            OnlineStoreApiKey = settings.OnlineStoreApiKey ?? string.Empty;
             SaeSdkPath = settings.SaeSdkPath ?? string.Empty;
             SaeUser = settings.SaeUser ?? string.Empty;
             SaePassword = settings.SaePassword ?? string.Empty;
@@ -1013,6 +1410,10 @@ public sealed class MainViewModel : ViewModelBase
             {
                 SupabaseUrl = SupabaseUrl,
                 SupabaseServiceKey = SupabaseServiceKey,
+                TargetSystem = TargetSystem,
+                OnlineStoreName = OnlineStoreName,
+                OnlineStoreBaseUrl = OnlineStoreBaseUrl,
+                OnlineStoreApiKey = OnlineStoreApiKey,
                 SaeSdkPath = SaeSdkPath,
                 SaeUser = SaeUser,
                 SaePassword = SaePassword,
@@ -1247,12 +1648,57 @@ public sealed class MainViewModel : ViewModelBase
         var products = await _apiClient.GetStagingProductsAsync();
         Application.Current.Dispatcher.Invoke(() =>
         {
-            StagingProducts.Clear();
-            foreach (var item in products)
-            {
-                StagingProducts.Add(new StagingProductUi(item));
-            }
+            ResetStagingProducts(products);
+            OnPropertyChanged(nameof(SelectedForSaeCount));
+            OnPropertyChanged(nameof(OnlineStorePendingCount));
+            OnPropertyChanged(nameof(OnlineStoreApartadosCount));
+            OnPropertyChanged(nameof(OnlineStoreSelectedCount));
+            OnPropertyChanged(nameof(OnlineStoreProducts));
+            SendCheckedToSaeCommand.RaiseCanExecuteChanged();
         });
+    }
+
+    private StagingProductUi CreateStagingProductUi(StagingProduct item)
+    {
+        var ui = new StagingProductUi(item);
+        ui.PropertyChanged += OnStagingProductPropertyChanged;
+        return ui;
+    }
+
+    private void OnStagingProductPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(StagingProductUi.IsSelected))
+        {
+            OnPropertyChanged(nameof(SelectedForSaeCount));
+            OnPropertyChanged(nameof(OnlineStoreSelectedCount));
+            SendCheckedToSaeCommand.RaiseCanExecuteChanged();
+        }
+
+        if (e.PropertyName == nameof(StagingProductUi.IsApartado))
+        {
+            OnPropertyChanged(nameof(OnlineStorePendingCount));
+            OnPropertyChanged(nameof(OnlineStoreApartadosCount));
+            OnPropertyChanged(nameof(OnlineStoreProducts));
+        }
+    }
+
+    private void ResetStagingProducts(IEnumerable<StagingProduct> products)
+    {
+        foreach (var existing in StagingProducts)
+        {
+            existing.PropertyChanged -= OnStagingProductPropertyChanged;
+        }
+
+        StagingProducts.Clear();
+        foreach (var item in products)
+        {
+            StagingProducts.Add(CreateStagingProductUi(item));
+        }
+
+        OnPropertyChanged(nameof(OnlineStorePendingCount));
+        OnPropertyChanged(nameof(OnlineStoreApartadosCount));
+        OnPropertyChanged(nameof(OnlineStoreSelectedCount));
+        OnPropertyChanged(nameof(OnlineStoreProducts));
     }
 
     private async Task RefreshLiveLogsAsync()

@@ -6,7 +6,7 @@ namespace ScrapSAE.Api.Services;
 /// <summary>
 /// Implementación de IStagingService para el API que utiliza SupabaseTableService
 /// </summary>
-public sealed class ApiStagingService : IStagingService
+    public sealed class ApiStagingService : IStagingService
 {
     private readonly SupabaseTableService<StagingProduct> _productsTable;
     private readonly SupabaseTableService<SiteProfile> _sitesTable;
@@ -39,7 +39,7 @@ public sealed class ApiStagingService : IStagingService
             existing.SourceUrl = product.SourceUrl;
             existing.UpdatedAt = DateTime.UtcNow;
             existing.Status = product.Status; // Mantener estado o resetear a pending? User dijo "actualizar"
-            await _productsTable.UpdateAsync(existing.Id, existing);
+            await SafeUpdateAsync(existing.Id, existing);
             return existing;
         }
 
@@ -74,7 +74,7 @@ public sealed class ApiStagingService : IStagingService
             product.Status = status;
             product.ValidationNotes = notes;
             product.UpdatedAt = DateTime.UtcNow;
-            await _productsTable.UpdateAsync(id, product);
+            await SafeUpdateAsync(id, product);
         }
     }
 
@@ -92,7 +92,7 @@ public sealed class ApiStagingService : IStagingService
             product.Status = status;
             product.ValidationNotes = notes;
             product.UpdatedAt = DateTime.UtcNow;
-            await _productsTable.UpdateAsync(product.Id, product);
+            await SafeUpdateAsync(product.Id, product);
         }
     }
 
@@ -106,7 +106,7 @@ public sealed class ApiStagingService : IStagingService
             product.FlashlySyncedAt = syncedAt;
             product.ValidationNotes = notes;
             product.UpdatedAt = DateTime.UtcNow;
-            await _productsTable.UpdateAsync(id, product);
+            await SafeUpdateAsync(id, product);
         }
     }
 
@@ -117,7 +117,7 @@ public sealed class ApiStagingService : IStagingService
         {
             product.AIProcessedJson = aiProcessedJson;
             product.UpdatedAt = DateTime.UtcNow;
-            await _productsTable.UpdateAsync(id, product);
+            await SafeUpdateAsync(id, product);
         }
     }
 
@@ -125,5 +125,25 @@ public sealed class ApiStagingService : IStagingService
     {
         var all = await _sitesTable.GetAllAsync();
         return all.Where(s => s.IsActive);
+    }
+
+    private async Task SafeUpdateAsync(Guid id, StagingProduct product)
+    {
+        try
+        {
+            await _productsTable.UpdateAsync(id, product);
+        }
+        catch (Exception ex) when (ContainsMissingIsApartadoColumn(ex))
+        {
+            // Backward compatibility: database schema may not yet have is_apartado.
+            product.IsApartado = false;
+            await _productsTable.UpdateAsync(id, product);
+        }
+    }
+
+    private static bool ContainsMissingIsApartadoColumn(Exception ex)
+    {
+        return ex.Message.Contains("is_apartado", StringComparison.OrdinalIgnoreCase) &&
+               ex.Message.Contains("column", StringComparison.OrdinalIgnoreCase);
     }
 }
