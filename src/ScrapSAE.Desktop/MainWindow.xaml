@@ -967,6 +967,15 @@
                     <WrapPanel Margin="0,0,0,8">
                         <Button Content="Enviar seleccionados"
                                 Command="{Binding SendSelectedToOnlineStoreCommand}" />
+                        <Button Content="Rescrapear seleccionados"
+                                Command="{Binding RescrapeSelectedOnlineStoreCommand}" />
+                        <Button Content="Ver progreso rescrape"
+                                Command="{Binding ShowSendProgressCommand}"
+                                Visibility="{Binding ShowOpenRescrapeProgressButton, Converter={StaticResource BoolToVisibility}}" />
+                        <CheckBox Content="Login manual rescrape"
+                                  IsChecked="{Binding RescrapeManualLoginEnabled}"
+                                  VerticalAlignment="Center"
+                                  Margin="8,0,0,0" />
                         <Button Content="Enviar pendientes"
                                 Command="{Binding SendPendingToOnlineStoreCommand}" />
                         <Button Content="Guardar cambios"
@@ -1029,6 +1038,10 @@
                             <DataGridTextColumn Header="Nombre" Binding="{Binding ProductName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="3*" />
                             <DataGridTextColumn Header="Precio" Binding="{Binding EditablePrice, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, StringFormat={}{0:F2}}" Width="110" />
                             <DataGridTextColumn Header="URL origen" Binding="{Binding SourceUrl, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="2*" />
+                            <DataGridTextColumn Header="Links imágenes" Binding="{Binding ImageLinksText}" Width="2*" />
+                            <DataGridTextColumn Header="Obtenido fuente"
+                                                Binding="{Binding Product.LastSeenAt, StringFormat={}{0:dd/MM/yyyy HH:mm:ss}}"
+                                                Width="170" />
                             <DataGridTextColumn Header="Estado" Binding="{Binding Status}" Width="120" />
                             <DataGridTextColumn Header="Sync tienda" Binding="{Binding FlashlySyncStatus}" Width="120" />
                             <DataGridTextColumn Header="Ultimo envio" Binding="{Binding FlashlySyncedAt}" Width="180" />
@@ -1098,12 +1111,29 @@
                     </Border>
 
                     <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+                        <Button Content="Confirmar Login Manual"
+                                Command="{Binding ConfirmRescrapeLoginCommand}"
+                                Margin="0,0,8,0"
+                                Visibility="{Binding ShowRescrapeConfirmLoginButton, Converter={StaticResource BoolToVisibility}}" />
+                        <Button Content="Pausar"
+                                Command="{Binding PauseRescrapeCommand}"
+                                Margin="0,0,8,0"
+                                Visibility="{Binding ShowRescrapeControlButtons, Converter={StaticResource BoolToVisibility}}" />
+                        <Button Content="Reanudar"
+                                Command="{Binding ResumeRescrapeCommand}"
+                                Margin="0,0,8,0"
+                                Visibility="{Binding ShowRescrapeControlButtons, Converter={StaticResource BoolToVisibility}}" />
+                        <Button Content="Cancelar"
+                                Command="{Binding CancelRescrapeCommand}"
+                                Margin="0,0,8,0"
+                                Background="#EF4444"
+                                BorderBrush="#B91C1C"
+                                Visibility="{Binding ShowRescrapeControlButtons, Converter={StaticResource BoolToVisibility}}" />
                         <Button Content="Copiar todo"
                                 Command="{Binding CopySendProgressCommand}"
                                 Margin="0,0,8,0" />
                         <Button Content="Cerrar"
-                                Command="{Binding CloseSendProgressCommand}"
-                                IsEnabled="{Binding IsSendProgressCompleted}" />
+                                Command="{Binding CloseSendProgressCommand}" />
                     </StackPanel>
                 </Grid>
             </Border>

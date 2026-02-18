@@ -3,6 +3,7 @@ using ScrapSAE.Core.DTOs;
 using ScrapSAE.Core.Entities;
 using ScrapSAE.Core.Interfaces;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace ScrapSAE.Api.Services;
 
@@ -18,6 +19,7 @@ public sealed class ScrapingRunner
     private readonly IConfigurationUpdater? _configurationUpdater;
     private readonly IPerformanceMetricsCollector? _metricsCollector;
     private readonly ILearningService? _learningService;
+    private readonly IPdfAttachmentAnalyzer? _pdfAttachmentAnalyzer;
     private readonly ILogger<ScrapingRunner> _logger;
     private static readonly JsonSerializerOptions _jsonOptions = new()
     {
@@ -37,7 +39,8 @@ public sealed class ScrapingRunner
         IPostExecutionAnalyzer? postExecutionAnalyzer = null,
         IConfigurationUpdater? configurationUpdater = null,
         IPerformanceMetricsCollector? metricsCollector = null,
-        ILearningService? learningService = null)
+        ILearningService? learningService = null,
+        IPdfAttachmentAnalyzer? pdfAttachmentAnalyzer = null)
     {
         _scrapingService = scrapingService;
         _supabase = supabase;
@@ -50,6 +53,7 @@ public sealed class ScrapingRunner
         _configurationUpdater = configurationUpdater;
         _metricsCollector = metricsCollector;
         _learningService = learningService;
+        _pdfAttachmentAnalyzer = pdfAttachmentAnalyzer;
     }
 
 
@@ -216,10 +220,19 @@ public sealed class ScrapingRunner
             }
 
             var existing = await GetStagingBySkuAsync(siteId, item.SkuSource);
+            var effectiveProduct = await EnrichScrapedProductAsync(siteId, item, existing, cancellationToken);
+            var rawSnapshotJson = SerializeScrapedSnapshot(effectiveProduct);
+            var incomingAiJson = await BuildAiJsonAsync(effectiveProduct, cancellationToken) ?? "{}";
+            var pdfSpecs = await ExtractPdfSpecificationsAsync(effectiveProduct, cancellationToken);
+            var finalAiJson = MergeConservative(existing?.AIProcessedJson, incomingAiJson, pdfSpecs);
+            var sourceUrl = ResolvePreferredSourceUrl(effectiveProduct, existing?.SourceUrl);
+
             if (existing == null)
             {
-                var staging = MapToStaging(siteId, item);
-                staging.AIProcessedJson = await BuildAiJsonAsync(item, cancellationToken);
+                var staging = MapToStaging(siteId, effectiveProduct);
+                staging.RawData = rawSnapshotJson;
+                staging.SourceUrl = sourceUrl;
+                staging.AIProcessedJson = finalAiJson;
                 await _supabase.PostAsync("staging_products", staging);
                 created++;
             }
@@ -227,8 +240,9 @@ public sealed class ScrapingRunner
             {
                 var update = new
                 {
-                    raw_data = item.RawHtml,
-                    ai_processed_json = await BuildAiJsonAsync(item, cancellationToken),
+                    raw_data = rawSnapshotJson,
+                    ai_processed_json = finalAiJson,
+                    source_url = sourceUrl,
                     updated_at = DateTime.UtcNow,
                     last_seen_at = DateTime.UtcNow
                 };
@@ -260,7 +274,7 @@ public sealed class ScrapingRunner
             Id = Guid.NewGuid(),
             SiteId = siteId,
             SkuSource = item.SkuSource,
-            RawData = item.RawHtml,
+            RawData = SerializeScrapedSnapshot(item),
             SourceUrl = item.SourceUrl,
             Status = "pending",
             Attempts = 0,
@@ -301,9 +315,13 @@ public sealed class ScrapingRunner
             scrapedProduct.Description,
             scrapedProduct.Price,
             scrapedProduct.ImageUrl,
+            scrapedProduct.ImageUrls,
+            scrapedProduct.Attachments,
             scrapedProduct.ScreenshotBase64,
             scrapedProduct.Brand,
             scrapedProduct.Category,
+            scrapedProduct.SourceUrl,
+            scrapedProduct.NavigationUrls,
             scrapedProduct.Attributes
         };
 
@@ -317,20 +335,25 @@ public sealed class ScrapingRunner
             processed.Description = string.IsNullOrWhiteSpace(processed.Description) ? (scrapedProduct.Description ?? string.Empty) : processed.Description;
             processed.Brand ??= scrapedProduct.Brand;
             processed.Price ??= scrapedProduct.Price;
+            MergeScrapedDataIntoProcessed(processed, scrapedProduct);
+            processed.OriginalRawData ??= rawData;
 
             return JsonSerializer.Serialize(processed);
         }
-        catch
+        catch (Exception ex)
         {
-            return JsonSerializer.Serialize(new
-            {
-                scrapedProduct.Title,
-                scrapedProduct.Price,
-                scrapedProduct.ImageUrl,
-                scrapedProduct.Description,
-                scrapedProduct.Attributes
-            });
+            _logger.LogWarning(ex,
+                "Fallo procesamiento IA para SKU {Sku}. Se aplicara fallback estructurado.",
+                scrapedProduct.SkuSource);
+
+            var fallback = BuildFallbackProcessedProduct(scrapedProduct, rawData);
+            return JsonSerializer.Serialize(fallback);
         }
+    }
+
+    public Task<string?> BuildAiJsonFromScrapedAsync(ScrapedProduct scrapedProduct, CancellationToken cancellationToken)
+    {
+        return BuildAiJsonAsync(scrapedProduct, cancellationToken);
     }
 
     private async Task<SiteProfile> EnrichSiteSelectorsAsync(SiteProfile site)
@@ -411,4 +434,146 @@ public sealed class ScrapingRunner
             return new List<string>();
         }
     }
+
+    private static ProcessedProduct BuildFallbackProcessedProduct(ScrapedProduct scrapedProduct, string rawData)
+    {
+        var fallback = new ProcessedProduct
+        {
+            Sku = scrapedProduct.SkuSource,
+            Name = scrapedProduct.Title ?? scrapedProduct.SkuSource ?? string.Empty,
+            Description = scrapedProduct.Description ?? scrapedProduct.Title ?? string.Empty,
+            Brand = scrapedProduct.Brand,
+            Price = scrapedProduct.Price,
+            OriginalRawData = rawData
+        };
+
+        MergeScrapedDataIntoProcessed(fallback, scrapedProduct);
+        return fallback;
+    }
+
+    private static void MergeScrapedDataIntoProcessed(ProcessedProduct processed, ScrapedProduct scrapedProduct)
+    {
+        processed.Specifications ??= new Dictionary<string, string>();
+        processed.Images ??= new List<string>();
+        processed.Attachments ??= new List<ProductAttachment>();
+        processed.Categories ??= new List<string>();
+
+        if (!string.IsNullOrWhiteSpace(scrapedProduct.SourceUrl) &&
+            !processed.Specifications.ContainsKey("source_url"))
+        {
+            processed.Specifications["source_url"] = scrapedProduct.SourceUrl!;
+        }
+
+        if (string.IsNullOrWhiteSpace(processed.Currency) &&
+            scrapedProduct.Attributes.TryGetValue("currency", out var currencyValue) &&
+            !string.IsNullOrWhiteSpace(currencyValue))
+        {
+            processed.Currency = currencyValue.Trim();
+        }
+
+        if (!processed.Stock.HasValue &&
+            scrapedProduct.Attributes.TryGetValue("stock", out var stockValue) &&
+            int.TryParse(stockValue, out var parsedStock))
+        {
+            processed.Stock = parsedStock;
+        }
+
+        foreach (var imageUrl in scrapedProduct.ImageUrls ?? Enumerable.Empty<string>())
+        {
+            if (!string.IsNullOrWhiteSpace(imageUrl) &&
+                !processed.Images.Contains(imageUrl, StringComparer.OrdinalIgnoreCase))
+            {
+                processed.Images.Add(imageUrl.Trim());
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(scrapedProduct.ImageUrl) &&
+            !processed.Images.Contains(scrapedProduct.ImageUrl, StringComparer.OrdinalIgnoreCase))
+        {
+            processed.Images.Insert(0, scrapedProduct.ImageUrl.Trim());
+        }
+
+        var existingAttachmentUrls = new HashSet<string>(
+            processed.Attachments.Select(a => a.FileUrl ?? string.Empty),
+            StringComparer.OrdinalIgnoreCase);
+        foreach (var attachment in scrapedProduct.Attachments ?? Enumerable.Empty<ProductAttachment>())
+        {
+            if (string.IsNullOrWhiteSpace(attachment.FileUrl) ||
+                existingAttachmentUrls.Contains(attachment.FileUrl))
+            {
+                continue;
+            }
+
+            processed.Attachments.Add(new ProductAttachment
+            {
+                FileName = attachment.FileName ?? string.Empty,
+                FileUrl = attachment.FileUrl.Trim(),
+                FileType = attachment.FileType,
+                FileSizeBytes = attachment.FileSizeBytes
+            });
+            existingAttachmentUrls.Add(attachment.FileUrl);
+        }
+
+        if (!processed.Categories.Any() && !string.IsNullOrWhiteSpace(scrapedProduct.Category))
+        {
+            processed.Categories = SplitCategoryPath(scrapedProduct.Category);
+        }
+
+        processed.SuggestedCategory ??= processed.Categories.FirstOrDefault();
+
+        foreach (var attribute in scrapedProduct.Attributes)
+        {
+            if (string.IsNullOrWhiteSpace(attribute.Key) || string.IsNullOrWhiteSpace(attribute.Value))
+            {
+                continue;
+            }
+
+            if (IgnoredAttributeKeys.Contains(attribute.Key))
+            {
+                continue;
+            }
+
+            var key = NormalizeSpecificationKey(attribute.Key);
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                continue;
+            }
+
+            if (!processed.Specifications.ContainsKey(key))
+            {
+                processed.Specifications[key] = attribute.Value.Trim();
+            }
+        }
+    }
+
+    private static string NormalizeSpecificationKey(string rawKey)
+    {
+        var key = rawKey.Trim();
+        if (key.StartsWith("tech_", StringComparison.OrdinalIgnoreCase))
+        {
+            key = key.Substring(5);
+        }
+
+        key = key.Replace("_", " ").Trim();
+        return key;
+    }
+
+    private static List<string> SplitCategoryPath(string rawCategory)
+    {
+        return rawCategory
+            .Split(new[] { '>', '|', ';', ',' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(v => v.Trim())
+            .Where(v => !string.IsNullOrWhiteSpace(v))
+            .ToList();
+    }
+
+    private static readonly HashSet<string> IgnoredAttributeKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "product_url",
+        "variant_url",
+        "price_text",
+        "stock",
+        "currency",
+        "source_url"
+    };
 }

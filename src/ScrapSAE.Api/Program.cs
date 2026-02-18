@@ -35,7 +35,9 @@ builder.Services.AddSingleton<IScrapeControlService, ScrapeControlService>();
 builder.Services.AddSingleton<ISyncLogService, ApiSyncLogService>();
 builder.Services.AddHttpClient("OpenAI");
 builder.Services.AddHttpClient("OnlineStore");
+builder.Services.AddHttpClient("AttachmentAnalyzer");
 builder.Services.AddSingleton<IAIProcessorService, OpenAIProcessorService>();
+builder.Services.AddSingleton<IPdfAttachmentAnalyzer, PdfAttachmentAnalyzer>();
 
 // Nuevos servicios para arquitectura adaptativa
 builder.Services.AddSingleton<IPerformanceMetricsCollector, PerformanceMetricsCollector>();
@@ -69,6 +71,9 @@ builder.Services.AddSingleton(sp => new SupabaseTableService<StagingProduct>(sp.
 builder.Services.AddSingleton(sp => new SupabaseTableService<CategoryMapping>(sp.GetRequiredService<ISupabaseRestClient>(), "category_mapping"));
 builder.Services.AddSingleton(sp => new SupabaseTableService<SyncLog>(sp.GetRequiredService<ISupabaseRestClient>(), "sync_logs"));
 builder.Services.AddSingleton(sp => new SupabaseTableService<ExecutionReport>(sp.GetRequiredService<ISupabaseRestClient>(), "execution_reports"));
+builder.Services.AddSingleton(sp => new SupabaseTableService<RescrapeJob>(sp.GetRequiredService<ISupabaseRestClient>(), "rescrape_jobs"));
+builder.Services.AddSingleton(sp => new SupabaseTableService<RescrapeJobItem>(sp.GetRequiredService<ISupabaseRestClient>(), "rescrape_job_items"));
+builder.Services.AddSingleton(sp => new SupabaseTableService<RescrapeJobLog>(sp.GetRequiredService<ISupabaseRestClient>(), "rescrape_job_logs"));
 
 // Browser sharing for persistence
 builder.Services.AddSingleton<IBrowserSharingService, BrowserSharingService>();
@@ -77,6 +82,8 @@ builder.Services.AddSingleton<ScrapingProcessManager>();
 builder.Services.AddSingleton<IScrapingService, PlaywrightScrapingService>();
 builder.Services.AddSingleton<ScrapingRunner>();
 builder.Services.AddSingleton<IScrapingSignalService, ScrapingSignalService>();
+builder.Services.AddSingleton<IRescrapeJobService, RescrapeJobService>();
+builder.Services.AddHostedService<RescrapeJobBackgroundService>();
 
 var saeProvider = builder.Configuration["SAE:Provider"] ?? "firebird";
 if (string.Equals(saeProvider, "firebird", StringComparison.OrdinalIgnoreCase))
@@ -253,13 +260,28 @@ app.MapPost("/api/scraping/inspect/{siteId:guid}", async (
         Environment.SetEnvironmentVariable("SCRAPSAE_INSPECT_ONLY", request.InspectOnly ? "true" : "false");
         
         Console.WriteLine($"[DEBUG] Direct URL inspection for site {siteId}: {request.Urls.Count} URLs");
-        
-        // Ejecutar scraping con las URLs directas
-        var scraped = await scrapingService.ScrapeDirectUrlsAsync(request.Urls, siteId, request.InspectOnly, token);
-        
-        // Persistir resultados si no es "solo inspecciÃ³n" o si queremos guardar lo validado (segÃºn lo solicitado)
-        // El usuario solicitÃ³ que las URLs agregadas para anÃ¡lisis deben agregar el producto
-        var (created, updated, skipped) = await runner.ProcessScrapedProductsAsync(siteId, scraped, token);
+        scrapingService.RegisterSite(site);
+
+        // Ejecutar scraping con las URLs directas.
+        var scraped = await scrapingService.ScrapeDirectUrlsAsync(
+            request.Urls,
+            siteId,
+            new DirectUrlScrapeOptions
+            {
+                InspectOnly = request.InspectOnly,
+                SingleProductOnly = false,
+                ExpandRelated = true
+            },
+            token);
+
+        var created = 0;
+        var updated = 0;
+        if (!request.InspectOnly)
+        {
+            var processed = await runner.ProcessScrapedProductsAsync(siteId, scraped, token);
+            created = processed.created;
+            updated = processed.updated;
+        }
         
         // Mapear de vuelta a DirectUrlResult para la respuesta del API (compatibilidad frontend)
         var results = scraped.Select(p => new DirectUrlResult {
@@ -273,15 +295,17 @@ app.MapPost("/api/scraping/inspect/{siteId:guid}", async (
             DetectedType = "ProductDetail"
         }).ToList();
         
-        return Results.Ok(new 
-        { 
-            totalUrls = request.Urls.Count,
-            successCount = results.Count(r => r.Success),
-            productsCreated = created,
-            productsUpdated = updated,
-            results = results,
-            inspectOnly = request.InspectOnly
-        });
+        var response = new InspectUrlsResponse
+        {
+            TotalUrls = request.Urls.Count,
+            SuccessCount = results.Count(r => r.Success),
+            ProductsCreated = created,
+            ProductsUpdated = updated,
+            Results = results,
+            InspectOnly = request.InspectOnly
+        };
+
+        return Results.Ok(response);
     }
     finally
     {
@@ -290,6 +314,94 @@ app.MapPost("/api/scraping/inspect/{siteId:guid}", async (
         Environment.SetEnvironmentVariable("SCRAPSAE_DIRECT_URLS", null);
         Environment.SetEnvironmentVariable("SCRAPSAE_INSPECT_ONLY", null);
     }
+});
+
+app.MapPost("/api/scraping/rescrape", async (
+    RescrapeRequest request,
+    IRescrapeJobService rescrapeJobs,
+    CancellationToken token) =>
+{
+    if (request.ProductIds == null || request.ProductIds.Count == 0)
+    {
+        return Results.BadRequest(new { message = "Se requiere al menos un productId." });
+    }
+
+    try
+    {
+        var created = await rescrapeJobs.EnqueueAsync(request, token);
+        return Results.Accepted($"/api/scraping/rescrape/{created.JobId}", created);
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.BadRequest(new { message = ex.Message });
+    }
+});
+
+app.MapGet("/api/scraping/rescrape/{jobId:guid}", async (
+    Guid jobId,
+    IRescrapeJobService rescrapeJobs,
+    CancellationToken token) =>
+{
+    var status = await rescrapeJobs.GetStatusAsync(jobId, token);
+    return status == null ? Results.NotFound(new { message = "Job no encontrado." }) : Results.Ok(status);
+});
+
+app.MapGet("/api/scraping/rescrape/{jobId:guid}/items", async (
+    Guid jobId,
+    IRescrapeJobService rescrapeJobs,
+    CancellationToken token) =>
+{
+    var status = await rescrapeJobs.GetStatusAsync(jobId, token);
+    if (status == null)
+    {
+        return Results.NotFound(new { message = "Job no encontrado." });
+    }
+
+    var items = await rescrapeJobs.GetItemsAsync(jobId, token);
+    return Results.Ok(items);
+});
+
+app.MapGet("/api/scraping/rescrape/{jobId:guid}/logs", async (
+    Guid jobId,
+    int? take,
+    IRescrapeJobService rescrapeJobs,
+    CancellationToken token) =>
+{
+    var status = await rescrapeJobs.GetStatusAsync(jobId, token);
+    if (status == null)
+    {
+        return Results.NotFound(new { message = "Job no encontrado." });
+    }
+
+    var logs = await rescrapeJobs.GetLogsAsync(jobId, take ?? 200, token);
+    return Results.Ok(logs);
+});
+
+app.MapPost("/api/scraping/rescrape/{jobId:guid}/pause", async (
+    Guid jobId,
+    IRescrapeJobService rescrapeJobs,
+    CancellationToken token) =>
+{
+    var paused = await rescrapeJobs.PauseAsync(jobId, token);
+    return paused ? Results.Ok(new { jobId, status = "paused" }) : Results.NotFound(new { message = "Job no encontrado." });
+});
+
+app.MapPost("/api/scraping/rescrape/{jobId:guid}/resume", async (
+    Guid jobId,
+    IRescrapeJobService rescrapeJobs,
+    CancellationToken token) =>
+{
+    var resumed = await rescrapeJobs.ResumeAsync(jobId, token);
+    return resumed ? Results.Ok(new { jobId, status = "queued" }) : Results.NotFound(new { message = "Job no encontrado." });
+});
+
+app.MapPost("/api/scraping/rescrape/{jobId:guid}/cancel", async (
+    Guid jobId,
+    IRescrapeJobService rescrapeJobs,
+    CancellationToken token) =>
+{
+    var cancelled = await rescrapeJobs.CancelAsync(jobId, token);
+    return cancelled ? Results.Ok(new { jobId, status = "cancelled" }) : Results.NotFound(new { message = "Job no encontrado." });
 });
 
 app.MapPost("/api/scraping/session/confirm/{siteId}", (string siteId, IScrapingSignalService signal) =>
@@ -811,14 +923,36 @@ static bool ValidateOnlineStorePayload(JsonObject payload, out string? error)
             return true;
         }
 
-        if (node is JsonValue valueNode && valueNode.TryGetValue<decimal>(out _))
+        if (node is JsonValue valueNode)
         {
+            decimal numericValue;
+            if (valueNode.TryGetValue<decimal>(out var asDecimal))
+            {
+                numericValue = asDecimal;
+            }
+            else if (valueNode.TryGetValue<int>(out var asInt))
+            {
+                numericValue = asInt;
+            }
+            else if (valueNode.TryGetValue<long>(out var asLong))
+            {
+                numericValue = asLong;
+            }
+            else if (valueNode.TryGetValue<double>(out var asDouble))
+            {
+                numericValue = (decimal)asDouble;
+            }
+            else
+            {
+                return true;
+            }
+
             if (predicate == null)
             {
                 return false;
             }
 
-            return !valueNode.TryGetValue<decimal>(out var numericValue) || !predicate(numericValue);
+            return !predicate(numericValue);
         }
 
         return true;
@@ -870,6 +1004,7 @@ static bool ValidateOnlineStorePayload(JsonObject payload, out string? error)
     if (MissingString("supplier_sku")) missing.Add("supplier_sku");
     if (MissingArray("category_path")) missing.Add("category_path");
     if (MissingArray("images")) missing.Add("images");
+    if (MissingArray("attachments")) missing.Add("attachments");
     if (MissingObject("specifications")) missing.Add("specifications");
     if (MissingNumber("stock", x => x >= 0m)) missing.Add("stock");
     if (!MissingArray("category_path") && InvalidArrayContent("category_path")) invalid.Add("category_path");
@@ -970,8 +1105,10 @@ static JsonObject BuildOnlineStoreProductPayload(StagingProduct product, string?
     var supplierSku = sourceSku;
     var categoryPath = new List<string> { "General" };
     var images = new List<string>();
+    var attachments = new JsonArray();
     var specificationsObject = new JsonObject();
     var stock = 0;
+    var productUrl = string.IsNullOrWhiteSpace(product.SourceUrl) ? null : product.SourceUrl!.Trim();
 
     if (!string.IsNullOrWhiteSpace(product.AIProcessedJson))
     {
@@ -993,6 +1130,9 @@ static JsonObject BuildOnlineStoreProductPayload(StagingProduct product, string?
                 ReadJsonString(root, "supplierSku", "supplier_sku"),
                 ReadJsonString(root, "skuSupplier", "supplier_code"),
                 sourceSku) ?? sourceSku;
+            productUrl = FirstNonEmpty(
+                ReadJsonString(root, "product_url", "productUrl", "source_url", "sourceUrl", "url", "Url"),
+                productUrl);
             categoryPath = ReadJsonStringArray(root, "category_path", "categoryPath", "categories", "Categories");
             if (categoryPath.Count == 0)
             {
@@ -1003,16 +1143,25 @@ static JsonObject BuildOnlineStoreProductPayload(StagingProduct product, string?
                 }
             }
 
-            images = ReadJsonStringArray(root, "images", "Images", "imageUrls", "image_urls");
+            images = ReadJsonStringArray(
+                root,
+                "images", "Images",
+                "imageUrls", "image_urls", "ImageUrls",
+                "primaryImageUrls", "primary_image_urls", "PrimaryImageUrls");
             if (images.Count == 0)
             {
-                var imageUrl = ReadJsonString(root, "imageUrl", "image_url", "ImageUrl");
+                var imageUrl = ReadJsonString(
+                    root,
+                    "imageUrl", "image_url", "ImageUrl",
+                    "primaryImageUrl", "primary_image_url", "PrimaryImageUrl",
+                    "thumbnailUrl", "thumbnail_url", "ThumbnailUrl");
                 if (!string.IsNullOrWhiteSpace(imageUrl))
                 {
                     images.Add(imageUrl!.Trim());
                 }
             }
 
+            attachments = ReadAttachments(root);
             stock = ReadJsonInt(root, "stock", "Stock");
 
             if (TryGetPropertyIgnoreCase(root, "specifications", out var specs) ||
@@ -1024,10 +1173,72 @@ static JsonObject BuildOnlineStoreProductPayload(StagingProduct product, string?
                     specificationsObject = jsonObject;
                 }
             }
+
+            MergeSpecificationsFromAttributes(specificationsObject, root);
         }
         catch
         {
             // Invalid JSON should not block outbound sync.
+        }
+    }
+
+    // Fallback para datos legacy almacenados en raw_data (cuando ai_processed_json no trae todo).
+    if ((images.Count == 0 || attachments.Count == 0 || specificationsObject.Count == 0) &&
+        !string.IsNullOrWhiteSpace(product.RawData))
+    {
+        try
+        {
+            using var rawDoc = JsonDocument.Parse(product.RawData);
+            var rawRoot = rawDoc.RootElement;
+
+            if (images.Count == 0)
+            {
+                images = ReadJsonStringArray(
+                    rawRoot,
+                    "images", "Images",
+                    "imageUrls", "image_urls", "ImageUrls",
+                    "primaryImageUrls", "primary_image_urls", "PrimaryImageUrls");
+                if (images.Count == 0)
+                {
+                    var imageUrl = ReadJsonString(
+                        rawRoot,
+                        "imageUrl", "image_url", "ImageUrl",
+                        "primaryImageUrl", "primary_image_url", "PrimaryImageUrl",
+                        "thumbnailUrl", "thumbnail_url", "ThumbnailUrl");
+                    if (!string.IsNullOrWhiteSpace(imageUrl))
+                    {
+                        images.Add(imageUrl.Trim());
+                    }
+                }
+            }
+
+            productUrl = FirstNonEmpty(
+                ReadJsonString(rawRoot, "product_url", "productUrl", "source_url", "sourceUrl", "url", "Url"),
+                productUrl);
+
+            if (attachments.Count == 0)
+            {
+                attachments = ReadAttachments(rawRoot);
+            }
+
+            if (specificationsObject.Count == 0)
+            {
+                if (TryGetPropertyIgnoreCase(rawRoot, "specifications", out var rawSpecs) ||
+                    TryGetPropertyIgnoreCase(rawRoot, "Specifications", out rawSpecs))
+                {
+                    var parsedSpecs = JsonNode.Parse(rawSpecs.GetRawText());
+                    if (parsedSpecs is JsonObject jsonObject)
+                    {
+                        specificationsObject = jsonObject;
+                    }
+                }
+
+                MergeSpecificationsFromAttributes(specificationsObject, rawRoot);
+            }
+        }
+        catch
+        {
+            // Ignore invalid raw_data payloads.
         }
     }
 
@@ -1050,6 +1261,12 @@ static JsonObject BuildOnlineStoreProductPayload(StagingProduct product, string?
     {
         supplierSku = sourceSku;
     }
+
+    images = images
+        .Where(x => !string.IsNullOrWhiteSpace(x))
+        .Select(x => x.Trim())
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToList();
 
     if (categoryPath.Count == 0)
     {
@@ -1074,8 +1291,13 @@ static JsonObject BuildOnlineStoreProductPayload(StagingProduct product, string?
         ["purchase_price"] = purchasePrice,
         ["supplier_name"] = supplierName,
         ["supplier_sku"] = supplierSku,
+        ["product_url"] = string.IsNullOrWhiteSpace(productUrl) ? null : productUrl,
+        ["source_url"] = string.IsNullOrWhiteSpace(productUrl) ? null : productUrl,
+        ["categories"] = new JsonArray(categoryPath.Select(v => JsonValue.Create(v)).ToArray()),
         ["category_path"] = new JsonArray(categoryPath.Select(v => JsonValue.Create(v)).ToArray()),
+        ["image_urls"] = new JsonArray(images.Select(v => JsonValue.Create(v)).ToArray()),
         ["images"] = new JsonArray(images.Select(v => JsonValue.Create(v)).ToArray()),
+        ["attachments"] = attachments,
         ["specifications"] = specificationsObject,
         ["stock"] = stock
     };
@@ -1090,6 +1312,67 @@ static List<string> SplitCategoryPath(string rawCategory)
         .Select(v => v.Trim())
         .Where(v => !string.IsNullOrWhiteSpace(v))
         .ToList();
+}
+
+static JsonArray ReadAttachments(JsonElement root)
+{
+    if (TryGetPropertyIgnoreCase(root, "attachments", out var attachmentsElement) ||
+        TryGetPropertyIgnoreCase(root, "Attachments", out attachmentsElement) ||
+        TryGetPropertyIgnoreCase(root, "files", out attachmentsElement) ||
+        TryGetPropertyIgnoreCase(root, "Files", out attachmentsElement))
+    {
+        if (attachmentsElement.ValueKind == JsonValueKind.Array)
+        {
+            var attachments = new JsonArray();
+            foreach (var item in attachmentsElement.EnumerateArray())
+            {
+                if (item.ValueKind == JsonValueKind.String)
+                {
+                    var directUrl = item.GetString();
+                    if (!string.IsNullOrWhiteSpace(directUrl))
+                    {
+                        attachments.Add(new JsonObject { ["url"] = directUrl.Trim() });
+                    }
+                    continue;
+                }
+
+                if (item.ValueKind != JsonValueKind.Object)
+                {
+                    continue;
+                }
+
+                var url = ReadJsonString(item, "url", "Url", "fileUrl", "file_url", "href", "Href", "link", "Link");
+                if (string.IsNullOrWhiteSpace(url))
+                {
+                    continue;
+                }
+
+                var name = ReadJsonString(item, "name", "Name", "fileName", "filename");
+                var type = ReadJsonString(item, "type", "Type", "mimeType", "mime_type");
+
+                var attachment = new JsonObject
+                {
+                    ["url"] = url!.Trim()
+                };
+
+                if (!string.IsNullOrWhiteSpace(name))
+                {
+                    attachment["name"] = name!.Trim();
+                }
+
+                if (!string.IsNullOrWhiteSpace(type))
+                {
+                    attachment["type"] = type!.Trim();
+                }
+
+                attachments.Add(attachment);
+            }
+
+            return attachments;
+        }
+    }
+
+    return new JsonArray();
 }
 
 static string? ReadJsonString(JsonElement root, params string[] names)
@@ -1173,10 +1456,32 @@ static List<string> ReadJsonStringArray(JsonElement root, params string[] names)
         if (element.ValueKind == JsonValueKind.Array)
         {
             return element.EnumerateArray()
-                .Select(x => x.ValueKind == JsonValueKind.String ? x.GetString() : x.ToString())
+                .Select(x =>
+                {
+                    if (x.ValueKind == JsonValueKind.String)
+                    {
+                        return x.GetString();
+                    }
+
+                    if (x.ValueKind == JsonValueKind.Object)
+                    {
+                        return ReadJsonString(x, "url", "Url", "src", "Src", "imageUrl", "image_url", "href", "Href", "fileUrl", "file_url");
+                    }
+
+                    return x.ToString();
+                })
                 .Where(x => !string.IsNullOrWhiteSpace(x))
-                .Select(x => x!)
+                .Select(x => x!.Trim())
                 .ToList();
+        }
+
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            var single = ReadJsonString(element, "url", "Url", "src", "Src", "imageUrl", "image_url", "href", "Href");
+            if (!string.IsNullOrWhiteSpace(single))
+            {
+                return new List<string> { single.Trim() };
+            }
         }
 
         if (element.ValueKind == JsonValueKind.String)
@@ -1195,6 +1500,75 @@ static List<string> ReadJsonStringArray(JsonElement root, params string[] names)
     }
 
     return new List<string>();
+}
+
+static void MergeSpecificationsFromAttributes(JsonObject target, JsonElement root)
+{
+    // 1) Estructura convencional "attributes".
+    if (TryGetPropertyIgnoreCase(root, "attributes", out var attributesElement) ||
+        TryGetPropertyIgnoreCase(root, "Attributes", out attributesElement))
+    {
+        if (attributesElement.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var prop in attributesElement.EnumerateObject())
+            {
+                var value = JsonElementToString(prop.Value);
+                if (string.IsNullOrWhiteSpace(value))
+                {
+                    continue;
+                }
+
+                var key = NormalizeSpecificationKey(prop.Name);
+                if (!target.ContainsKey(key))
+                {
+                    target[key] = value;
+                }
+            }
+        }
+    }
+
+    // 2) Formato plano legacy con claves tech_* en raíz.
+    foreach (var prop in root.EnumerateObject())
+    {
+        if (!prop.Name.StartsWith("tech_", StringComparison.OrdinalIgnoreCase))
+        {
+            continue;
+        }
+
+        var value = JsonElementToString(prop.Value);
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            continue;
+        }
+
+        var key = NormalizeSpecificationKey(prop.Name);
+        if (!target.ContainsKey(key))
+        {
+            target[key] = value;
+        }
+    }
+}
+
+static string NormalizeSpecificationKey(string rawKey)
+{
+    var key = rawKey.Trim();
+    if (key.StartsWith("tech_", StringComparison.OrdinalIgnoreCase))
+    {
+        key = key.Substring(5);
+    }
+
+    key = key.Replace("_", " ").Trim();
+    return key;
+}
+
+static string? JsonElementToString(JsonElement value)
+{
+    return value.ValueKind switch
+    {
+        JsonValueKind.String => value.GetString()?.Trim(),
+        JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False => value.ToString(),
+        _ => null
+    };
 }
 
 static bool TryGetPropertyIgnoreCase(JsonElement root, string propertyName, out JsonElement value)

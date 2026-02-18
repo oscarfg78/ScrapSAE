@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using FluentAssertions;
 using ScrapSAE.Api.Tests.Fakes;
+using ScrapSAE.Core.DTOs;
 using ScrapSAE.Core.Entities;
 
 namespace ScrapSAE.Api.Tests;
@@ -133,5 +134,105 @@ public class ApiE2eTests : IClassFixture<ApiTestFactory>
         var root = document.RootElement;
         root.GetProperty("supabaseUrl").GetString().Should().Be(payload.supabaseUrl);
         root.GetProperty("saeDbPath").GetString().Should().Be(payload.saeDbPath);
+    }
+
+    [Fact]
+    public async Task Inspect_WithInspectOnly_ShouldReturnWrappedResponse_WithoutPersistence()
+    {
+        var client = _factory.CreateClient();
+        _factory.SupabaseClient.Reset();
+        var site = new SiteProfile
+        {
+            Id = Guid.NewGuid(),
+            Name = "Site Inspect",
+            BaseUrl = "https://example.com",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        _factory.SupabaseClient.Seed("config_sites", site);
+
+        var payload = new
+        {
+            urls = new[] { "https://example.com/p/1" },
+            inspectOnly = true,
+            manualLogin = false,
+            headless = true
+        };
+
+        var response = await client.PostAsJsonAsync($"/api/scraping/inspect/{site.Id}", payload);
+        response.EnsureSuccessStatusCode();
+
+        var body = await response.Content.ReadFromJsonAsync<InspectUrlsResponse>();
+        body.Should().NotBeNull();
+        body!.TotalUrls.Should().Be(1);
+        body.InspectOnly.Should().BeTrue();
+        body.ProductsCreated.Should().Be(0);
+        body.ProductsUpdated.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Rescrape_ShouldCreateJobAndItems()
+    {
+        var client = _factory.CreateClient();
+        _factory.SupabaseClient.Reset();
+
+        var site = new SiteProfile
+        {
+            Id = Guid.NewGuid(),
+            Name = "Site Rescrape",
+            BaseUrl = "https://example.com",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        _factory.SupabaseClient.Seed("config_sites", site);
+
+        var p1 = new StagingProduct
+        {
+            Id = Guid.NewGuid(),
+            SiteId = site.Id,
+            SkuSource = "SKU-1",
+            SourceUrl = "https://example.com/p/1",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        var p2 = new StagingProduct
+        {
+            Id = Guid.NewGuid(),
+            SiteId = site.Id,
+            SkuSource = "SKU-2",
+            SourceUrl = "https://example.com/p/2",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        _factory.SupabaseClient.Seed("staging_products", p1, p2);
+
+        var create = await client.PostAsJsonAsync("/api/scraping/rescrape", new RescrapeRequest
+        {
+            ProductIds = new List<Guid> { p1.Id, p2.Id },
+            ManualLogin = true
+        });
+
+        create.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        var created = await create.Content.ReadFromJsonAsync<RescrapeJobResponse>();
+        created.Should().NotBeNull();
+        created!.TotalItems.Should().Be(2);
+
+        var statusResponse = await client.GetAsync($"/api/scraping/rescrape/{created.JobId}");
+        statusResponse.EnsureSuccessStatusCode();
+        var status = await statusResponse.Content.ReadFromJsonAsync<RescrapeJobStatusResponse>();
+        status.Should().NotBeNull();
+        status!.TotalItems.Should().Be(2);
+
+        var itemsResponse = await client.GetAsync($"/api/scraping/rescrape/{created.JobId}/items");
+        itemsResponse.EnsureSuccessStatusCode();
+        var items = await itemsResponse.Content.ReadFromJsonAsync<List<RescrapeJobItemResponse>>();
+        items.Should().NotBeNull();
+        items!.Should().HaveCount(2);
+
+        var logsResponse = await client.GetAsync($"/api/scraping/rescrape/{created.JobId}/logs");
+        logsResponse.EnsureSuccessStatusCode();
+        var logs = await logsResponse.Content.ReadFromJsonAsync<List<RescrapeJobLogResponse>>();
+        logs.Should().NotBeNull();
+        logs!.Count.Should().BeGreaterThan(0);
     }
 }

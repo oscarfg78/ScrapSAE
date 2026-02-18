@@ -6,6 +6,11 @@ namespace ScrapSAE.Api.Tests.Stubs;
 
 public sealed class StubScrapingService : IScrapingService
 {
+    public void RegisterSite(SiteProfile site)
+    {
+        // No-op for tests.
+    }
+
     public Task<IEnumerable<ScrapedProduct>> ScrapeAsync(SiteProfile site, CancellationToken cancellationToken = default)
     {
         var products = new[]
@@ -19,5 +24,21 @@ public sealed class StubScrapingService : IScrapingService
     public Task<byte[]?> DownloadImageAsync(string imageUrl)
     {
         return Task.FromResult<byte[]?>(null);
+    }
+
+    public Task<List<ScrapedProduct>> ScrapeDirectUrlsAsync(
+        List<string> urls,
+        Guid siteId,
+        DirectUrlScrapeOptions? options = null,
+        CancellationToken cancellationToken = default)
+    {
+        var products = urls.Select((url, idx) => new ScrapedProduct
+        {
+            SkuSource = $"DIRECT-{idx + 1}",
+            Title = $"Direct Product {idx + 1}",
+            SourceUrl = url
+        }).ToList();
+
+        return Task.FromResult(products);
     }
 }

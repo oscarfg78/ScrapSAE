@@ -68,12 +68,68 @@ public sealed class ApiClient
         }
     }
 
-    public async Task<List<DirectUrlResult>?> InspectUrlsAsync(Guid siteId, List<string> urls)
+    public async Task<InspectUrlsResponse?> InspectUrlsAsync(Guid siteId, List<string> urls)
     {
         var body = new { urls };
         var response = await _httpClient.PostAsJsonAsync($"api/scraping/inspect/{siteId}", body);
         response.EnsureSuccessStatusCode();
-        return await response.Content.ReadFromJsonAsync<List<DirectUrlResult>>(_jsonOptions);
+        return await response.Content.ReadFromJsonAsync<InspectUrlsResponse>(_jsonOptions);
+    }
+
+    public async Task<RescrapeJobResponse?> QueueRescrapeAsync(List<Guid> productIds, bool manualLogin = false)
+    {
+        var body = new RescrapeRequest
+        {
+            ProductIds = productIds,
+            ManualLogin = manualLogin
+        };
+        var response = await _httpClient.PostAsJsonAsync("api/scraping/rescrape", body);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<RescrapeJobResponse>(_jsonOptions);
+    }
+
+    public async Task<RescrapeJobStatusResponse?> GetRescrapeStatusAsync(Guid jobId)
+    {
+        var response = await _httpClient.GetAsync($"api/scraping/rescrape/{jobId}");
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<RescrapeJobStatusResponse>(_jsonOptions);
+    }
+
+    public async Task<List<RescrapeJobItemResponse>> GetRescrapeItemsAsync(Guid jobId)
+    {
+        var response = await _httpClient.GetAsync($"api/scraping/rescrape/{jobId}/items");
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<List<RescrapeJobItemResponse>>(_jsonOptions) ?? new List<RescrapeJobItemResponse>();
+    }
+
+    public async Task<List<RescrapeJobLogResponse>> GetRescrapeLogsAsync(Guid jobId, int take = 200)
+    {
+        var response = await _httpClient.GetAsync($"api/scraping/rescrape/{jobId}/logs?take={take}");
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<List<RescrapeJobLogResponse>>(_jsonOptions) ?? new List<RescrapeJobLogResponse>();
+    }
+
+    public async Task<bool> CancelRescrapeAsync(Guid jobId)
+    {
+        var response = await _httpClient.PostAsync($"api/scraping/rescrape/{jobId}/cancel", null);
+        return response.IsSuccessStatusCode;
+    }
+
+    public async Task<bool> PauseRescrapeAsync(Guid jobId)
+    {
+        var response = await _httpClient.PostAsync($"api/scraping/rescrape/{jobId}/pause", null);
+        return response.IsSuccessStatusCode;
+    }
+
+    public async Task<bool> ResumeRescrapeAsync(Guid jobId)
+    {
+        var response = await _httpClient.PostAsync($"api/scraping/rescrape/{jobId}/resume", null);
+        return response.IsSuccessStatusCode;
     }
 
 

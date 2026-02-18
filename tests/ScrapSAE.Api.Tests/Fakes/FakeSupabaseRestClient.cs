@@ -23,6 +23,14 @@ public sealed class FakeSupabaseRestClient : ISupabaseRestClient
         return Task.FromResult(results);
     }
 
+    public Task<string> GetAsync(string pathAndQuery)
+    {
+        var (table, filters) = ParsePath(pathAndQuery);
+        var list = GetTable(table);
+        var results = list.Where(item => MatchesFilters(item, filters)).ToList();
+        return Task.FromResult(JsonSerializer.Serialize(results, JsonOptions));
+    }
+
     public Task<T?> PostAsync<T>(string path, T body) where T : class
     {
         var list = GetTable(path);
@@ -42,6 +50,20 @@ public sealed class FakeSupabaseRestClient : ISupabaseRestClient
 
         ApplyUpdate(item, update);
         return Task.FromResult<T?>(item);
+    }
+
+    public Task PatchAsync(string pathAndQuery, string jsonBody)
+    {
+        var (table, filters) = ParsePath(pathAndQuery);
+        var list = GetTable(table);
+        var toUpdate = list.Where(entry => MatchesFilters(entry, filters)).ToList();
+        using var doc = JsonDocument.Parse(jsonBody);
+        foreach (var item in toUpdate)
+        {
+            ApplyJsonUpdate(item, doc.RootElement);
+        }
+
+        return Task.CompletedTask;
     }
 
     public Task DeleteAsync(string pathAndQuery)
@@ -152,6 +174,39 @@ public sealed class FakeSupabaseRestClient : ISupabaseRestClient
 
             var value = sourceProperty.GetValue(update);
             targetProperty.SetValue(target, value);
+        }
+    }
+
+    private static void ApplyJsonUpdate(object target, JsonElement updateElement)
+    {
+        if (updateElement.ValueKind != JsonValueKind.Object)
+        {
+            return;
+        }
+
+        foreach (var property in updateElement.EnumerateObject())
+        {
+            var targetPropertyName = SnakeToPascal(property.Name);
+            var targetProperty = target.GetType().GetProperty(targetPropertyName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.IgnoreCase);
+            if (targetProperty == null || !targetProperty.CanWrite)
+            {
+                continue;
+            }
+
+            object? value = null;
+            try
+            {
+                value = JsonSerializer.Deserialize(property.Value.GetRawText(), targetProperty.PropertyType);
+            }
+            catch
+            {
+                // Ignore incompatible test updates.
+            }
+
+            if (value != null || targetProperty.PropertyType.IsClass || Nullable.GetUnderlyingType(targetProperty.PropertyType) != null)
+            {
+                targetProperty.SetValue(target, value);
+            }
         }
     }
 

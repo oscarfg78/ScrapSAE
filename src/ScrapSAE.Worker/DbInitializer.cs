@@ -128,6 +128,10 @@ public class DbInitializer
                 PriceSelector = ".price-value",
                 SkuSelector = ".part-number",
                 ImageSelector = ".product-image img",
+                ImageGallerySelector = ".product-gallery, .image-gallery",
+                ImageGalleryItemSelector = "img",
+                AttachmentLinkSelector = "a[href*='.pdf'], a[href*='datasheet'], a[href*='manual'], a[href*='download']",
+                StockSelector = ".stock, [data-testid*='stock'], .availability",
                 NextPageSelector = ".pagination-next",
                 MaxPages = 2
             },

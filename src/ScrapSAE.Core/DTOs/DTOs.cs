@@ -1,7 +1,7 @@
 namespace ScrapSAE.Core.DTOs;
 
 /// <summary>
-/// Producto extraído del scraping (datos crudos)
+/// Producto extraÃ­do del scraping (datos crudos)
 /// </summary>
 public class ScrapedProduct
 {
@@ -29,7 +29,7 @@ public class ScrapedProduct
 }
 
 /// <summary>
-/// Archivo adjunto de producto (PDF, manual, ficha técnica)
+/// Archivo adjunto de producto (PDF, manual, ficha tÃ©cnica)
 /// </summary>
 public class ProductAttachment
 {
@@ -64,7 +64,7 @@ public class ProcessedProduct
 }
 
 /// <summary>
-/// Sugerencia de categoría de IA
+/// Sugerencia de categorÃ­a de IA
 /// </summary>
 public class CategorySuggestion
 {
@@ -75,7 +75,7 @@ public class CategorySuggestion
 }
 
 /// <summary>
-/// Payload para webhook de notificación
+/// Payload para webhook de notificaciÃ³n
 /// </summary>
 public class ProductWebhookPayload
 {
@@ -89,7 +89,7 @@ public class ProductWebhookPayload
 }
 
 /// <summary>
-/// Configuración de selectores para scraping
+/// ConfiguraciÃ³n de selectores para scraping
 /// </summary>
 public class SiteSelectors
 {
@@ -125,25 +125,46 @@ public class SiteSelectors
     public string? ScrapingMode { get; set; } // "traditional" o "families"
     public string? ProductFamilyLinkSelector { get; set; }  // Selector para enlaces de familias
     public string? ProductFamilyLinkText { get; set; }      // Texto del enlace (ej: "Explorar la serie")
-    public List<string>? CategoryUrls { get; set; }         // URLs directas de categorías para modo families
+    public List<string>? CategoryUrls { get; set; }         // URLs directas de categorÃ­as para modo families
     
-    // Propiedades para extracción profunda de detalle de variante
-    public string? VariantDetailLinkSelector { get; set; }  // Selector del enlace a la página de detalle desde la fila de variante
-    public string? DetailTitleSelector { get; set; }        // Selector para el título en la página de detalle
-    public string? DetailDescriptionSelector { get; set; }  // Selector para la descripción en la página de detalle
-    public string? DetailImageSelector { get; set; }        // Selector para la imagen principal en la página de detalle
+    // Propiedades para extracciÃ³n profunda de detalle de variante
+    public string? VariantDetailLinkSelector { get; set; }  // Selector del enlace a la pÃ¡gina de detalle desde la fila de variante
+    public string? DetailTitleSelector { get; set; }        // Selector para el tÃ­tulo en la pÃ¡gina de detalle
+    public string? DetailDescriptionSelector { get; set; }  // Selector para la descripciÃ³n en la pÃ¡gina de detalle
+    public string? DetailImageSelector { get; set; }        // Selector para la imagen principal en la pÃ¡gina de detalle
     
-    // Selectores para galería de imágenes
-    public string? ImageGallerySelector { get; set; }       // Selector para el contenedor de la galería
-    public string? ImageGalleryItemSelector { get; set; }   // Selector para cada imagen en la galería
+    // Selectores para galerÃ­a de imÃ¡genes
+    public string? ImageGallerySelector { get; set; }       // Selector para el contenedor de la galerÃ­a
+    public string? ImageGalleryItemSelector { get; set; }   // Selector para cada imagen en la galerÃ­a
     
     // Selectores para archivos adjuntos
     public string? AttachmentLinkSelector { get; set; }     // Selector para enlaces a PDFs/documentos
     
     // Selectores para stock
-    public string? StockSelector { get; set; }              // Selector para información de stock
+    public string? StockSelector { get; set; }              // Selector para informaciÃ³n de stock
 }
 
+
+/// <summary>
+/// Opciones para scraping directo de URLs.
+/// </summary>
+public class DirectUrlScrapeOptions
+{
+    /// <summary>
+    /// Si es true, se inspecciona sin persistir productos.
+    /// </summary>
+    public bool InspectOnly { get; set; }
+
+    /// <summary>
+    /// Si es true, extrae solo el producto de la URL dada (modo 1:1).
+    /// </summary>
+    public bool SingleProductOnly { get; set; }
+
+    /// <summary>
+    /// Si es true, permite expandir a URLs relacionadas.
+    /// </summary>
+    public bool ExpandRelated { get; set; } = true;
+}
 
 public class SelectorAnalysisRequest
 {
@@ -169,7 +190,7 @@ public class SelectorSuggestion
 }
 
 /// <summary>
-/// Resultado de operación
+/// Resultado de operaciÃ³n
 /// </summary>
 public class OperationResult<T>
 {
@@ -193,7 +214,7 @@ public class OperationResult<T>
 }
 
 /// <summary>
-/// Resultado de inspección de una URL
+/// Resultado de inspecciÃ³n de una URL
 /// </summary>
 public class DirectUrlResult
 {
@@ -209,10 +230,92 @@ public class DirectUrlResult
     public string? ImageUrl { get; set; }
     public string? Breadcrumb { get; set; }
     
-    // Estadísticas para páginas de listado
+    // EstadÃ­sticas para pÃ¡ginas de listado
     public int? ProductsFound { get; set; }
     public List<string>? ChildLinks { get; set; }
     
     // Screenshot para debug
     public string? ScreenshotBase64 { get; set; }
+}
+
+/// <summary>
+/// Respuesta estandarizada para inspección directa de URLs.
+/// </summary>
+public class InspectUrlsResponse
+{
+    public int TotalUrls { get; set; }
+    public int SuccessCount { get; set; }
+    public int ProductsCreated { get; set; }
+    public int ProductsUpdated { get; set; }
+    public bool InspectOnly { get; set; }
+    public List<DirectUrlResult> Results { get; set; } = new();
+}
+
+/// <summary>
+/// Request para encolar un rescrape de productos de staging.
+/// </summary>
+public class RescrapeRequest
+{
+    public List<Guid> ProductIds { get; set; } = new();
+    public bool ManualLogin { get; set; }
+}
+
+/// <summary>
+/// Respuesta al crear un job de rescrape.
+/// </summary>
+public class RescrapeJobResponse
+{
+    public Guid JobId { get; set; }
+    public int TotalItems { get; set; }
+    public DateTime QueuedAt { get; set; }
+}
+
+/// <summary>
+/// Estado agregado de un job de rescrape.
+/// </summary>
+public class RescrapeJobStatusResponse
+{
+    public Guid JobId { get; set; }
+    public string Status { get; set; } = "queued";
+    public DateTime RequestedAt { get; set; }
+    public DateTime? StartedAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
+    public int TotalItems { get; set; }
+    public int ProcessedItems { get; set; }
+    public int SuccessItems { get; set; }
+    public int FailedItems { get; set; }
+    public int SkippedItems { get; set; }
+    public string? ErrorMessage { get; set; }
+}
+
+/// <summary>
+/// Estado por item de un job de rescrape.
+/// </summary>
+public class RescrapeJobItemResponse
+{
+    public Guid ItemId { get; set; }
+    public Guid JobId { get; set; }
+    public Guid StagingProductId { get; set; }
+    public Guid SiteId { get; set; }
+    public string? SourceUrl { get; set; }
+    public string Status { get; set; } = "pending";
+    public bool Changed { get; set; }
+    public string? ErrorMessage { get; set; }
+    public string? ResultJson { get; set; }
+    public DateTime UpdatedAt { get; set; }
+}
+
+/// <summary>
+/// Evento de ejecución de un job de rescrape.
+/// </summary>
+public class RescrapeJobLogResponse
+{
+    public Guid LogId { get; set; }
+    public Guid JobId { get; set; }
+    public Guid? ItemId { get; set; }
+    public Guid? StagingProductId { get; set; }
+    public string Level { get; set; } = "info";
+    public string Message { get; set; } = string.Empty;
+    public string? DetailsJson { get; set; }
+    public DateTime CreatedAt { get; set; }
 }

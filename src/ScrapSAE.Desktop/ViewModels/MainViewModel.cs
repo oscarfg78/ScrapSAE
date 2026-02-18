@@ -78,6 +78,13 @@ public sealed class MainViewModel : ViewModelBase
     private double _sendProgressValue;
     private double _sendProgressMaximum = 1;
     private bool _showApartadosOnly;
+    private bool _rescrapeManualLoginEnabled;
+    private bool _showRescrapeConfirmLoginButton;
+    private bool _showRescrapeControlButtons;
+    private Guid? _currentRescrapeJobId;
+    private string _currentRescrapeJobStatus = string.Empty;
+    private HashSet<Guid> _currentRescrapeSiteIds = new();
+    private string? _sendProgressLogFilePath;
     public System.ComponentModel.ICollectionView StagingProductsView { get; private set; }
 
     public MainViewModel(ApiClient apiClient)
@@ -119,6 +126,7 @@ public sealed class MainViewModel : ViewModelBase
         SendPendingToSaeCommand = new AsyncCommand(() => SafeExecuteAsync(SendPendingToSaeAsync, "Enviar pendientes a SAE"));
         SendPendingToOnlineStoreCommand = new AsyncCommand(() => SafeExecuteAsync(SendPendingToOnlineStoreAsync, "Enviar pendientes a tienda en línea"));
         SendSelectedToOnlineStoreCommand = new AsyncCommand(() => SafeExecuteAsync(SendSelectedToOnlineStoreAsync, "Enviar seleccionados a tienda en línea"));
+        RescrapeSelectedOnlineStoreCommand = new AsyncCommand(() => SafeExecuteAsync(RescrapeSelectedOnlineStoreAsync, "Rescrapear seleccionados de tienda en línea"));
         SaveSelectedOnlineStoreRecordCommand = new AsyncCommand(() => SafeExecuteAsync(SaveSelectedOnlineStoreRecordAsync, "Guardar cambios en registro"));
         DeleteSelectedOnlineStoreRecordsCommand = new AsyncCommand(() => SafeExecuteAsync(DeleteSelectedOnlineStoreRecordsAsync, "Eliminar registros seleccionados"));
         MarkSelectedAsApartadoCommand = new AsyncCommand(() => SafeExecuteAsync(MarkSelectedAsApartadoAsync, "Marcar apartados"));
@@ -139,6 +147,10 @@ public sealed class MainViewModel : ViewModelBase
         LoadLearnedUrlsCommand = new AsyncCommand(() => SafeExecuteAsync(LoadLearnedUrlsAsync, "Cargar URLs"), () => SelectedSite != null);
         SaveLearnedUrlsCommand = new AsyncCommand(() => SafeExecuteAsync(SaveLearnedUrlsAsync, "Guardar URLs"), () => SelectedSite != null);
         ConfirmLoginCommand = new AsyncCommand(() => SafeExecuteAsync(ConfirmLoginAsync, "Confirmar Login"), () => SelectedSite != null);
+        ConfirmRescrapeLoginCommand = new AsyncCommand(() => SafeExecuteAsync(ConfirmRescrapeLoginAsync, "Confirmar Login Manual (Rescrape)"));
+        PauseRescrapeCommand = new AsyncCommand(() => SafeExecuteAsync(PauseRescrapeAsync, "Pausar Rescrape"), CanPauseRescrape);
+        ResumeRescrapeCommand = new AsyncCommand(() => SafeExecuteAsync(ResumeRescrapeAsync, "Reanudar Rescrape"), CanResumeRescrape);
+        CancelRescrapeCommand = new AsyncCommand(() => SafeExecuteAsync(CancelRescrapeAsync, "Cancelar Rescrape"), CanCancelRescrape);
 
         _logTimer.Start();
         _statusTimer.Start();
@@ -147,7 +159,8 @@ public sealed class MainViewModel : ViewModelBase
         ShowWindowCommand = new RelayCommand(ShowWindow);
         ExitApplicationCommand = new RelayCommand(ExitApplication);
         NavigateCommand = new RelayCommand<string>(NavigateToTab);
-        CloseSendProgressCommand = new RelayCommand(() => IsSendProgressVisible = false);
+        CloseSendProgressCommand = new RelayCommand(CloseSendProgressModal);
+        ShowSendProgressCommand = new RelayCommand(ShowSendProgressModal);
         CopySendProgressCommand = new RelayCommand(CopySendProgressToClipboard);
         
         // Initialize Collection View for filtering
@@ -166,7 +179,13 @@ public sealed class MainViewModel : ViewModelBase
     public bool IsSendProgressVisible
     {
         get => _isSendProgressVisible;
-        set => SetField(ref _isSendProgressVisible, value);
+        set
+        {
+            if (SetField(ref _isSendProgressVisible, value))
+            {
+                OnPropertyChanged(nameof(ShowOpenRescrapeProgressButton));
+            }
+        }
     }
 
     public bool IsSendProgressCompleted
@@ -225,6 +244,35 @@ public sealed class MainViewModel : ViewModelBase
             }
         }
     }
+
+    public bool RescrapeManualLoginEnabled
+    {
+        get => _rescrapeManualLoginEnabled;
+        set => SetField(ref _rescrapeManualLoginEnabled, value);
+    }
+
+    public bool ShowRescrapeConfirmLoginButton
+    {
+        get => _showRescrapeConfirmLoginButton;
+        set => SetField(ref _showRescrapeConfirmLoginButton, value);
+    }
+
+    public bool ShowRescrapeControlButtons
+    {
+        get => _showRescrapeControlButtons;
+        set
+        {
+            if (SetField(ref _showRescrapeControlButtons, value))
+            {
+                OnPropertyChanged(nameof(ShowOpenRescrapeProgressButton));
+            }
+        }
+    }
+
+    public bool ShowOpenRescrapeProgressButton =>
+        !IsSendProgressVisible &&
+        _currentRescrapeJobId.HasValue &&
+        ShowRescrapeControlButtons;
 
     private bool FilterOnlineStoreProducts(StagingProductUi p)
     {
@@ -686,6 +734,7 @@ public sealed class MainViewModel : ViewModelBase
     public AsyncCommand SendPendingToSaeCommand { get; }
     public AsyncCommand SendPendingToOnlineStoreCommand { get; }
     public AsyncCommand SendSelectedToOnlineStoreCommand { get; }
+    public AsyncCommand RescrapeSelectedOnlineStoreCommand { get; }
     public AsyncCommand SaveSelectedOnlineStoreRecordCommand { get; }
     public AsyncCommand DeleteSelectedOnlineStoreRecordsCommand { get; }
     public AsyncCommand MarkSelectedAsApartadoCommand { get; }
@@ -705,11 +754,16 @@ public sealed class MainViewModel : ViewModelBase
     public AsyncCommand LoadLearnedUrlsCommand { get; }
     public AsyncCommand SaveLearnedUrlsCommand { get; }
     public AsyncCommand ConfirmLoginCommand { get; }
+    public AsyncCommand ConfirmRescrapeLoginCommand { get; }
+    public AsyncCommand PauseRescrapeCommand { get; }
+    public AsyncCommand ResumeRescrapeCommand { get; }
+    public AsyncCommand CancelRescrapeCommand { get; }
     
     public RelayCommand ShowWindowCommand { get; }
     public RelayCommand ExitApplicationCommand { get; }
     public RelayCommand<string> NavigateCommand { get; }
     public RelayCommand CloseSendProgressCommand { get; }
+    public RelayCommand ShowSendProgressCommand { get; }
     public RelayCommand CopySendProgressCommand { get; }
 
     public async Task LoadAllAsync()
@@ -1050,6 +1104,131 @@ public sealed class MainViewModel : ViewModelBase
         AppLogger.Info($"Login confirmed for site {SelectedSite.Name}");
     }
 
+    private async Task ConfirmRescrapeLoginAsync()
+    {
+        if (_currentRescrapeSiteIds.Count == 0)
+        {
+            AppendSendProgressLog("No hay sitios activos para confirmar login manual.");
+            return;
+        }
+
+        var confirmed = 0;
+        foreach (var siteId in _currentRescrapeSiteIds)
+        {
+            try
+            {
+                await _apiClient.ConfirmLoginAsync(siteId);
+                confirmed++;
+                AppendSendProgressLog($"Login manual confirmado para sitio {siteId}.");
+            }
+            catch (Exception ex)
+            {
+                AppendSendProgressLog($"Error confirmando login manual para sitio {siteId}: {ex.Message}");
+                AppLogger.Error($"ConfirmRescrapeLoginAsync failed for site {siteId}", ex);
+            }
+        }
+
+        if (confirmed > 0)
+        {
+            SendProgressStatus = $"Login manual confirmado para {confirmed} sitio(s). Esperando reanudación del rescrape...";
+        }
+    }
+
+    private bool CanPauseRescrape()
+    {
+        if (!_currentRescrapeJobId.HasValue || !ShowRescrapeControlButtons)
+        {
+            return false;
+        }
+
+        return string.Equals(_currentRescrapeJobStatus, "queued", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(_currentRescrapeJobStatus, "running", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool CanResumeRescrape()
+    {
+        if (!_currentRescrapeJobId.HasValue || !ShowRescrapeControlButtons)
+        {
+            return false;
+        }
+
+        return string.Equals(_currentRescrapeJobStatus, "paused", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool CanCancelRescrape()
+    {
+        if (!_currentRescrapeJobId.HasValue || !ShowRescrapeControlButtons)
+        {
+            return false;
+        }
+
+        return !string.Equals(_currentRescrapeJobStatus, "completed", StringComparison.OrdinalIgnoreCase) &&
+               !string.Equals(_currentRescrapeJobStatus, "completed_with_errors", StringComparison.OrdinalIgnoreCase) &&
+               !string.Equals(_currentRescrapeJobStatus, "cancelled", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void RefreshRescrapeControlCommands()
+    {
+        PauseRescrapeCommand.RaiseCanExecuteChanged();
+        ResumeRescrapeCommand.RaiseCanExecuteChanged();
+        CancelRescrapeCommand.RaiseCanExecuteChanged();
+        OnPropertyChanged(nameof(ShowOpenRescrapeProgressButton));
+    }
+
+    private async Task PauseRescrapeAsync()
+    {
+        if (!_currentRescrapeJobId.HasValue)
+        {
+            return;
+        }
+
+        var ok = await _apiClient.PauseRescrapeAsync(_currentRescrapeJobId.Value);
+        AppendSendProgressLog(ok
+            ? "Solicitud de pausa enviada."
+            : "No se pudo pausar el job.");
+        if (ok)
+        {
+            _currentRescrapeJobStatus = "paused";
+            RefreshRescrapeControlCommands();
+        }
+    }
+
+    private async Task ResumeRescrapeAsync()
+    {
+        if (!_currentRescrapeJobId.HasValue)
+        {
+            return;
+        }
+
+        var ok = await _apiClient.ResumeRescrapeAsync(_currentRescrapeJobId.Value);
+        AppendSendProgressLog(ok
+            ? "Solicitud de reanudación enviada."
+            : "No se pudo reanudar el job.");
+        if (ok)
+        {
+            _currentRescrapeJobStatus = "queued";
+            RefreshRescrapeControlCommands();
+        }
+    }
+
+    private async Task CancelRescrapeAsync()
+    {
+        if (!_currentRescrapeJobId.HasValue)
+        {
+            return;
+        }
+
+        var ok = await _apiClient.CancelRescrapeAsync(_currentRescrapeJobId.Value);
+        AppendSendProgressLog(ok
+            ? "Solicitud de cancelación enviada."
+            : "No se pudo cancelar el job.");
+        if (ok)
+        {
+            _currentRescrapeJobStatus = "cancelled";
+            RefreshRescrapeControlCommands();
+        }
+    }
+
     private async Task InspectUrlsAsync()
     {
         if (SelectedSite == null || string.IsNullOrWhiteSpace(LearnedUrlsText)) return;
@@ -1071,11 +1250,11 @@ public sealed class MainViewModel : ViewModelBase
         LiveLogs.Add($"[{DateTime.Now:HH:mm:ss}] → Iniciando inspección de {urls.Count} URLs...");
         try
         {
-            var results = await _apiClient.InspectUrlsAsync(SelectedSite.Id, urls);
+            var response = await _apiClient.InspectUrlsAsync(SelectedSite.Id, urls);
             
-            if (results != null)
+            if (response != null)
             {
-                StatusMessage = $"Inspección completada. Extraídos {results.Count(r => r.Success)} de {urls.Count}.";
+                StatusMessage = $"Inspección completada. Extraídos {response.SuccessCount} de {urls.Count}.";
                 await RefreshStagingProductsAsync();
                 await LoadLearnedUrlsAsync();
             }
@@ -1150,6 +1329,273 @@ public sealed class MainViewModel : ViewModelBase
         }
 
         await SendOnlineStoreProductsWithProgressAsync(selected, "Envio de seleccionados a tienda en linea");
+    }
+
+    private async Task RescrapeSelectedOnlineStoreAsync()
+    {
+        var selected = OnlineStoreProducts.Where(p => p.IsSelected).ToList();
+        if (selected.Count == 0)
+        {
+            StatusMessage = "No hay productos seleccionados para rescrapear.";
+            return;
+        }
+
+        var productIds = selected.Select(p => p.Product.Id).Distinct().ToList();
+        var labelsById = selected
+            .GroupBy(p => p.Product.Id)
+            .ToDictionary(
+                g => g.Key,
+                g =>
+                {
+                    var first = g.First();
+                    return string.IsNullOrWhiteSpace(first.Sku)
+                        ? (!string.IsNullOrWhiteSpace(first.Product.SkuSource)
+                            ? first.Product.SkuSource!
+                            : first.Product.Id.ToString())
+                        : first.Sku;
+                });
+
+        IsSendProgressVisible = true;
+        IsSendProgressCompleted = false;
+        SendProgressTitle = "Rescrape de seleccionados";
+        ClearSendProgressLogs();
+        _currentRescrapeSiteIds = selected.Select(s => s.Product.SiteId).Where(id => id != Guid.Empty).Distinct().ToHashSet();
+        ShowRescrapeConfirmLoginButton = RescrapeManualLoginEnabled && _currentRescrapeSiteIds.Count > 0;
+        ShowRescrapeControlButtons = true;
+        _currentRescrapeJobId = null;
+        _currentRescrapeJobStatus = "queued";
+        RefreshRescrapeControlCommands();
+        SendProgressMaximum = Math.Max(1, productIds.Count);
+        SendProgressValue = 0;
+        SendProgressStatus = $"Encolando rescrape de {productIds.Count} producto(s)...";
+
+        var queued = await _apiClient.QueueRescrapeAsync(productIds, RescrapeManualLoginEnabled);
+        if (queued == null)
+        {
+            SendProgressStatus = "No se pudo crear el job de rescrape.";
+            IsSendProgressCompleted = true;
+            ShowRescrapeConfirmLoginButton = false;
+            ShowRescrapeControlButtons = false;
+            _currentRescrapeSiteIds.Clear();
+            _currentRescrapeJobId = null;
+            _currentRescrapeJobStatus = string.Empty;
+            RefreshRescrapeControlCommands();
+            return;
+        }
+
+        _currentRescrapeJobId = queued.JobId;
+        _currentRescrapeJobStatus = "queued";
+        RefreshRescrapeControlCommands();
+
+        StartSendProgressLogFile("rescrape", queued.JobId);
+        AppendSendProgressLog($"Job creado: {queued.JobId}");
+        AppendSendProgressLog($"Opciones: manualLogin={RescrapeManualLoginEnabled}");
+        if (RescrapeManualLoginEnabled)
+        {
+            AppendSendProgressLog("Login manual habilitado: inicia sesión en el navegador emergente.");
+            AppendSendProgressLog("Cuando termine el login, usa el botón 'Confirmar Login Manual' para liberar el flujo.");
+        }
+
+        var doneStates = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "completed",
+            "completed_with_errors",
+            "cancelled"
+        };
+        var seenItemTransitions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seenLogIds = new HashSet<Guid>();
+        var previousProcessed = -1;
+        var lastProgressAt = DateTime.UtcNow;
+        var statusFetchWarningShown = false;
+        var itemFetchWarningShown = false;
+        var logFetchWarningShown = false;
+
+        while (true)
+        {
+            await Task.Delay(2000);
+            RescrapeJobStatusResponse? status;
+            try
+            {
+                status = await _apiClient.GetRescrapeStatusAsync(queued.JobId);
+                if (statusFetchWarningShown)
+                {
+                    AppendSendProgressLog("Conexion con estado de rescrape restablecida.");
+                    statusFetchWarningShown = false;
+                }
+            }
+            catch (Exception ex)
+            {
+                if (!statusFetchWarningShown)
+                {
+                    AppendSendProgressLog($"No se pudo leer estado de rescrape: {ex.Message}");
+                    statusFetchWarningShown = true;
+                }
+                continue;
+            }
+
+            if (status == null)
+            {
+                SendProgressStatus = "Job de rescrape no encontrado.";
+                IsSendProgressCompleted = true;
+                ShowRescrapeConfirmLoginButton = false;
+                ShowRescrapeControlButtons = false;
+                _currentRescrapeSiteIds.Clear();
+                _currentRescrapeJobId = null;
+                _currentRescrapeJobStatus = string.Empty;
+                RefreshRescrapeControlCommands();
+                break;
+            }
+
+            _currentRescrapeJobStatus = status.Status;
+            RefreshRescrapeControlCommands();
+
+            SendProgressMaximum = Math.Max(1, status.TotalItems);
+            SendProgressValue = Math.Min(status.ProcessedItems, SendProgressMaximum);
+            var items = new List<RescrapeJobItemResponse>();
+            try
+            {
+                items = await _apiClient.GetRescrapeItemsAsync(queued.JobId);
+                if (itemFetchWarningShown)
+                {
+                    AppendSendProgressLog("Lectura de items de rescrape restablecida.");
+                    itemFetchWarningShown = false;
+                }
+            }
+            catch (Exception ex)
+            {
+                if (!itemFetchWarningShown)
+                {
+                    AppendSendProgressLog($"No se pudieron leer items de rescrape: {ex.Message}");
+                    itemFetchWarningShown = true;
+                }
+            }
+
+            var running = items.Count(i => string.Equals(i.Status, "running", StringComparison.OrdinalIgnoreCase));
+            var pending = items.Count(i => string.Equals(i.Status, "pending", StringComparison.OrdinalIgnoreCase));
+            var stage = BuildRescrapeStageText(items, labelsById);
+            SendProgressStatus =
+                $"Estado: {status.Status}. Procesados {status.ProcessedItems}/{status.TotalItems}. Running: {running}. Pendientes: {pending}. Etapa: {stage}";
+
+            if (status.ProcessedItems > previousProcessed)
+            {
+                previousProcessed = status.ProcessedItems;
+                lastProgressAt = DateTime.UtcNow;
+            }
+            else if (string.Equals(status.Status, "running", StringComparison.OrdinalIgnoreCase) &&
+                     DateTime.UtcNow - lastProgressAt > TimeSpan.FromMinutes(2))
+            {
+                AppendSendProgressLog("Sin avance en 2+ minutos. Revisa sesión manual, conectividad y logs del job.");
+                lastProgressAt = DateTime.UtcNow;
+            }
+
+            foreach (var item in items.OrderBy(i => i.UpdatedAt))
+            {
+                var transitionKey = $"{item.ItemId}|{item.Status}|{item.Changed}|{item.ErrorMessage}|{item.ResultJson}";
+                if (!seenItemTransitions.Add(transitionKey))
+                {
+                    continue;
+                }
+
+                var marker = item.Status.Equals("succeeded", StringComparison.OrdinalIgnoreCase)
+                    ? "OK"
+                    : item.Status.ToUpperInvariant();
+                var label = labelsById.TryGetValue(item.StagingProductId, out var value)
+                    ? value
+                    : item.StagingProductId.ToString();
+                var changed = item.Changed ? " (cambió)" : string.Empty;
+                AppendSendProgressLog($"{marker} {label}{changed}");
+                if (!string.IsNullOrWhiteSpace(item.ErrorMessage))
+                {
+                    AppendSendProgressLog($"  {item.ErrorMessage}");
+                }
+            }
+
+            List<RescrapeJobLogResponse> logs;
+            try
+            {
+                logs = await _apiClient.GetRescrapeLogsAsync(queued.JobId, 300);
+                if (logFetchWarningShown)
+                {
+                    AppendSendProgressLog("Lectura de bitacora de rescrape restablecida.");
+                    logFetchWarningShown = false;
+                }
+            }
+            catch (Exception ex)
+            {
+                logs = new List<RescrapeJobLogResponse>();
+                if (!logFetchWarningShown)
+                {
+                    AppendSendProgressLog($"No se pudo leer bitacora de rescrape: {ex.Message}");
+                    AppendSendProgressLog("Continuando con estado basico del job sin bitacora persistida.");
+                    logFetchWarningShown = true;
+                }
+            }
+
+            foreach (var log in logs.OrderBy(l => l.CreatedAt))
+            {
+                if (!seenLogIds.Add(log.LogId))
+                {
+                    continue;
+                }
+
+                var level = string.IsNullOrWhiteSpace(log.Level) ? "INFO" : log.Level.ToUpperInvariant();
+                AppendSendProgressLog($"[{log.CreatedAt:HH:mm:ss}] [{level}] {log.Message}");
+            }
+
+            if (!doneStates.Contains(status.Status))
+            {
+                continue;
+            }
+
+            SendProgressStatus = $"Finalizado. Exitosos: {status.SuccessItems}. Fallidos: {status.FailedItems}. Omitidos: {status.SkippedItems}.";
+            if (!string.IsNullOrWhiteSpace(_sendProgressLogFilePath))
+            {
+                AppendSendProgressLog($"Log guardado en: {_sendProgressLogFilePath}");
+            }
+            IsSendProgressCompleted = true;
+            ShowRescrapeConfirmLoginButton = false;
+            ShowRescrapeControlButtons = false;
+            _currentRescrapeSiteIds.Clear();
+            _currentRescrapeJobId = null;
+            _currentRescrapeJobStatus = string.Empty;
+            RefreshRescrapeControlCommands();
+            StatusMessage = SendProgressStatus;
+            break;
+        }
+
+        await RefreshStagingProductsAsync();
+    }
+
+    private static string BuildRescrapeStageText(
+        IReadOnlyList<RescrapeJobItemResponse> items,
+        IReadOnlyDictionary<Guid, string> labelsById)
+    {
+        var runningEntries = items
+            .Where(i => string.Equals(i.Status, "running", StringComparison.OrdinalIgnoreCase))
+            .Take(2)
+            .Select(i =>
+            {
+                var label = labelsById.TryGetValue(i.StagingProductId, out var value)
+                    ? value
+                    : i.StagingProductId.ToString();
+                var detail = string.IsNullOrWhiteSpace(i.ErrorMessage)
+                    ? "Procesando..."
+                    : i.ErrorMessage;
+                return $"{label}: {detail}";
+            })
+            .ToList();
+
+        if (runningEntries.Count > 0)
+        {
+            return string.Join(" | ", runningEntries);
+        }
+
+        if (items.Any(i => string.Equals(i.Status, "pending", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "Esperando siguiente item en cola.";
+        }
+
+        return "Sin item activo reportado.";
     }
 
     private async Task SendOnlineStoreProductsWithProgressAsync(List<StagingProductUi> products, string title)
@@ -1333,6 +1779,61 @@ public sealed class MainViewModel : ViewModelBase
     {
         SendProgressLogs.Clear();
         SendProgressText = string.Empty;
+        _sendProgressLogFilePath = null;
+    }
+
+    private void CloseSendProgressModal()
+    {
+        if (_currentRescrapeJobId.HasValue &&
+            ShowRescrapeControlButtons &&
+            !IsSendProgressCompleted)
+        {
+            IsSendProgressVisible = false;
+            StatusMessage = "Rescrape activo en segundo plano. Usa 'Ver progreso rescrape' para volver al detalle.";
+            return;
+        }
+
+        IsSendProgressVisible = false;
+        ShowRescrapeConfirmLoginButton = false;
+        ShowRescrapeControlButtons = false;
+        _currentRescrapeJobId = null;
+        _currentRescrapeJobStatus = string.Empty;
+        _currentRescrapeSiteIds.Clear();
+        RefreshRescrapeControlCommands();
+    }
+
+    private void ShowSendProgressModal()
+    {
+        if (!ShowOpenRescrapeProgressButton)
+        {
+            return;
+        }
+
+        IsSendProgressVisible = true;
+        StatusMessage = "Mostrando progreso de rescrape en ejecucion.";
+    }
+
+    private void StartSendProgressLogFile(string prefix, Guid? jobId = null)
+    {
+        try
+        {
+            var baseDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "ScrapSAE",
+                "execution-logs");
+            Directory.CreateDirectory(baseDir);
+
+            var fileName = jobId.HasValue
+                ? $"{DateTime.UtcNow:yyyyMMdd_HHmmss}_{prefix}_{jobId.Value}.log"
+                : $"{DateTime.UtcNow:yyyyMMdd_HHmmss}_{prefix}.log";
+            _sendProgressLogFilePath = Path.Combine(baseDir, fileName);
+            File.WriteAllText(_sendProgressLogFilePath, $"Inicio: {DateTime.UtcNow:O}{Environment.NewLine}");
+        }
+        catch (Exception ex)
+        {
+            _sendProgressLogFilePath = null;
+            AppLogger.Error("No se pudo crear archivo de log de progreso.", ex);
+        }
     }
 
     private void AppendSendProgressLog(string line)
@@ -1341,6 +1842,18 @@ public sealed class MainViewModel : ViewModelBase
         SendProgressText = string.IsNullOrEmpty(SendProgressText)
             ? line
             : $"{SendProgressText}{Environment.NewLine}{line}";
+
+        if (!string.IsNullOrWhiteSpace(_sendProgressLogFilePath))
+        {
+            try
+            {
+                File.AppendAllText(_sendProgressLogFilePath, $"{DateTime.UtcNow:O} {line}{Environment.NewLine}");
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error("No se pudo escribir línea en log de progreso.", ex);
+            }
+        }
     }
 
     private void CopySendProgressToClipboard()

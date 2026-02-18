@@ -115,3 +115,58 @@ public class ExecutionReport
     public string? Summary { get; set; } // JSON
     public DateTime CreatedAt { get; set; }
 }
+
+/// <summary>
+/// Job persistente de rescrape.
+/// </summary>
+public class RescrapeJob
+{
+    public Guid Id { get; set; }
+    public string Status { get; set; } = "queued";
+    public DateTime RequestedAt { get; set; }
+    public DateTime? StartedAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
+    public int TotalItems { get; set; }
+    public int ProcessedItems { get; set; }
+    public int SuccessItems { get; set; }
+    public int FailedItems { get; set; }
+    public int SkippedItems { get; set; }
+    public string? OptionsJson { get; set; }
+    public string? SummaryJson { get; set; }
+    public string? ErrorMessage { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+}
+
+/// <summary>
+/// Ãtem de trabajo de un job de rescrape.
+/// </summary>
+public class RescrapeJobItem
+{
+    public Guid Id { get; set; }
+    public Guid JobId { get; set; }
+    public Guid StagingProductId { get; set; }
+    public Guid SiteId { get; set; }
+    public string? SourceUrl { get; set; }
+    public string Status { get; set; } = "pending";
+    public bool Changed { get; set; }
+    public string? ErrorMessage { get; set; }
+    public string? ResultJson { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+}
+
+/// <summary>
+/// Log de ejecución de jobs de rescrape.
+/// </summary>
+public class RescrapeJobLog
+{
+    public Guid Id { get; set; }
+    public Guid JobId { get; set; }
+    public Guid? ItemId { get; set; }
+    public Guid? StagingProductId { get; set; }
+    public string Level { get; set; } = "info";
+    public string Message { get; set; } = string.Empty;
+    public string? DetailsJson { get; set; }
+    public DateTime CreatedAt { get; set; }
+}

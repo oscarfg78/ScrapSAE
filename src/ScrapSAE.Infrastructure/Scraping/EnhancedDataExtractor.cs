@@ -1,6 +1,7 @@
 using Microsoft.Playwright;
 using Microsoft.Extensions.Logging;
 using ScrapSAE.Core.DTOs;
+using System.Net;
 using System.Text.RegularExpressions;
 
 namespace ScrapSAE.Infrastructure.Scraping;
@@ -46,6 +47,40 @@ public class EnhancedDataExtractor
                         {
                             images.Add(NormalizeUrl(imageUrl, page.Url));
                         }
+                    }
+                }
+            }
+
+            // Fallback intermedio: buscar selectores de galerías típicos (Festo y similares).
+            if (images.Count == 0)
+            {
+                var gallerySelectors = new[]
+                {
+                    "img[class*='gallery-image']",
+                    "[class*='image-gallery'] img",
+                    "[class*='article-detail-page-header-gallery'] img",
+                    "img[srcset*='media/catalog']"
+                };
+
+                foreach (var selector in gallerySelectors)
+                {
+                    var imageElements = await page.QuerySelectorAllAsync(selector);
+                    foreach (var imgElement in imageElements)
+                    {
+                        var src = await imgElement.GetAttributeAsync("src");
+                        var srcSet = await imgElement.GetAttributeAsync("srcset");
+                        var dataSrc = await imgElement.GetAttributeAsync("data-src");
+                        var imageUrl = src ?? ExtractFirstSrcFromSrcSet(srcSet) ?? dataSrc;
+
+                        if (!string.IsNullOrWhiteSpace(imageUrl) && IsValidImageUrl(imageUrl))
+                        {
+                            images.Add(NormalizeUrl(imageUrl, page.Url));
+                        }
+                    }
+
+                    if (images.Count > 0)
+                    {
+                        break;
                     }
                 }
             }
@@ -149,48 +184,34 @@ public class EnhancedDataExtractor
     /// </summary>
     public async Task<List<ProductAttachment>> ExtractAttachmentsAsync(IPage page, SiteSelectors selectors)
     {
-        var attachments = new List<ProductAttachment>();
+        var attachmentsByUrl = new Dictionary<string, ProductAttachment>(StringComparer.OrdinalIgnoreCase);
 
         try
         {
-            // Selector específico si está configurado
-            string linkSelector = selectors.AttachmentLinkSelector ?? "a[href*='.pdf'], a[href*='.zip'], a[href*='.docx'], a[href*='download'], a[href*='manual'], a[href*='datasheet']";
-            
-            var links = await page.QuerySelectorAllAsync(linkSelector);
-            
-            foreach (var link in links)
-            {
-                var href = await link.GetAttributeAsync("href");
-                var text = await link.InnerTextAsync();
-                
-                if (string.IsNullOrWhiteSpace(href))
-                    continue;
+            await TryActivateDownloadsTabAsync(page);
 
-                var fullUrl = NormalizeUrl(href, page.Url);
-                
-                // Determinar tipo de archivo
-                var fileType = DetermineFileType(fullUrl);
-                
-                // Filtrar solo archivos relevantes
-                if (IsRelevantAttachment(fullUrl, text))
-                {
-                    attachments.Add(new ProductAttachment
-                    {
-                        FileName = text.Trim(),
-                        FileUrl = fullUrl,
-                        FileType = fileType
-                    });
-                }
-            }
+            // Metodo 1: enlaces visibles en DOM (selector configurable + fallback robusto).
+            string linkSelector = selectors.AttachmentLinkSelector ??
+                "a[href*='.pdf'], a[href*='.zip'], a[href*='.docx'], a[href*='.doc'], " +
+                "a[href*='download'], a[href*='manual'], a[href*='datasheet'], a[href*='support']";
+            await CollectAttachmentsFromAnchorsAsync(page, linkSelector, attachmentsByUrl);
 
-            _logger.LogInformation("Extracted {Count} attachments", attachments.Count);
+            // Metodo 2: atributos data-* usados por componentes React/SPA.
+            await CollectAttachmentsFromDataAttributesAsync(page, attachmentsByUrl);
+
+            // Metodo 3: búsqueda en HTML/script embebido (cuando los links no se renderizan como <a>).
+            await CollectAttachmentsFromHtmlAsync(page, attachmentsByUrl);
+
+            _logger.LogInformation("Extracted {Count} attachments with hybrid flow", attachmentsByUrl.Count);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Error extracting attachments");
         }
 
-        return attachments;
+        return attachmentsByUrl.Values
+            .OrderBy(a => a.FileName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     /// <summary>
@@ -293,14 +314,18 @@ public class EnhancedDataExtractor
     private string? DetermineFileType(string url)
     {
         var lowerUrl = url.ToLower();
-        if (lowerUrl.Contains(".pdf"))
-            return "pdf";
+        if (lowerUrl.Contains(".pdf") || lowerUrl.Contains("datasheet"))
+            return "application/pdf";
         if (lowerUrl.Contains(".zip"))
-            return "zip";
-        if (lowerUrl.Contains(".docx") || lowerUrl.Contains(".doc"))
-            return "doc";
-        if (lowerUrl.Contains(".xlsx") || lowerUrl.Contains(".xls"))
-            return "excel";
+            return "application/zip";
+        if (lowerUrl.Contains(".docx"))
+            return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+        if (lowerUrl.Contains(".doc"))
+            return "application/msword";
+        if (lowerUrl.Contains(".xlsx"))
+            return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+        if (lowerUrl.Contains(".xls"))
+            return "application/vnd.ms-excel";
         return null;
     }
 
@@ -311,15 +336,208 @@ public class EnhancedDataExtractor
 
         // Incluir PDFs, ZIPs, documentos
         if (lowerUrl.Contains(".pdf") || lowerUrl.Contains(".zip") || 
-            lowerUrl.Contains(".docx") || lowerUrl.Contains(".doc"))
+            lowerUrl.Contains(".docx") || lowerUrl.Contains(".doc") ||
+            lowerUrl.Contains("datasheet") || lowerUrl.Contains("download-document"))
             return true;
 
         // Incluir si el texto sugiere que es un manual o ficha técnica
         if (lowerText.Contains("manual") || lowerText.Contains("datasheet") ||
             lowerText.Contains("ficha") || lowerText.Contains("catálogo") ||
-            lowerText.Contains("especificaciones") || lowerText.Contains("technical"))
+            lowerText.Contains("especificaciones") || lowerText.Contains("technical") ||
+            lowerText.Contains("hoja de datos"))
             return true;
 
         return false;
+    }
+
+    private async Task TryActivateDownloadsTabAsync(IPage page)
+    {
+        try
+        {
+            var tabCandidates = new[]
+            {
+                "li.js-support-portal-button",
+                "[data-onsite-click-event-data*='support downloads']",
+                "[class*='product-details-tabs__list-item']"
+            };
+
+            foreach (var selector in tabCandidates)
+            {
+                var tabs = await page.QuerySelectorAllAsync(selector);
+                foreach (var tab in tabs)
+                {
+                    var text = (await tab.InnerTextAsync())?.Trim() ?? string.Empty;
+                    if (!text.Contains("descarga", StringComparison.OrdinalIgnoreCase) &&
+                        !text.Contains("download", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        await tab.ClickAsync();
+                        await Task.Delay(500);
+                        return;
+                    }
+                    catch
+                    {
+                        // Continuar con el siguiente candidato.
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // Esta mejora es best-effort.
+        }
+    }
+
+    private async Task CollectAttachmentsFromAnchorsAsync(
+        IPage page,
+        string linkSelector,
+        IDictionary<string, ProductAttachment> output)
+    {
+        var links = await page.QuerySelectorAllAsync(linkSelector);
+        foreach (var link in links)
+        {
+            var href = await link.GetAttributeAsync("href");
+            var text = await link.InnerTextAsync();
+            TryAddAttachmentCandidate(output, href, text, page.Url);
+        }
+
+        // Barrido amplio en todos los anchors por si cambian clases/selectores.
+        var allLinks = await page.QuerySelectorAllAsync("a[href]");
+        foreach (var link in allLinks)
+        {
+            var href = await link.GetAttributeAsync("href");
+            var text = await link.InnerTextAsync();
+            TryAddAttachmentCandidate(output, href, text, page.Url);
+        }
+    }
+
+    private async Task CollectAttachmentsFromDataAttributesAsync(
+        IPage page,
+        IDictionary<string, ProductAttachment> output)
+    {
+        var candidates = await page.EvaluateAsync<List<string>>(
+            @"() => {
+                const attrs = ['data-iframe-src', 'data-file-url', 'data-download-url', 'data-href'];
+                const result = [];
+                const nodes = Array.from(document.querySelectorAll('*'));
+                for (const node of nodes) {
+                    for (const attr of attrs) {
+                        const value = node.getAttribute(attr);
+                        if (value) result.push(value);
+                    }
+                }
+                return result;
+            }");
+
+        foreach (var candidate in candidates)
+        {
+            TryAddAttachmentCandidate(output, candidate, null, page.Url);
+        }
+    }
+
+    private async Task CollectAttachmentsFromHtmlAsync(
+        IPage page,
+        IDictionary<string, ProductAttachment> output)
+    {
+        var html = await page.ContentAsync();
+        if (string.IsNullOrWhiteSpace(html))
+        {
+            return;
+        }
+
+        // URLs absolutas y relativas (incluyendo rutas sin extensión directa como /download-document/datasheet/197391).
+        var patterns = new[]
+        {
+            @"https?:\/\/[^\s""'<>]+(?:\.pdf|\.zip|\.docx?|\.xlsx?|download-document\/[^\s""'<>]+|datasheet\/\d+)[^\s""'<>]*",
+            @"\/[^\s""'<>]+(?:\.pdf|\.zip|\.docx?|\.xlsx?|download-document\/[^\s""'<>]+|datasheet\/\d+)[^\s""'<>]*",
+            @"https?:\\\/\\\/[^\s""'<>]+(?:\.pdf|\.zip|\.docx?|\.xlsx?|download-document\\\/[^\s""'<>]+|datasheet\\\/\d+)[^\s""'<>]*"
+        };
+
+        foreach (var pattern in patterns)
+        {
+            foreach (Match match in Regex.Matches(html, pattern, RegexOptions.IgnoreCase))
+            {
+                if (!match.Success)
+                {
+                    continue;
+                }
+
+                var rawUrl = match.Value
+                    .Replace("\\/", "/")
+                    .Replace("\\u002F", "/", StringComparison.OrdinalIgnoreCase);
+                rawUrl = WebUtility.HtmlDecode(rawUrl);
+                TryAddAttachmentCandidate(output, rawUrl, null, page.Url);
+            }
+        }
+    }
+
+    private void TryAddAttachmentCandidate(
+        IDictionary<string, ProductAttachment> output,
+        string? rawUrl,
+        string? rawText,
+        string baseUrl)
+    {
+        if (string.IsNullOrWhiteSpace(rawUrl))
+        {
+            return;
+        }
+
+        var normalizedInput = rawUrl.Trim();
+        if (normalizedInput.StartsWith("javascript:", StringComparison.OrdinalIgnoreCase) ||
+            normalizedInput.StartsWith("#", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        string fullUrl;
+        try
+        {
+            fullUrl = NormalizeUrl(normalizedInput, baseUrl);
+        }
+        catch
+        {
+            return;
+        }
+
+        var text = rawText?.Trim() ?? string.Empty;
+        if (!IsRelevantAttachment(fullUrl, text))
+        {
+            return;
+        }
+
+        if (output.ContainsKey(fullUrl))
+        {
+            return;
+        }
+
+        output[fullUrl] = new ProductAttachment
+        {
+            FileName = string.IsNullOrWhiteSpace(text) ? Path.GetFileName(fullUrl) : text,
+            FileUrl = fullUrl,
+            FileType = DetermineFileType(fullUrl)
+        };
+    }
+
+    private static string? ExtractFirstSrcFromSrcSet(string? srcSet)
+    {
+        if (string.IsNullOrWhiteSpace(srcSet))
+        {
+            return null;
+        }
+
+        var firstEntry = srcSet.Split(',', StringSplitOptions.RemoveEmptyEntries)
+            .Select(x => x.Trim())
+            .FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(firstEntry))
+        {
+            return null;
+        }
+
+        var urlToken = firstEntry.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+        return string.IsNullOrWhiteSpace(urlToken) ? null : urlToken;
     }
 }

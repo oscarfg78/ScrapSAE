@@ -117,3 +117,7 @@ dist/
 .playwright-profile/GraphiteDawnCache
 .playwright-profile/GrShaderCache
 .playwright-profile/ShaderCache
+
+# Repo-specific runtime artifacts
+**/.artifacts/
+**/sessions/*_state.json

@@ -67,6 +67,11 @@ public interface IScrapingService
     /// Ejecuta el scraping de un sitio proveedor
     /// </summary>
     Task<IEnumerable<ScrapedProduct>> ScrapeAsync(SiteProfile site, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Registra/actualiza metadata de sitio para scraping directo por URL.
+    /// </summary>
+    void RegisterSite(SiteProfile site);
     
     /// <summary>
     /// Descarga una imagen de producto
@@ -76,7 +81,21 @@ public interface IScrapingService
     /// <summary>
     /// Extrae datos de una lista de URLs específicas directamente
     /// </summary>
-    Task<List<ScrapedProduct>> ScrapeDirectUrlsAsync(List<string> urls, Guid siteId, bool inspectOnly, CancellationToken cancellationToken = default);
+    Task<List<ScrapedProduct>> ScrapeDirectUrlsAsync(
+        List<string> urls,
+        Guid siteId,
+        DirectUrlScrapeOptions? options = null,
+        CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// Analiza adjuntos PDF para extraer especificaciones técnicas.
+/// </summary>
+public interface IPdfAttachmentAnalyzer
+{
+    Task<Dictionary<string, string>> ExtractSpecificationsAsync(
+        IEnumerable<ProductAttachment> attachments,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -272,3 +291,4 @@ public interface IStrategyOrchestrator
         Guid executionId,
         CancellationToken cancellationToken = default);
 }
+

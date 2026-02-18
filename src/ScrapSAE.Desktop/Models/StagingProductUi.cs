@@ -81,13 +81,42 @@ public class StagingProductUi : ViewModelBase
 
     public string PrimaryImageUrl
     {
-        get => _overrideImageUrl ?? Images.FirstOrDefault() ?? GetFallbackValue("ImageUrl") ?? "";
+        get => _overrideImageUrl
+               ?? Images.FirstOrDefault()
+               ?? ReadSingleImageUrl(_product.AIProcessedJson)
+               ?? ReadSingleImageUrl(_product.RawData)
+               ?? "";
         set => SetField(ref _overrideImageUrl, value);
     }
 
     public string ImageUrl => PrimaryImageUrl;
 
-    public List<string> Images => GetProcessed()?.Images ?? new List<string>();
+    public List<string> Images
+    {
+        get
+        {
+            var merged = new List<string>();
+            AppendUnique(merged, GetProcessed()?.Images);
+            AppendUnique(merged, ReadImageLinksFromJson(_product.AIProcessedJson));
+            AppendUnique(merged, ReadImageLinksFromJson(_product.RawData));
+            AppendUnique(merged, new[]
+            {
+                ReadSingleImageUrl(_product.AIProcessedJson),
+                ReadSingleImageUrl(_product.RawData)
+            });
+
+            return merged;
+        }
+    }
+
+    public string ImageLinksText
+    {
+        get
+        {
+            var links = Images;
+            return links.Count == 0 ? string.Empty : string.Join(" | ", links);
+        }
+    }
 
     public string Currency => GetProcessed()?.Currency ?? "MXN";
 
@@ -202,9 +231,14 @@ public class StagingProductUi : ViewModelBase
         {
             if (string.IsNullOrEmpty(_product.AIProcessedJson)) return null;
             using var doc = JsonDocument.Parse(_product.AIProcessedJson);
-            if (doc.RootElement.TryGetProperty(key, out var prop))
+            if (TryGetPropertyIgnoreCase(doc.RootElement, key, out var prop))
             {
-                return prop.GetString();
+                return prop.ValueKind switch
+                {
+                    JsonValueKind.String => prop.GetString(),
+                    JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False => prop.ToString(),
+                    _ => null
+                };
             }
         }
         catch
@@ -221,7 +255,7 @@ public class StagingProductUi : ViewModelBase
         {
             if (string.IsNullOrEmpty(_product.AIProcessedJson)) return null;
             using var doc = JsonDocument.Parse(_product.AIProcessedJson);
-            if (doc.RootElement.TryGetProperty("Price", out var prop) && prop.ValueKind == JsonValueKind.Number)
+            if (TryGetPropertyIgnoreCase(doc.RootElement, "Price", out var prop) && prop.ValueKind == JsonValueKind.Number)
             {
                 return prop.GetDecimal();
             }
@@ -271,5 +305,188 @@ public class StagingProductUi : ViewModelBase
         {
             return new JsonObject();
         }
+    }
+
+    private static void AppendUnique(List<string> target, IEnumerable<string?>? source)
+    {
+        if (source == null)
+        {
+            return;
+        }
+
+        foreach (var value in source)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                continue;
+            }
+
+            var normalized = value.Trim();
+            if (target.Contains(normalized, StringComparer.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            target.Add(normalized);
+        }
+    }
+
+    private static string? ReadSingleImageUrl(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            return ReadStringProperty(
+                doc.RootElement,
+                "imageUrl", "image_url", "ImageUrl",
+                "primaryImageUrl", "primary_image_url", "PrimaryImageUrl",
+                "thumbnailUrl", "thumbnail_url", "ThumbnailUrl");
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static List<string> ReadImageLinksFromJson(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return new List<string>();
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            var names = new[]
+            {
+                "images", "Images", "imageUrls", "image_urls", "ImageUrls",
+                "imageUrl", "image_url", "ImageUrl",
+                "primaryImageUrl", "primary_image_url", "PrimaryImageUrl",
+                "thumbnailUrl", "thumbnail_url", "ThumbnailUrl"
+            };
+            var result = new List<string>();
+            foreach (var name in names)
+            {
+                if (!TryGetPropertyIgnoreCase(root, name, out var element))
+                {
+                    continue;
+                }
+
+                AppendUnique(result, ReadImageLinksFromElement(element));
+            }
+
+            return result;
+        }
+        catch
+        {
+            // Ignore parse errors.
+        }
+
+        return new List<string>();
+    }
+
+    private static List<string> ReadImageLinksFromElement(JsonElement element)
+    {
+        var result = new List<string>();
+
+        if (element.ValueKind == JsonValueKind.String)
+        {
+            var value = element.GetString();
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                foreach (var item in value.Split('|', ';', '\n', '\r'))
+                {
+                    var trimmed = item.Trim();
+                    if (!string.IsNullOrWhiteSpace(trimmed))
+                    {
+                        result.Add(trimmed);
+                    }
+                }
+            }
+        }
+
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            var value = ReadStringProperty(
+                element,
+                "url", "Url", "src", "Src", "imageUrl", "image_url", "ImageUrl",
+                "primaryImageUrl", "primary_image_url", "PrimaryImageUrl",
+                "thumbnailUrl", "thumbnail_url", "ThumbnailUrl");
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                result.Add(value.Trim());
+            }
+        }
+
+        if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in element.EnumerateArray())
+            {
+                if (item.ValueKind == JsonValueKind.String)
+                {
+                    var value = item.GetString();
+                    if (!string.IsNullOrWhiteSpace(value))
+                    {
+                        result.Add(value.Trim());
+                    }
+                    continue;
+                }
+
+                if (item.ValueKind == JsonValueKind.Object)
+                {
+                    var value = ReadStringProperty(
+                        item,
+                        "url", "Url", "src", "Src", "imageUrl", "image_url", "ImageUrl",
+                        "primaryImageUrl", "primary_image_url", "PrimaryImageUrl",
+                        "thumbnailUrl", "thumbnail_url", "ThumbnailUrl");
+                    if (!string.IsNullOrWhiteSpace(value))
+                    {
+                        result.Add(value.Trim());
+                    }
+                }
+            }
+        }
+
+        return result
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static string? ReadStringProperty(JsonElement element, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            if (TryGetPropertyIgnoreCase(element, name, out var property) &&
+                property.ValueKind == JsonValueKind.String)
+            {
+                return property.GetString();
+            }
+        }
+
+        return null;
+    }
+
+    private static bool TryGetPropertyIgnoreCase(JsonElement element, string name, out JsonElement value)
+    {
+        foreach (var prop in element.EnumerateObject())
+        {
+            if (string.Equals(prop.Name, name, StringComparison.OrdinalIgnoreCase))
+            {
+                value = prop.Value;
+                return true;
+            }
+        }
+
+        value = default;
+        return false;
     }
 }

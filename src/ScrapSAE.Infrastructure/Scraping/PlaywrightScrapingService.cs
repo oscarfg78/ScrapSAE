@@ -33,6 +33,7 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
     private readonly ISyncLogService _syncLogService;
     private readonly ITelemetryService _telemetryService;
     private readonly ScrapingProcessManager _processManager;
+    private readonly EnhancedDataExtractor _enhancedDataExtractor;
     private readonly List<SiteProfile> _sites; // Cache simple for testing
     private IPlaywright? _playwright; // Only for persistent context overrides
     private IBrowserContext? _context;
@@ -62,7 +63,29 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
         _syncLogService = syncLogService;
         _telemetryService = telemetryService;
         _processManager = processManager;
+        _enhancedDataExtractor = new EnhancedDataExtractor(logger);
         _sites = new List<SiteProfile>(); // Initialize empty
+    }
+
+    public void RegisterSite(SiteProfile site)
+    {
+        if (site == null || site.Id == Guid.Empty)
+        {
+            return;
+        }
+
+        lock (_sites)
+        {
+            var index = _sites.FindIndex(s => s.Id == site.Id);
+            if (index >= 0)
+            {
+                _sites[index] = site;
+            }
+            else
+            {
+                _sites.Add(site);
+            }
+        }
     }
 
 
@@ -231,6 +254,7 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
 
     public async Task<IEnumerable<ScrapedProduct>> ScrapeAsync(SiteProfile site, CancellationToken cancellationToken = default)
     {
+        RegisterSite(site);
         var products = new List<ScrapedProduct>();
         
         // Verificar si hay URLs directas para inspeccionar (modo de inspección manual)
@@ -239,7 +263,16 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
         {
             _logger.LogInformation("Modo de inspección directa de URLs activado");
             var urls = System.Text.Json.JsonSerializer.Deserialize<List<string>>(directUrlsJson) ?? new List<string>();
-            return await ScrapeDirectUrlsAsync(urls, site.Id, false, cancellationToken);
+            return await ScrapeDirectUrlsAsync(
+                urls,
+                site.Id,
+                new DirectUrlScrapeOptions
+                {
+                    InspectOnly = false,
+                    SingleProductOnly = false,
+                    ExpandRelated = true
+                },
+                cancellationToken);
         }
         
         // Verificar si hay URLs aprendidas (modo automático con aprendizaje)
@@ -249,7 +282,16 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
             _logger.LogInformation("Modo de scraping con URLs aprendidas activado");
             await LogStepAsync(site.Id, "info", "Usando URLs aprendidas para scraping", null);
             var urls = System.Text.Json.JsonSerializer.Deserialize<List<string>>(learnedUrlsJson) ?? new List<string>();
-            return await ScrapeDirectUrlsAsync(urls, site.Id, false, cancellationToken);
+            return await ScrapeDirectUrlsAsync(
+                urls,
+                site.Id,
+                new DirectUrlScrapeOptions
+                {
+                    InspectOnly = false,
+                    SingleProductOnly = false,
+                    ExpandRelated = true
+                },
+                cancellationToken);
         }
         
         try
@@ -4095,6 +4137,10 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
             selectors.DetailTitleSelector ??= GetSelector(root, "DetailTitleSelector", "detailTitleSelector", "detail_title_selector");
             selectors.DetailDescriptionSelector ??= GetSelector(root, "DetailDescriptionSelector", "detailDescriptionSelector", "detail_description_selector");
             selectors.DetailImageSelector ??= GetSelector(root, "DetailImageSelector", "detailImageSelector", "detail_image_selector");
+            selectors.ImageGallerySelector ??= GetSelector(root, "ImageGallerySelector", "imageGallerySelector", "image_gallery_selector");
+            selectors.ImageGalleryItemSelector ??= GetSelector(root, "ImageGalleryItemSelector", "imageGalleryItemSelector", "image_gallery_item_selector");
+            selectors.AttachmentLinkSelector ??= GetSelector(root, "AttachmentLinkSelector", "attachmentLinkSelector", "attachment_link_selector");
+            selectors.StockSelector ??= GetSelector(root, "StockSelector", "stockSelector", "stock_selector");
 
 
             if (selectors.CategoryUrls == null || selectors.CategoryUrls.Count == 0)
@@ -4337,110 +4383,204 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
         }
     }
 
-    public async Task<List<ScrapedProduct>> ScrapeDirectUrlsAsync(List<string> urls, Guid siteId, bool inspectOnly, CancellationToken cancellationToken)
+    public async Task<List<ScrapedProduct>> ScrapeDirectUrlsAsync(
+        List<string> urls,
+        Guid siteId,
+        DirectUrlScrapeOptions? options = null,
+        CancellationToken cancellationToken = default)
     {
+        options ??= new DirectUrlScrapeOptions();
+        var inspectOnly = options.InspectOnly;
+        var singleProductOnly = options.SingleProductOnly;
+        var expandRelated = options.ExpandRelated && !singleProductOnly;
+
         var products = new List<ScrapedProduct>();
         var seenProducts = new HashSet<string>();
-        
-        // Buscar sitio y selectores
-        var site = _sites.FirstOrDefault(s => s.Id == siteId);
+
+        // Buscar sitio y selectores.
+        SiteProfile? site;
+        lock (_sites)
+        {
+            site = _sites.FirstOrDefault(s => s.Id == siteId);
+        }
         if (site == null)
         {
             _logger.LogWarning("Sitio no encontrado para inspección directa: {SiteId}", siteId);
             return products;
         }
 
-        var selectorsJson = "";
+        string selectorsJson;
         if (site.Selectors is JsonElement jsonElement)
+        {
             selectorsJson = jsonElement.GetRawText();
+        }
         else if (site.Selectors is string s)
+        {
             selectorsJson = s;
+        }
         else
+        {
             selectorsJson = JsonConvert.SerializeObject(site.Selectors);
+        }
 
         var selectors = JsonConvert.DeserializeObject<SiteSelectors>(selectorsJson) ?? new SiteSelectors();
         FillSelectorsFromJson(selectors, selectorsJson);
 
-        // Iniciar navegador
+        var forceManualLogin = Environment.GetEnvironmentVariable("SCRAPSAE_FORCE_MANUAL_LOGIN") == "true" ||
+                               Environment.GetEnvironmentVariable("SCRAPSAE_MANUAL_LOGIN") == "true";
+        if (forceManualLogin && Environment.GetEnvironmentVariable("SCRAPSAE_MANUAL_BROWSER_READY") != "true")
+        {
+            try
+            {
+                await _browserSharing.CloseBrowserAsync();
+                Environment.SetEnvironmentVariable("SCRAPSAE_MANUAL_BROWSER_READY", "true");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "No se pudo reiniciar browser para login manual.");
+            }
+        }
+        else if (!forceManualLogin)
+        {
+            Environment.SetEnvironmentVariable("SCRAPSAE_MANUAL_BROWSER_READY", null);
+        }
+
         var browser = await _browserSharing.GetBrowserAsync();
         var context = await CreateBrowserContextAsync(browser, site.Name ?? "default");
         var page = await context.NewPageAsync();
 
-        try 
+        try
         {
-            await LogStepAsync(siteId, "info", $"🚀 Iniciando inspección directa de {urls.Count} URLs", new { count = urls.Count });
+            await LogStepAsync(siteId, "info", "Iniciando inspección directa de URLs", new
+            {
+                count = urls.Count,
+                inspectOnly,
+                singleProductOnly,
+                expandRelated
+            });
+
+            if (forceManualLogin)
+            {
+                var loginEntry = !string.IsNullOrWhiteSpace(site.LoginUrl)
+                    ? site.LoginUrl
+                    : urls.FirstOrDefault() ?? site.BaseUrl;
+                if (!string.IsNullOrWhiteSpace(loginEntry))
+                {
+                    await LogStepAsync(siteId, "info", "Login manual habilitado para scraping directo.", new { loginEntry });
+                    await page.GotoAsync(loginEntry, new PageGotoOptions
+                    {
+                        WaitUntil = WaitUntilState.DOMContentLoaded,
+                        Timeout = 90000
+                    });
+                    await AcceptCookiesAsync(page, cancellationToken);
+                    Environment.SetEnvironmentVariable("SCRAPSAE_MANUAL_LOGIN_ACTIVE", "true");
+                    await ManualLoginFallbackInExistingPageAsync(page, site, cancellationToken);
+                }
+            }
+
+            var manualRecoveryAttempted = false;
 
             foreach (var url in urls)
             {
-                if (cancellationToken.IsCancellationRequested) break;
-
-                try 
+                if (cancellationToken.IsCancellationRequested)
                 {
-                    // Emular comportamiento humano antes de navegar
+                    break;
+                }
+
+                try
+                {
                     await SimulateHumanBehaviorAsync(page, cancellationToken);
 
                     _logger.LogInformation("Inspeccionando URL: {Url}", url);
-                    await LogStepAsync(siteId, "info", $"🌐 Navegando a: {url}", new { url });
-                    
+                    await LogStepAsync(siteId, "info", $"Navegando a: {url}", new { url });
+
                     await HumanNavigateAsync(page, url, WaitUntilState.NetworkIdle);
                     await AcceptCookiesAsync(page, cancellationToken);
-                    
-                    // Verificar sesión
-                    await LogStepAsync(siteId, "info", "🔒 Verificando estado de la sesión...", null);
-                    await EnsureSessionActiveAsync(page, siteId, cancellationToken);
-                    await LogStepAsync(siteId, "info", "✅ Sesión activa y lista.", null);
 
-                    // Screenshot
+                    var sessionActive = await EnsureSessionActiveAsync(page, siteId, cancellationToken);
+                    if (!sessionActive)
+                    {
+                        if (forceManualLogin && !manualRecoveryAttempted)
+                        {
+                            manualRecoveryAttempted = true;
+                            await LogStepAsync(siteId, "warning", "Sesion inactiva. Solicitando login manual.", new { url });
+                            Environment.SetEnvironmentVariable("SCRAPSAE_MANUAL_LOGIN_ACTIVE", "true");
+                            await ManualLoginFallbackInExistingPageAsync(page, site, cancellationToken);
+                            sessionActive = await EnsureSessionActiveAsync(page, siteId, cancellationToken);
+                        }
+
+                        if (!sessionActive)
+                        {
+                            await LogStepAsync(siteId, "warning", "Sesion inactiva durante scraping directo.", new { url });
+                        }
+                    }
+
                     var screenshot = await SaveStepScreenshotAsync(page, $"inspect_{Path.GetFileName(new Uri(url).AbsolutePath)}");
-                    
-                    // Extracción Deep
-                    await LogStepAsync(siteId, "info", "🧪 Extrayendo información técnica (Deep Extraction)...", null);
-                    // Update: The error was in ExtractProductFromDetailPageDeepAsync call, but here it says ExtractFestoProductsFromDetailPageAsync.
-                    // Let me check ScrapeDirectUrlsAsync implementation again.
-                    // Ah, line 4376 in the original file (which is ExtractProductFromDetailPageDeepAsync) called DiscoverRelatedProductUrlsAsync(page, cancellationToken).
-                    // This usage was inside ExtractProductFromDetailPageDeepAsync.
-                    // Now I need to update the CALLERS of ExtractProductFromDetailPageDeepAsync.
-                    // Wait, I am looking at ScrapeDirectUrlsAsync (around 3800).
-                    // In the previous view it used ExtractFestoProductsFromDetailPageAsync.
-                    // I need to find where ExtractProductFromDetailPageDeepAsync is CALLED.
-                    
-                    var extractedProducts = await ExtractFestoProductsFromDetailPageAsync(page, selectors, new List<string>(), cancellationToken);
-                    
-                    if (extractedProducts != null && extractedProducts.Any())
+                    await LogStepAsync(siteId, "info", "Extrayendo información técnica (Deep Extraction)...", null);
+
+                    List<ScrapedProduct> extractedProducts;
+                    if (singleProductOnly)
+                    {
+                        var singleProduct = await ExtractProductFromDetailPageDeepAsync(
+                            page,
+                            selectors,
+                            siteId,
+                            familyTitle: null,
+                            cancellationToken);
+                        extractedProducts = singleProduct != null
+                            ? new List<ScrapedProduct> { singleProduct }
+                            : new List<ScrapedProduct>();
+                    }
+                    else
+                    {
+                        extractedProducts = await ExtractFestoProductsFromDetailPageAsync(page, selectors, new List<string>(), cancellationToken);
+                    }
+
+                    if (extractedProducts.Any())
                     {
                         foreach (var product in extractedProducts)
                         {
                             product.SourceUrl = url;
                             product.ScreenshotBase64 = screenshot;
+
+                            if (singleProductOnly)
+                            {
+                                product.NavigationUrls = new List<string>();
+                            }
+
                             if (seenProducts.Add(GetProductKey(product)))
                             {
                                 products.Add(product);
-                                await LogStepAsync(siteId, "success", $"Producto extraído: {product.Title}", new { sku = product.SkuSource, url });
+                                await LogStepAsync(siteId, "success", $"Producto extraído: {product.Title}", new
+                                {
+                                    sku = product.SkuSource,
+                                    url
+                                });
                             }
                         }
 
-                        // UNIFIED CRAWLER: Use this page as a seed for further discovery
-                        if (url.Contains("festo.com") || (site.Name != null && site.Name.Contains("Festo", StringComparison.OrdinalIgnoreCase)))
+                        if (expandRelated &&
+                            (url.Contains("festo.com", StringComparison.OrdinalIgnoreCase) ||
+                             (site.Name != null && site.Name.Contains("Festo", StringComparison.OrdinalIgnoreCase))))
                         {
-                            _logger.LogInformation("URL Directa -> Iniciando Crawler Profundo...");
+                            _logger.LogInformation("URL directa -> iniciando expansión de relacionados.");
                             var queue = new Queue<string>();
-                            
-                            // Discover neighbors on this page
+
                             var neighbors = await DiscoverRelatedProductUrlsAsync(page, cancellationToken);
-                            foreach(var n in neighbors) 
-                                if(!seenProducts.Contains(n)) queue.Enqueue(n);
-                                
-                            // Try breadcrumb fallback only if queue is empty or low? 
-                            // No, let's do both. Breadcrumb goes UP, Crawler goes SIDEWAYS.
-                            
-                            // 1. Sideways Crawl
+                            foreach (var n in neighbors)
+                            {
+                                if (!seenProducts.Contains(n))
+                                {
+                                    queue.Enqueue(n);
+                                }
+                            }
+
                             if (queue.Count > 0)
                             {
                                 await CrawlProductsFromSeedsAsync(page, siteId, selectors, products, seenProducts, queue, cancellationToken);
                             }
 
-                            // 2. Breadcrumb Up (Original Logic) - kept for robustness
-                            await LogStepAsync(siteId, "info", "🔍 Intentando expandir vía breadcrumbs (Hacia arriba)...", null);
+                            await LogStepAsync(siteId, "info", "Intentando expandir vía breadcrumbs...", null);
                             if (await NavigateBackViaFestoBreadcrumbAsync(page, cancellationToken))
                             {
                                 await NavigateAndCollectFromSubcategoriesAsync(
@@ -4449,7 +4589,7 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
                                     selectors,
                                     products,
                                     seenProducts,
-                                    10000, // Reduced limits as requested (effectively high)
+                                    10000,
                                     new List<string> { "Recursivo" },
                                     cancellationToken,
                                     depth: 0);
@@ -4458,10 +4598,9 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
                     }
                     else
                     {
-                        await LogStepAsync(siteId, "warning", $"No se pudo extraer producto", new { url });
+                        await LogStepAsync(siteId, "warning", "No se pudo extraer producto", new { url });
                     }
 
-                    // Pausa humanizada
                     await HumanDelayAsync(1000, 3000);
                 }
                 catch (Exception ex)
@@ -5005,6 +5144,42 @@ private async Task<ScrapedProduct?> ExtractProductFromDetailPageDeepAsync(
         if (await imageElem.CountAsync() > 0)
         {
             product.ImageUrl = await imageElem.GetAttributeAsync("src");
+            if (!string.IsNullOrWhiteSpace(product.ImageUrl))
+            {
+                product.ImageUrl = NormalizeHref(page.Url, product.ImageUrl);
+            }
+        }
+
+        // 5.1 Extraer galería de imágenes, adjuntos, stock y moneda.
+        var galleryImages = await _enhancedDataExtractor.ExtractImageGalleryAsync(page, selectors);
+        if (!string.IsNullOrWhiteSpace(product.ImageUrl))
+        {
+            galleryImages.Insert(0, product.ImageUrl!);
+        }
+
+        product.ImageUrls = galleryImages
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(x => x.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (string.IsNullOrWhiteSpace(product.ImageUrl) && product.ImageUrls.Count > 0)
+        {
+            product.ImageUrl = product.ImageUrls[0];
+        }
+
+        product.Attachments = await _enhancedDataExtractor.ExtractAttachmentsAsync(page, selectors);
+
+        var stock = await _enhancedDataExtractor.ExtractStockAsync(page, selectors);
+        if (stock.HasValue)
+        {
+            product.Attributes["stock"] = stock.Value.ToString();
+        }
+
+        var currency = await _enhancedDataExtractor.ExtractCurrencyAsync(page);
+        if (!string.IsNullOrWhiteSpace(currency))
+        {
+            product.Attributes["currency"] = currency!;
         }
         
         // 6. Extraer atributos adicionales (specs, categoría, etc.)
@@ -5029,9 +5204,13 @@ private async Task<ScrapedProduct?> ExtractProductFromDetailPageDeepAsync(
         {
             _logger.LogDebug("Error extrayendo atributos adicionales: {Message}", ex.Message);
         }
+
+        // 6.1 Extraer tabla de especificaciones técnicas (Festo ADP).
+        await ExtractFestoTechnicalDataAsync(page, product, cancellationToken);
         
-            // 7. Descubrimiento de URLs de navegación/relacionados (Sugerencia del Usuario)
+            // 7. Descubrimiento de URLs de navegación/relacionados.
             product.NavigationUrls = await DiscoverRelatedProductUrlsAsync(page, cancellationToken);
+            MergeAttachmentCandidatesFromLinks(product);
             if (product.NavigationUrls.Any())
             {
                 _logger.LogInformation("Asociadas {Count} URLs de navegación al producto {Sku}", product.NavigationUrls.Count, product.SkuSource);
@@ -5046,6 +5225,94 @@ private async Task<ScrapedProduct?> ExtractProductFromDetailPageDeepAsync(
         }
     }
 
+
+private static void MergeAttachmentCandidatesFromLinks(ScrapedProduct product)
+{
+    if (product.NavigationUrls == null || product.NavigationUrls.Count == 0)
+    {
+        return;
+    }
+
+    product.Attachments ??= new List<ProductAttachment>();
+    var existingAttachmentUrls = new HashSet<string>(
+        product.Attachments
+            .Where(a => !string.IsNullOrWhiteSpace(a.FileUrl))
+            .Select(a => a.FileUrl!),
+        StringComparer.OrdinalIgnoreCase);
+
+    foreach (var link in product.NavigationUrls)
+    {
+        if (string.IsNullOrWhiteSpace(link))
+        {
+            continue;
+        }
+
+        var normalized = link.Trim();
+        if (!IsAttachmentLikeUrl(normalized) || existingAttachmentUrls.Contains(normalized))
+        {
+            continue;
+        }
+
+        product.Attachments.Add(new ProductAttachment
+        {
+            FileName = GuessAttachmentFileName(normalized),
+            FileUrl = normalized,
+            FileType = GuessAttachmentMimeType(normalized)
+        });
+        existingAttachmentUrls.Add(normalized);
+    }
+}
+
+private static bool IsAttachmentLikeUrl(string url)
+{
+    var lower = url.ToLowerInvariant();
+    return lower.Contains(".pdf") ||
+           lower.Contains(".zip") ||
+           lower.Contains(".docx") ||
+           lower.Contains(".doc") ||
+           lower.Contains(".xlsx") ||
+           lower.Contains(".xls") ||
+           lower.Contains("download-document") ||
+           lower.Contains("datasheet") ||
+           lower.Contains("manual");
+}
+
+private static string GuessAttachmentFileName(string url)
+{
+    try
+    {
+        var uri = new Uri(url);
+        var fileName = Path.GetFileName(uri.AbsolutePath);
+        if (!string.IsNullOrWhiteSpace(fileName))
+        {
+            return fileName;
+        }
+    }
+    catch
+    {
+        // Ignore and fallback below.
+    }
+
+    return "attachment";
+}
+
+private static string? GuessAttachmentMimeType(string url)
+{
+    var lower = url.ToLowerInvariant();
+    if (lower.Contains(".pdf") || lower.Contains("datasheet"))
+        return "application/pdf";
+    if (lower.Contains(".zip"))
+        return "application/zip";
+    if (lower.Contains(".docx"))
+        return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    if (lower.Contains(".doc"))
+        return "application/msword";
+    if (lower.Contains(".xlsx"))
+        return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    if (lower.Contains(".xls"))
+        return "application/vnd.ms-excel";
+    return null;
+}
 
 /// <summary>
 /// Simula actividad aleatoria de usuario (hover, scroll, etc.) para parecer humano

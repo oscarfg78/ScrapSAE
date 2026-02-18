@@ -1,7 +1,9 @@
 using System.Reflection;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Moq;
+using ScrapSAE.Core.DTOs;
 using ScrapSAE.Core.Entities;
 using ScrapSAE.Core.Interfaces;
 using ScrapSAE.Worker;
@@ -19,7 +21,21 @@ public class WorkerTests
         var staging = new Mock<IStagingService>();
         var aiProcessor = new Mock<IAIProcessorService>();
         var syncLogService = new Mock<ISyncLogService>();
-        _worker = new Worker(logger.Object, scraping.Object, staging.Object, aiProcessor.Object, syncLogService.Object);
+        var flashlySyncService = new Mock<IFlashlySyncService>();
+        var csvExportService = new Mock<ICsvExportService>();
+        var syncOptions = Options.Create(new SyncOptionsConfig());
+        var csvOptions = Options.Create(new CsvExportConfig());
+
+        _worker = new Worker(
+            logger.Object,
+            scraping.Object,
+            staging.Object,
+            aiProcessor.Object,
+            syncLogService.Object,
+            flashlySyncService.Object,
+            csvExportService.Object,
+            syncOptions,
+            csvOptions);
     }
 
     [Fact]
