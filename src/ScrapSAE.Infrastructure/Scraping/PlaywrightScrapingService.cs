@@ -2056,25 +2056,196 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
     private async Task<List<string>> TryExtractBreadcrumbAsync(IPage page)
     {
         var crumbs = new List<string>();
-        try
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        var selectors = new[]
         {
-            var items = page.Locator("nav ol li, .breadcrumb li, .breadcrumb-item");
-            var count = await items.CountAsync();
-            for (var i = 0; i < count; i++)
+            "nav[aria-label*='breadcrumb' i] li, nav[aria-label*='breadcrumb' i] a, nav[aria-label*='breadcrumb' i] span",
+            "li[class*='breadcrumb-item'], a[class*='breadcrumb-item__link'], span[class*='breadcrumb-item__label']",
+            ".breadcrumb li, .breadcrumb a, .breadcrumb span",
+            "[data-testid*='breadcrumb'] li, [data-testid*='breadcrumb'] a, [data-testid*='breadcrumb'] span",
+            "[class*='breadcrumb'] li, [class*='breadcrumb'] a, [class*='breadcrumb'] span"
+        };
+
+        foreach (var selector in selectors)
+        {
+            try
             {
-                var text = await items.Nth(i).InnerTextAsync();
-                if (!string.IsNullOrWhiteSpace(text))
+                var items = page.Locator(selector);
+                var count = await items.CountAsync();
+                for (var i = 0; i < count; i++)
                 {
-                    crumbs.Add(text.Trim());
+                    var text = await items.Nth(i).InnerTextAsync();
+                    AddBreadcrumbCandidate(crumbs, seen, text);
                 }
             }
+            catch
+            {
+                // Ignore and try next selector.
+            }
+
+            if (crumbs.Count > 0)
+            {
+                break;
+            }
         }
-        catch
+
+        if (crumbs.Count == 0)
         {
-            // Ignore and fallback.
+            try
+            {
+                var containers = new[]
+                {
+                    "nav[aria-label*='breadcrumb' i]",
+                    "[data-testid*='breadcrumb']",
+                    "[class*='breadcrumb']"
+                };
+
+                foreach (var containerSelector in containers)
+                {
+                    var container = page.Locator(containerSelector).First;
+                    if (await container.CountAsync() == 0)
+                    {
+                        continue;
+                    }
+
+                    var rawText = await container.InnerTextAsync();
+                    if (string.IsNullOrWhiteSpace(rawText))
+                    {
+                        continue;
+                    }
+
+                    foreach (var part in rawText.Split(new[] { '>', '›' }, StringSplitOptions.RemoveEmptyEntries))
+                    {
+                        AddBreadcrumbCandidate(crumbs, seen, part);
+                    }
+
+                    if (crumbs.Count > 0)
+                    {
+                        break;
+                    }
+                }
+            }
+            catch
+            {
+                // Ignore fallback errors.
+            }
         }
 
         return crumbs;
+    }
+
+    private static void AddBreadcrumbCandidate(List<string> target, HashSet<string> seen, string? rawText)
+    {
+        var cleaned = CleanBreadcrumbText(rawText);
+        if (string.IsNullOrWhiteSpace(cleaned) || IsBreadcrumbNoise(cleaned))
+        {
+            return;
+        }
+
+        if (seen.Add(cleaned))
+        {
+            target.Add(cleaned);
+        }
+    }
+
+    private static void ApplyCategoryFromBreadcrumb(
+        ScrapedProduct product,
+        List<string>? breadcrumb,
+        List<string>? fallbackCategoryPath,
+        string currentUrl)
+    {
+        var categoryPath = BuildCategoryPath(breadcrumb, fallbackCategoryPath, currentUrl);
+        if (categoryPath.Count == 0)
+        {
+            return;
+        }
+
+        var pathText = string.Join(" > ", categoryPath);
+        product.Category = categoryPath[^1];
+        product.Attributes["category"] = product.Category;
+        product.Attributes["category_path"] = pathText;
+    }
+
+    private static List<string> BuildCategoryPath(
+        List<string>? breadcrumb,
+        List<string>? fallbackCategoryPath,
+        string currentUrl)
+    {
+        var rawPath = breadcrumb != null && breadcrumb.Count > 0
+            ? breadcrumb
+            : fallbackCategoryPath ?? new List<string>();
+
+        var normalized = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var segment in rawPath)
+        {
+            var cleaned = CleanBreadcrumbText(segment);
+            if (string.IsNullOrWhiteSpace(cleaned) || IsBreadcrumbNoise(cleaned))
+            {
+                continue;
+            }
+
+            if (seen.Add(cleaned))
+            {
+                normalized.Add(cleaned);
+            }
+        }
+
+        if (normalized.Count > 1 && IsLikelyProductBreadcrumb(normalized[^1], currentUrl))
+        {
+            normalized.RemoveAt(normalized.Count - 1);
+        }
+
+        return normalized;
+    }
+
+    private static bool IsLikelyProductBreadcrumb(string crumb, string currentUrl)
+    {
+        if (string.IsNullOrWhiteSpace(crumb))
+        {
+            return false;
+        }
+
+        var normalizedToken = NormalizeBreadcrumbTokenForUrl(crumb);
+        if (Uri.TryCreate(currentUrl, UriKind.Absolute, out var uri))
+        {
+            var path = uri.AbsolutePath.ToLowerInvariant();
+            if (!string.IsNullOrWhiteSpace(normalizedToken) &&
+                path.Contains(normalizedToken, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return Regex.IsMatch(crumb, @"^[A-Z0-9]{2,}(?:[-_/][A-Z0-9]{1,})+$", RegexOptions.IgnoreCase);
+    }
+
+    private static string NormalizeBreadcrumbTokenForUrl(string value)
+    {
+        var normalized = value.Trim().ToLowerInvariant();
+        normalized = normalized.Replace(" ", "-").Replace(",", string.Empty);
+        normalized = Regex.Replace(normalized, @"[^a-z0-9\-_]", string.Empty);
+        normalized = Regex.Replace(normalized, @"-+", "-");
+        return normalized.Trim('-');
+    }
+
+    private static string CleanBreadcrumbText(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return string.Empty;
+        }
+
+        var cleaned = Regex.Replace(text, @"\s+", " ").Trim();
+        cleaned = cleaned.Trim('>', '›', '-', '/', '\\');
+        return cleaned;
+    }
+
+    private static bool IsBreadcrumbNoise(string value)
+    {
+        return string.Equals(value, "Inicio", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(value, "Home", StringComparison.OrdinalIgnoreCase);
     }
 
     private static async Task<string?> GetDetailHrefFromCardAsync(ILocator card, SiteSelectors selectors)
@@ -3553,17 +3724,7 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
             }
 
             var breadcrumb = await TryExtractBreadcrumbAsync(page);
-            if (breadcrumb.Count > 0)
-            {
-                categoryPath = breadcrumb;
-            }
-
-            if (categoryPath.Count > 0)
-            {
-                var pathText = string.Join(" > ", categoryPath);
-                product.Category = pathText;
-                product.Attributes["category_path"] = pathText;
-            }
+            ApplyCategoryFromBreadcrumb(product, breadcrumb, categoryPath, page.Url);
 
             var hasBarcode = product.Attributes.TryGetValue("barcode", out var barcodeValue) &&
                 !string.IsNullOrWhiteSpace(barcodeValue);
@@ -5187,11 +5348,7 @@ private async Task<ScrapedProduct?> ExtractProductFromDetailPageDeepAsync(
         {
             // Breadcrumb para categoría
             var breadcrumb = await TryExtractBreadcrumbAsync(page);
-            if (breadcrumb.Count > 0)
-            {
-                product.Category = string.Join(" > ", breadcrumb);
-                product.Attributes["category_path"] = product.Category;
-            }
+            ApplyCategoryFromBreadcrumb(product, breadcrumb, null, page.Url);
             
             // Marca
             var brandElem = page.Locator("[class*='brand--'], .brand, [data-testid*='brand']").First;

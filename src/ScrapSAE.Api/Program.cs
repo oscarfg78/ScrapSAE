@@ -1308,7 +1308,7 @@ static JsonObject BuildOnlineStoreProductPayload(StagingProduct product, string?
 static List<string> SplitCategoryPath(string rawCategory)
 {
     return rawCategory
-        .Split(new[] { '>', '|', ';', ',' }, StringSplitOptions.RemoveEmptyEntries)
+        .Split(new[] { '>', '|', ';' }, StringSplitOptions.RemoveEmptyEntries)
         .Select(v => v.Trim())
         .Where(v => !string.IsNullOrWhiteSpace(v))
         .ToList();

@@ -328,22 +328,119 @@
             </TabItem>
             <TabItem Header="Proveedores">
                 <Grid Margin="8">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
-                    </Grid.RowDefinitions>
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                        <Button Content="Crear" Command="{Binding CreateSiteCommand}" Margin="0,0,8,0" />
-                        <Button Content="Actualizar" Command="{Binding UpdateSiteCommand}" Margin="0,0,8,0" />
-                        <Button Content="Eliminar" Command="{Binding DeleteSiteCommand}" />
-                    </StackPanel>
-                    <DataGrid Grid.Row="1"
-                              ItemsSource="{Binding Sites}"
-                              SelectedItem="{Binding SelectedSite}"
-                              AutoGenerateColumns="True"
-                              IsReadOnly="False"
-                              CanUserAddRows="False"
-                              Margin="0,4,0,0" />
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="1.9*" />
+                        <ColumnDefinition Width="2.1*" />
+                    </Grid.ColumnDefinitions>
+
+                    <Border Grid.Column="0" Background="White" Padding="12" Margin="0,0,8,0" CornerRadius="6" BorderBrush="#E5E7EB" BorderThickness="1">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+
+                            <StackPanel>
+                                <TextBlock Text="Proveedores registrados" FontWeight="SemiBold" FontSize="14" />
+                                <TextBlock Text="Selecciona un proveedor para editarlo o crea uno nuevo." Foreground="#6B7280" FontSize="12" Margin="0,2,0,10" />
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                    <Button Content="Nuevo" Command="{Binding CreateSiteCommand}" Margin="0,0,8,0" />
+                                    <Button Content="{Binding SiteSaveButtonText}" Command="{Binding UpdateSiteCommand}" Background="#059669" BorderBrush="#047857" Margin="0,0,8,0" />
+                                    <Button Content="Eliminar" Command="{Binding DeleteSiteCommand}" Background="#DC2626" BorderBrush="#B91C1C" />
+                                </StackPanel>
+                            </StackPanel>
+
+                            <Grid Grid.Row="1" Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBox Grid.Column="0"
+                                         Margin="0"
+                                         Text="{Binding SiteSearchText, UpdateSourceTrigger=PropertyChanged}"
+                                         ToolTip="Buscar por nombre, URL base o login URL" />
+                                <Button Grid.Column="1"
+                                        Content="Limpiar"
+                                        Command="{Binding ClearSiteSearchCommand}"
+                                        Background="#6B7280"
+                                        BorderBrush="#4B5563"
+                                        Margin="8,0,0,0" />
+                            </Grid>
+
+                            <DataGrid Grid.Row="2"
+                                      ItemsSource="{Binding SitesView}"
+                                      SelectedItem="{Binding SelectedSite}"
+                                      AutoGenerateColumns="False"
+                                      IsReadOnly="True"
+                                      CanUserAddRows="False">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Nombre" Binding="{Binding Name}" Width="1.3*" />
+                                    <DataGridTextColumn Header="URL base" Binding="{Binding BaseUrl}" Width="2*" />
+                                    <DataGridCheckBoxColumn Header="Activo" Binding="{Binding IsActive}" Width="0.6*" />
+                                    <DataGridCheckBoxColumn Header="Login" Binding="{Binding RequiresLogin}" Width="0.6*" />
+                                    <DataGridTextColumn Header="Máx" Binding="{Binding MaxProductsPerScrape}" Width="0.6*" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </Grid>
+                    </Border>
+
+                    <Border Grid.Column="1" Background="White" Padding="12" Margin="8,0,0,0" CornerRadius="6" BorderBrush="#E5E7EB" BorderThickness="1">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel>
+                                <TextBlock Text="{Binding SiteFormTitle}" FontWeight="SemiBold" FontSize="16" />
+                                <TextBlock Text="{Binding SiteFormStatusMessage}" Foreground="#6B7280" Margin="0,4,0,12" TextWrapping="Wrap" />
+
+                                <TextBlock Text="Datos generales" FontWeight="SemiBold" Margin="0,0,0,8" />
+                                <TextBlock Text="Nombre del proveedor" FontWeight="SemiBold" />
+                                <TextBox Text="{Binding SiteFormName, UpdateSourceTrigger=PropertyChanged}" />
+
+                                <TextBlock Text="URL base" FontWeight="SemiBold" />
+                                <TextBox Text="{Binding SiteFormBaseUrl, UpdateSourceTrigger=PropertyChanged}" />
+
+                                <TextBlock Text="URL de login (opcional)" FontWeight="SemiBold" />
+                                <TextBox Text="{Binding SiteFormLoginUrl, UpdateSourceTrigger=PropertyChanged}" />
+
+                                <TextBlock Text="Cron expression (opcional)" FontWeight="SemiBold" />
+                                <TextBox Text="{Binding SiteFormCronExpression, UpdateSourceTrigger=PropertyChanged}" />
+
+                                <TextBlock Text="Máx. productos por scrape (0 = ilimitado)" FontWeight="SemiBold" />
+                                <TextBox Text="{Binding SiteFormMaxProductsPerScrape, UpdateSourceTrigger=PropertyChanged}" />
+
+                                <CheckBox Content="Proveedor activo" IsChecked="{Binding SiteFormIsActive}" Margin="0,0,0,8" />
+                                <CheckBox Content="Requiere login" IsChecked="{Binding SiteFormRequiresLogin}" Margin="0,0,0,12" />
+
+                                <TextBlock Text="Credenciales encriptadas (opcional)" FontWeight="SemiBold" />
+                                <TextBox Text="{Binding SiteFormCredentialsEncrypted, UpdateSourceTrigger=PropertyChanged}" />
+
+                                <TextBlock Text="Selectores (JSON)" FontWeight="SemiBold" />
+                                <TextBox Text="{Binding SiteFormSelectorsJson, UpdateSourceTrigger=PropertyChanged}"
+                                         AcceptsReturn="True"
+                                         TextWrapping="Wrap"
+                                         Height="120"
+                                         VerticalScrollBarVisibility="Auto" />
+
+                                <TextBlock Text="Selectores secundarios (JSON)" FontWeight="SemiBold" />
+                                <TextBox Text="{Binding SiteFormSecondarySelectorsJson, UpdateSourceTrigger=PropertyChanged}"
+                                         AcceptsReturn="True"
+                                         TextWrapping="Wrap"
+                                         Height="110"
+                                         VerticalScrollBarVisibility="Auto" />
+
+                                <TextBlock Text="Estrategias (JSON)" FontWeight="SemiBold" />
+                                <TextBox Text="{Binding SiteFormStrategiesJson, UpdateSourceTrigger=PropertyChanged}"
+                                         AcceptsReturn="True"
+                                         TextWrapping="Wrap"
+                                         Height="110"
+                                         VerticalScrollBarVisibility="Auto" />
+
+                                <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                    <Button Content="{Binding SiteSaveButtonText}" Command="{Binding UpdateSiteCommand}" Background="#059669" BorderBrush="#047857" Margin="0,0,8,0" />
+                                    <Button Content="Descartar cambios" Command="{Binding ResetSiteFormCommand}" Background="#6B7280" BorderBrush="#4B5563" />
+                                </StackPanel>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Border>
                 </Grid>
             </TabItem>
 

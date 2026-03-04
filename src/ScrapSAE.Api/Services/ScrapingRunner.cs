@@ -199,6 +199,8 @@ public sealed class ScrapingRunner
 
         foreach (var item in scraped)
         {
+            ApplyProviderBrandAndCategory(item, site.Name);
+
             if (string.IsNullOrWhiteSpace(item.SkuSource))
             {
                 skipped++;
@@ -223,6 +225,7 @@ public sealed class ScrapingRunner
             var effectiveProduct = existing == null
                 ? CloneScrapedProduct(item)
                 : await EnrichScrapedProductAsync(siteId, item, existing, cancellationToken);
+            ApplyProviderBrandAndCategory(effectiveProduct, site.Name);
             var rawSnapshotJson = SerializeScrapedSnapshot(effectiveProduct);
             var incomingAiJson = await BuildAiJsonAsync(effectiveProduct, cancellationToken) ?? "{}";
             var pdfSpecs = await ExtractPdfSpecificationsAsync(effectiveProduct, cancellationToken);
@@ -318,7 +321,10 @@ public sealed class ScrapingRunner
             processed.Sku ??= scrapedProduct.SkuSource;
             processed.Name = string.IsNullOrWhiteSpace(processed.Name) ? (scrapedProduct.Title ?? string.Empty) : processed.Name;
             processed.Description = string.IsNullOrWhiteSpace(processed.Description) ? (scrapedProduct.Description ?? string.Empty) : processed.Description;
-            processed.Brand ??= scrapedProduct.Brand;
+            if (!string.IsNullOrWhiteSpace(scrapedProduct.Brand))
+            {
+                processed.Brand = scrapedProduct.Brand;
+            }
             processed.Price ??= scrapedProduct.Price;
             MergeScrapedDataIntoProcessed(processed, scrapedProduct);
             processed.OriginalRawData ??= rawData;
@@ -1293,12 +1299,13 @@ public sealed class ScrapingRunner
             existingAttachmentUrls.Add(attachment.FileUrl);
         }
 
-        if (!processed.Categories.Any() && !string.IsNullOrWhiteSpace(scrapedProduct.Category))
+        var scrapedCategories = ResolveScrapedCategories(scrapedProduct);
+        if (scrapedCategories.Count > 0)
         {
-            processed.Categories = SplitCategoryPath(scrapedProduct.Category);
+            processed.Categories = scrapedCategories;
         }
 
-        processed.SuggestedCategory ??= processed.Categories.FirstOrDefault();
+        processed.SuggestedCategory = processed.Categories.LastOrDefault() ?? processed.SuggestedCategory;
 
         foreach (var attribute in scrapedProduct.Attributes)
         {
@@ -1340,10 +1347,67 @@ public sealed class ScrapingRunner
     private static List<string> SplitCategoryPath(string rawCategory)
     {
         return rawCategory
-            .Split(new[] { '>', '|', ';', ',' }, StringSplitOptions.RemoveEmptyEntries)
+            .Split(new[] { '>', '|', ';' }, StringSplitOptions.RemoveEmptyEntries)
             .Select(v => v.Trim())
             .Where(v => !string.IsNullOrWhiteSpace(v))
             .ToList();
+    }
+
+    private static List<string> ResolveScrapedCategories(ScrapedProduct scrapedProduct)
+    {
+        if (scrapedProduct.Attributes.TryGetValue("category_path", out var categoryPathValue) &&
+            !string.IsNullOrWhiteSpace(categoryPathValue))
+        {
+            var fromPath = SplitCategoryPath(categoryPathValue);
+            if (fromPath.Count > 0)
+            {
+                return fromPath;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(scrapedProduct.Category))
+        {
+            var fromCategory = SplitCategoryPath(scrapedProduct.Category);
+            if (fromCategory.Count > 0)
+            {
+                return fromCategory;
+            }
+        }
+
+        return new List<string>();
+    }
+
+    private static void ApplyProviderBrandAndCategory(ScrapedProduct product, string? providerName)
+    {
+        product.Attributes ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        if (!string.IsNullOrWhiteSpace(providerName))
+        {
+            var normalizedProvider = providerName.Trim();
+            if (!string.IsNullOrWhiteSpace(normalizedProvider))
+            {
+                product.Brand = normalizedProvider;
+                product.Attributes["brand"] = normalizedProvider;
+                product.Attributes["supplier_name"] = normalizedProvider;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(product.Category) &&
+            product.Attributes.TryGetValue("category_path", out var categoryPath) &&
+            !string.IsNullOrWhiteSpace(categoryPath))
+        {
+            var splitPath = SplitCategoryPath(categoryPath);
+            if (splitPath.Count > 0)
+            {
+                product.Category = splitPath[^1];
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(product.Category))
+        {
+            product.Category = product.Category.Trim();
+            product.Attributes["category"] = product.Category;
+        }
     }
 
     private static readonly HashSet<string> IgnoredAttributeKeys = new(StringComparer.OrdinalIgnoreCase)

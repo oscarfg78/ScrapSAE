@@ -16,6 +16,7 @@ namespace ScrapSAE.Desktop.ViewModels;
 
 public sealed class MainViewModel : ViewModelBase
 {
+    private static readonly JsonSerializerOptions SiteJsonOptions = new() { WriteIndented = true };
     private readonly ApiClient _apiClient;
     private readonly DispatcherTimer _saeTimer;
     private readonly DispatcherTimer _logTimer;
@@ -85,7 +86,22 @@ public sealed class MainViewModel : ViewModelBase
     private string _currentRescrapeJobStatus = string.Empty;
     private HashSet<Guid> _currentRescrapeSiteIds = new();
     private string? _sendProgressLogFilePath;
+    private Guid? _siteFormId;
+    private string _siteFormName = string.Empty;
+    private string _siteFormBaseUrl = "https://";
+    private string _siteFormLoginUrl = string.Empty;
+    private string _siteFormCronExpression = string.Empty;
+    private bool _siteFormRequiresLogin;
+    private bool _siteFormIsActive = true;
+    private string _siteFormMaxProductsPerScrape = "0";
+    private string _siteFormCredentialsEncrypted = string.Empty;
+    private string _siteFormSelectorsJson = "{}";
+    private string _siteFormSecondarySelectorsJson = "{}";
+    private string _siteFormStrategiesJson = "[]";
+    private string _siteFormStatusMessage = "Selecciona un proveedor o crea uno nuevo.";
+    private string _siteSearchText = string.Empty;
     public System.ComponentModel.ICollectionView StagingProductsView { get; private set; }
+    public System.ComponentModel.ICollectionView SitesView { get; private set; }
 
     public MainViewModel(ApiClient apiClient)
     {
@@ -100,9 +116,9 @@ public sealed class MainViewModel : ViewModelBase
         _liveLogTimer.Tick += async (_, _) => await RefreshLiveLogsAsync();
 
         LoadAllCommand = new AsyncCommand(() => SafeExecuteAsync(LoadAllAsync, "Cargar datos"));
-        CreateSiteCommand = new AsyncCommand(() => SafeExecuteAsync(CreateSiteAsync, "Crear proveedor"));
-        UpdateSiteCommand = new AsyncCommand(() => SafeExecuteAsync(UpdateSiteAsync, "Actualizar proveedor"));
-        DeleteSiteCommand = new AsyncCommand(() => SafeExecuteAsync(DeleteSiteAsync, "Eliminar proveedor"));
+        CreateSiteCommand = new AsyncCommand(() => SafeExecuteAsync(PrepareNewSiteAsync, "Nuevo proveedor"));
+        UpdateSiteCommand = new AsyncCommand(() => SafeExecuteAsync(SaveSiteAsync, "Guardar proveedor"));
+        DeleteSiteCommand = new AsyncCommand(() => SafeExecuteAsync(DeleteSiteAsync, "Eliminar proveedor"), () => SelectedSite != null);
 
         CreateStagingCommand = new AsyncCommand(() => SafeExecuteAsync(CreateStagingAsync, "Crear staging"));
         UpdateStagingCommand = new AsyncCommand(() => SafeExecuteAsync(UpdateStagingAsync, "Actualizar staging"));
@@ -162,8 +178,13 @@ public sealed class MainViewModel : ViewModelBase
         CloseSendProgressCommand = new RelayCommand(CloseSendProgressModal);
         ShowSendProgressCommand = new RelayCommand(ShowSendProgressModal);
         CopySendProgressCommand = new RelayCommand(CopySendProgressToClipboard);
+        ResetSiteFormCommand = new RelayCommand(ResetSiteFormFromSelection);
+        ClearSiteSearchCommand = new RelayCommand(ClearSiteSearch, () => !string.IsNullOrWhiteSpace(SiteSearchText));
         
         // Initialize Collection View for filtering
+        SitesView = System.Windows.Data.CollectionViewSource.GetDefaultView(Sites);
+        SitesView.Filter = FilterSites;
+
         StagingProductsView = System.Windows.Data.CollectionViewSource.GetDefaultView(StagingProducts);
         StagingProductsView.Filter = FilterStagingProducts;
 
@@ -175,6 +196,95 @@ public sealed class MainViewModel : ViewModelBase
         get => _searchText;
         set => SetField(ref _searchText, value);
     }
+
+    public string SiteSearchText
+    {
+        get => _siteSearchText;
+        set
+        {
+            if (SetField(ref _siteSearchText, value))
+            {
+                SitesView.Refresh();
+                ClearSiteSearchCommand.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
+    public string SiteFormName
+    {
+        get => _siteFormName;
+        set => SetField(ref _siteFormName, value);
+    }
+
+    public string SiteFormBaseUrl
+    {
+        get => _siteFormBaseUrl;
+        set => SetField(ref _siteFormBaseUrl, value);
+    }
+
+    public string SiteFormLoginUrl
+    {
+        get => _siteFormLoginUrl;
+        set => SetField(ref _siteFormLoginUrl, value);
+    }
+
+    public string SiteFormCronExpression
+    {
+        get => _siteFormCronExpression;
+        set => SetField(ref _siteFormCronExpression, value);
+    }
+
+    public bool SiteFormRequiresLogin
+    {
+        get => _siteFormRequiresLogin;
+        set => SetField(ref _siteFormRequiresLogin, value);
+    }
+
+    public bool SiteFormIsActive
+    {
+        get => _siteFormIsActive;
+        set => SetField(ref _siteFormIsActive, value);
+    }
+
+    public string SiteFormMaxProductsPerScrape
+    {
+        get => _siteFormMaxProductsPerScrape;
+        set => SetField(ref _siteFormMaxProductsPerScrape, value);
+    }
+
+    public string SiteFormCredentialsEncrypted
+    {
+        get => _siteFormCredentialsEncrypted;
+        set => SetField(ref _siteFormCredentialsEncrypted, value);
+    }
+
+    public string SiteFormSelectorsJson
+    {
+        get => _siteFormSelectorsJson;
+        set => SetField(ref _siteFormSelectorsJson, value);
+    }
+
+    public string SiteFormSecondarySelectorsJson
+    {
+        get => _siteFormSecondarySelectorsJson;
+        set => SetField(ref _siteFormSecondarySelectorsJson, value);
+    }
+
+    public string SiteFormStrategiesJson
+    {
+        get => _siteFormStrategiesJson;
+        set => SetField(ref _siteFormStrategiesJson, value);
+    }
+
+    public string SiteFormStatusMessage
+    {
+        get => _siteFormStatusMessage;
+        set => SetField(ref _siteFormStatusMessage, value);
+    }
+
+    public string SiteFormTitle => _siteFormId.HasValue ? "Editar proveedor" : "Nuevo proveedor";
+
+    public string SiteSaveButtonText => _siteFormId.HasValue ? "Guardar cambios" : "Crear proveedor";
 
     public bool IsSendProgressVisible
     {
@@ -380,7 +490,9 @@ public sealed class MainViewModel : ViewModelBase
                 ((AsyncCommand)StopScrapingCommand).RaiseCanExecuteChanged();
                 ((AsyncCommand)ConfirmLoginCommand).RaiseCanExecuteChanged();
                 ((AsyncCommand)InspectUrlsCommand).RaiseCanExecuteChanged();
+                DeleteSiteCommand.RaiseCanExecuteChanged();
                 UpdateRecentSyncLogs();
+                PopulateSiteForm(value);
                 _ = SafeExecuteAsync(RefreshScrapeStatusAsync, "Estado scraping");
             }
         }
@@ -765,6 +877,8 @@ public sealed class MainViewModel : ViewModelBase
     public RelayCommand CloseSendProgressCommand { get; }
     public RelayCommand ShowSendProgressCommand { get; }
     public RelayCommand CopySendProgressCommand { get; }
+    public RelayCommand ResetSiteFormCommand { get; }
+    public RelayCommand ClearSiteSearchCommand { get; }
 
     public async Task LoadAllAsync()
 
@@ -772,12 +886,22 @@ public sealed class MainViewModel : ViewModelBase
         try
         {
             StatusMessage = "Cargando datos...";
+            var selectedSiteId = SelectedSite?.Id;
             Sites.Clear();
             foreach (var site in await _apiClient.GetSitesAsync())
             {
                 Sites.Add(site);
             }
             HasSites = Sites.Count > 0;
+            SitesView.Refresh();
+            SelectedSite = selectedSiteId.HasValue
+                ? Sites.FirstOrDefault(s => s.Id == selectedSiteId.Value) ?? Sites.FirstOrDefault()
+                : Sites.FirstOrDefault();
+            if (SelectedSite == null)
+            {
+                PopulateSiteForm(null);
+            }
+
             AppLogger.Info($"Sites loaded: {Sites.Count}");
 
             ResetStagingProducts(await _apiClient.GetStagingProductsAsync());
@@ -818,32 +942,57 @@ public sealed class MainViewModel : ViewModelBase
         }
     }
 
-    private async Task CreateSiteAsync()
+    private Task PrepareNewSiteAsync()
     {
-        AppLogger.Info("CreateSite clicked.");
-        var site = SelectedSite ?? new SiteProfile { Name = "Nuevo", BaseUrl = "https://", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow };
-        var created = await _apiClient.CreateSiteAsync(site);
-        if (created != null)
-        {
-            Sites.Add(created);
-            SelectedSite = created;
-            HasSites = Sites.Count > 0;
-            AppLogger.Info($"Site created: {created.Name} ({created.Id}).");
-        }
+        SelectedSite = null;
+        PopulateSiteForm(null);
+        SiteFormStatusMessage = "Completa el formulario para crear un proveedor.";
+        StatusMessage = "Formulario listo para nuevo proveedor.";
+        return Task.CompletedTask;
     }
 
-    private async Task UpdateSiteAsync()
+    private async Task SaveSiteAsync()
     {
-        if (SelectedSite == null)
+        if (!TryBuildSiteFromForm(out var payload, out var validationMessage))
         {
+            SiteFormStatusMessage = validationMessage;
+            StatusMessage = validationMessage;
             return;
         }
 
-        var updated = await _apiClient.UpdateSiteAsync(SelectedSite.Id, SelectedSite);
-        if (updated != null)
+        if (_siteFormId.HasValue)
         {
-            StatusMessage = "Proveedor actualizado.";
+            var updated = await _apiClient.UpdateSiteAsync(_siteFormId.Value, payload);
+            if (updated == null)
+            {
+                SiteFormStatusMessage = "No se pudo actualizar el proveedor.";
+                StatusMessage = SiteFormStatusMessage;
+                return;
+            }
+
+            ReplaceSiteInCollection(updated);
+            SelectedSite = updated;
+            SiteFormStatusMessage = $"Proveedor \"{updated.Name}\" actualizado.";
         }
+        else
+        {
+            var created = await _apiClient.CreateSiteAsync(payload);
+            if (created == null)
+            {
+                SiteFormStatusMessage = "No se pudo crear el proveedor.";
+                StatusMessage = SiteFormStatusMessage;
+                return;
+            }
+
+            Sites.Add(created);
+            SelectedSite = created;
+            SiteFormStatusMessage = $"Proveedor \"{created.Name}\" creado.";
+            AppLogger.Info($"Site created: {created.Name} ({created.Id}).");
+        }
+
+        HasSites = Sites.Count > 0;
+        SitesView.Refresh();
+        StatusMessage = SiteFormStatusMessage;
     }
 
     private async Task DeleteSiteAsync()
@@ -853,10 +1002,287 @@ public sealed class MainViewModel : ViewModelBase
             return;
         }
 
-        await _apiClient.DeleteSiteAsync(SelectedSite.Id);
-        Sites.Remove(SelectedSite);
-        SelectedSite = null;
+        var toDelete = SelectedSite;
+        var confirmation = MessageBox.Show(
+            $"Se eliminará el proveedor \"{toDelete.Name}\". Esta acción no se puede deshacer.",
+            "Eliminar proveedor",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning);
+
+        if (confirmation != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        await _apiClient.DeleteSiteAsync(toDelete.Id);
+        var removedIndex = Sites.IndexOf(toDelete);
+        Sites.Remove(toDelete);
+
         HasSites = Sites.Count > 0;
+        SitesView.Refresh();
+
+        if (Sites.Count == 0)
+        {
+            SelectedSite = null;
+            PopulateSiteForm(null);
+            SiteFormStatusMessage = "Proveedor eliminado. Ya puedes crear uno nuevo.";
+            StatusMessage = SiteFormStatusMessage;
+            return;
+        }
+
+        var nextIndex = Math.Min(Math.Max(removedIndex, 0), Sites.Count - 1);
+        SelectedSite = Sites[nextIndex];
+        SiteFormStatusMessage = $"Proveedor \"{toDelete.Name}\" eliminado.";
+        StatusMessage = SiteFormStatusMessage;
+    }
+
+    private async Task PersistSelectedSiteAsync()
+    {
+        if (SelectedSite == null)
+        {
+            return;
+        }
+
+        var updated = await _apiClient.UpdateSiteAsync(SelectedSite.Id, SelectedSite);
+        if (updated == null)
+        {
+            return;
+        }
+
+        ReplaceSiteInCollection(updated);
+        SelectedSite = updated;
+        StatusMessage = "Proveedor actualizado.";
+    }
+
+    private void ReplaceSiteInCollection(SiteProfile site)
+    {
+        var index = Sites.ToList().FindIndex(s => s.Id == site.Id);
+        if (index >= 0)
+        {
+            Sites[index] = site;
+            return;
+        }
+
+        Sites.Add(site);
+    }
+
+    private void ResetSiteFormFromSelection()
+    {
+        PopulateSiteForm(SelectedSite);
+        SiteFormStatusMessage = SelectedSite == null
+            ? "Formulario restablecido para nuevo proveedor."
+            : $"Se descartaron cambios. Editando \"{SelectedSite.Name}\".";
+    }
+
+    private void ClearSiteSearch()
+    {
+        SiteSearchText = string.Empty;
+    }
+
+    private bool FilterSites(object obj)
+    {
+        if (obj is not SiteProfile site)
+        {
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(SiteSearchText))
+        {
+            return true;
+        }
+
+        var query = SiteSearchText.Trim();
+        return site.Name.Contains(query, StringComparison.OrdinalIgnoreCase)
+            || site.BaseUrl.Contains(query, StringComparison.OrdinalIgnoreCase)
+            || (!string.IsNullOrWhiteSpace(site.LoginUrl) && site.LoginUrl.Contains(query, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private void PopulateSiteForm(SiteProfile? site)
+    {
+        _siteFormId = site?.Id;
+        OnPropertyChanged(nameof(SiteFormTitle));
+        OnPropertyChanged(nameof(SiteSaveButtonText));
+
+        SiteFormName = site?.Name ?? string.Empty;
+        SiteFormBaseUrl = site?.BaseUrl ?? "https://";
+        SiteFormLoginUrl = site?.LoginUrl ?? string.Empty;
+        SiteFormCronExpression = site?.CronExpression ?? string.Empty;
+        SiteFormRequiresLogin = site?.RequiresLogin ?? false;
+        SiteFormIsActive = site?.IsActive ?? true;
+        SiteFormMaxProductsPerScrape = (site?.MaxProductsPerScrape ?? 0).ToString();
+        SiteFormCredentialsEncrypted = site?.CredentialsEncrypted ?? string.Empty;
+        SiteFormSelectorsJson = SerializeFormJson(site?.Selectors, "{}");
+        SiteFormSecondarySelectorsJson = JsonSerializer.Serialize(site?.SecondarySelectors ?? new Dictionary<string, List<string>>(), SiteJsonOptions);
+        SiteFormStrategiesJson = JsonSerializer.Serialize(site?.Strategies ?? new List<ScrapingStrategyDefinition>(), SiteJsonOptions);
+
+        if (site == null)
+        {
+            SiteFormStatusMessage = "Completa el formulario para crear un proveedor.";
+        }
+        else
+        {
+            SiteFormStatusMessage = $"Editando proveedor: {site.Name}";
+        }
+    }
+
+    private bool TryBuildSiteFromForm(out SiteProfile payload, out string validationMessage)
+    {
+        payload = new SiteProfile();
+
+        if (string.IsNullOrWhiteSpace(SiteFormName))
+        {
+            validationMessage = "El nombre del proveedor es obligatorio.";
+            return false;
+        }
+
+        if (!TryNormalizeHttpUrl(SiteFormBaseUrl, out var baseUrl))
+        {
+            validationMessage = "La URL base debe ser una URL http/https válida.";
+            return false;
+        }
+
+        string loginUrl = string.Empty;
+        if (!string.IsNullOrWhiteSpace(SiteFormLoginUrl) && !TryNormalizeHttpUrl(SiteFormLoginUrl, out loginUrl))
+        {
+            validationMessage = "La URL de login debe ser una URL http/https válida.";
+            return false;
+        }
+
+        if (!int.TryParse(SiteFormMaxProductsPerScrape, out var maxProductsPerScrape) || maxProductsPerScrape < 0)
+        {
+            validationMessage = "Máx. productos por scrape debe ser un entero mayor o igual a 0.";
+            return false;
+        }
+
+        if (!TryNormalizeJson(SiteFormSelectorsJson, JsonValueKind.Object, out var selectorsJson, out validationMessage))
+        {
+            return false;
+        }
+
+        if (!TryNormalizeJson(SiteFormSecondarySelectorsJson, JsonValueKind.Object, out var secondarySelectorsJson, out validationMessage))
+        {
+            return false;
+        }
+
+        if (!TryNormalizeJson(SiteFormStrategiesJson, JsonValueKind.Array, out var strategiesJson, out validationMessage))
+        {
+            return false;
+        }
+
+        Dictionary<string, List<string>> secondarySelectors;
+        List<ScrapingStrategyDefinition> strategies;
+        try
+        {
+            secondarySelectors = JsonSerializer.Deserialize<Dictionary<string, List<string>>>(secondarySelectorsJson) ?? new Dictionary<string, List<string>>();
+            strategies = JsonSerializer.Deserialize<List<ScrapingStrategyDefinition>>(strategiesJson) ?? new List<ScrapingStrategyDefinition>();
+        }
+        catch (JsonException ex)
+        {
+            validationMessage = $"No se pudieron interpretar opciones avanzadas: {ex.Message}";
+            return false;
+        }
+
+        SiteFormSelectorsJson = selectorsJson;
+        SiteFormSecondarySelectorsJson = secondarySelectorsJson;
+        SiteFormStrategiesJson = strategiesJson;
+
+        var current = _siteFormId.HasValue ? Sites.FirstOrDefault(s => s.Id == _siteFormId.Value) : null;
+        payload = new SiteProfile
+        {
+            Id = _siteFormId ?? Guid.NewGuid(),
+            Name = SiteFormName.Trim(),
+            BaseUrl = baseUrl,
+            LoginUrl = string.IsNullOrWhiteSpace(loginUrl) ? null : loginUrl,
+            Selectors = selectorsJson,
+            CronExpression = string.IsNullOrWhiteSpace(SiteFormCronExpression) ? null : SiteFormCronExpression.Trim(),
+            RequiresLogin = SiteFormRequiresLogin,
+            CredentialsEncrypted = string.IsNullOrWhiteSpace(SiteFormCredentialsEncrypted) ? null : SiteFormCredentialsEncrypted.Trim(),
+            IsActive = SiteFormIsActive,
+            MaxProductsPerScrape = maxProductsPerScrape,
+            CreatedAt = current?.CreatedAt ?? DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+            SecondarySelectors = secondarySelectors,
+            Strategies = strategies
+        };
+
+        validationMessage = string.Empty;
+        return true;
+    }
+
+    private static bool TryNormalizeHttpUrl(string? rawUrl, out string normalizedUrl)
+    {
+        normalizedUrl = string.Empty;
+        if (string.IsNullOrWhiteSpace(rawUrl))
+        {
+            return false;
+        }
+
+        if (!Uri.TryCreate(rawUrl.Trim(), UriKind.Absolute, out var uri))
+        {
+            return false;
+        }
+
+        if (!string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        normalizedUrl = uri.AbsoluteUri;
+        return true;
+    }
+
+    private static bool TryNormalizeJson(string input, JsonValueKind expectedKind, out string normalizedJson, out string errorMessage)
+    {
+        var fallback = expectedKind == JsonValueKind.Array ? "[]" : "{}";
+        var candidate = string.IsNullOrWhiteSpace(input) ? fallback : input.Trim();
+
+        try
+        {
+            using var doc = JsonDocument.Parse(candidate);
+            if (doc.RootElement.ValueKind != expectedKind)
+            {
+                normalizedJson = candidate;
+                errorMessage = expectedKind == JsonValueKind.Array
+                    ? "El JSON debe ser un arreglo."
+                    : "El JSON debe ser un objeto.";
+                return false;
+            }
+
+            normalizedJson = JsonSerializer.Serialize(doc.RootElement, SiteJsonOptions);
+            errorMessage = string.Empty;
+            return true;
+        }
+        catch (JsonException ex)
+        {
+            normalizedJson = candidate;
+            errorMessage = $"JSON inválido: {ex.Message}";
+            return false;
+        }
+    }
+
+    private static string SerializeFormJson(object? rawValue, string fallback)
+    {
+        try
+        {
+            if (rawValue == null)
+            {
+                return fallback;
+            }
+
+            var element = rawValue switch
+            {
+                JsonElement jsonElement => jsonElement.Clone(),
+                string text => JsonDocument.Parse(string.IsNullOrWhiteSpace(text) ? fallback : text).RootElement.Clone(),
+                _ => JsonSerializer.SerializeToElement(rawValue)
+            };
+
+            return JsonSerializer.Serialize(element, SiteJsonOptions);
+        }
+        catch
+        {
+            return fallback;
+        }
     }
 
     private async Task CreateStagingAsync()
@@ -2103,7 +2529,8 @@ public sealed class MainViewModel : ViewModelBase
         if (!string.IsNullOrWhiteSpace(suggestion.NextPageSelector)) dict["nextPageSelector"] = suggestion.NextPageSelector!;
 
         SelectedSite.Selectors = JsonSerializer.Serialize(dict);
-        await UpdateSiteAsync();
+        PopulateSiteForm(SelectedSite);
+        await PersistSelectedSiteAsync();
     }
 
     private async Task RefreshAppLogsAsync()

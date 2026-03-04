@@ -551,6 +551,7 @@ public sealed class RescrapeJobService : IRescrapeJobService
                 });
                 return;
             }
+            ApplyProviderBrandAndCategory(scrapedProduct, site.Name);
 
             item.ErrorMessage = "Extracción completada. Ejecutando IA y merge conservador...";
             item.UpdatedAt = DateTime.UtcNow;
@@ -755,6 +756,48 @@ public sealed class RescrapeJobService : IRescrapeJobService
         }
 
         _logger.LogInformation("RescrapeJob {JobId} [{Level}] {Message}", jobId, level, message);
+    }
+
+    private static void ApplyProviderBrandAndCategory(ScrapedProduct product, string? providerName)
+    {
+        product.Attributes ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        if (!string.IsNullOrWhiteSpace(providerName))
+        {
+            var normalizedProvider = providerName.Trim();
+            if (!string.IsNullOrWhiteSpace(normalizedProvider))
+            {
+                product.Brand = normalizedProvider;
+                product.Attributes["brand"] = normalizedProvider;
+                product.Attributes["supplier_name"] = normalizedProvider;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(product.Category) &&
+            product.Attributes.TryGetValue("category_path", out var categoryPath) &&
+            !string.IsNullOrWhiteSpace(categoryPath))
+        {
+            var splitPath = SplitCategoryPath(categoryPath);
+            if (splitPath.Count > 0)
+            {
+                product.Category = splitPath[^1];
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(product.Category))
+        {
+            product.Category = product.Category.Trim();
+            product.Attributes["category"] = product.Category;
+        }
+    }
+
+    private static List<string> SplitCategoryPath(string rawCategory)
+    {
+        return rawCategory
+            .Split(new[] { '>', '|', ';' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(v => v.Trim())
+            .Where(v => !string.IsNullOrWhiteSpace(v))
+            .ToList();
     }
 
     private static bool IsMissingRescrapeJobLogsTable(Exception ex)
