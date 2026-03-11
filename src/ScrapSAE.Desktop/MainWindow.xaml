@@ -1005,12 +1005,21 @@
                                         <TextBlock Text="Productos en Staging (Vista Previa)" FontWeight="SemiBold" Foreground="#374151" />
                                     </Border>
                                     <DataGrid Grid.Row="1"
-                                              ItemsSource="{Binding StagingProducts}"
+                                              ItemsSource="{Binding StagingProductsView}"
                                               SelectedItem="{Binding SelectedStagingProduct}"
-                                              AutoGenerateColumns="True"
+                                              AutoGenerateColumns="False"
                                               IsReadOnly="False"
                                               CanUserAddRows="False"
-                                              BorderThickness="0" />
+                                              BorderThickness="0">
+                                        <DataGrid.Columns>
+                                            <DataGridTextColumn Header="SKU" Binding="{Binding Sku}" Width="220" />
+                                            <DataGridTextColumn Header="Título" Binding="{Binding Title}" Width="3*" />
+                                            <DataGridTextColumn Header="Estado" Binding="{Binding Status}" Width="120" />
+                                            <DataGridTextColumn Header="Precio" Binding="{Binding Price}" Width="110" />
+                                            <DataGridTextColumn Header="Actualizado" Binding="{Binding UpdatedAt}" Width="180" />
+                                            <DataGridTextColumn Header="Visto" Binding="{Binding LastSeenAt}" Width="180" />
+                                        </DataGrid.Columns>
+                                    </DataGrid>
                                 </Grid>
                             </Border>
                         </Grid>
@@ -1075,6 +1084,12 @@
                                   Margin="8,0,0,0" />
                         <Button Content="Enviar pendientes"
                                 Command="{Binding SendPendingToOnlineStoreCommand}" />
+                        <Button Content="Ver detalle"
+                                Command="{Binding OpenOnlineStoreDetailDialogCommand}" />
+                        <Button Content="Validar seleccionados"
+                                Command="{Binding ValidateSelectedOnlineStoreRecordsCommand}"
+                                Background="#059669"
+                                BorderBrush="#047857" />
                         <Button Content="Guardar cambios"
                                 Command="{Binding SaveSelectedOnlineStoreRecordCommand}" />
                         <Button Content="Eliminar seleccionados"
@@ -1087,15 +1102,26 @@
                                 BorderBrush="#D97706" />
                         <Button Content="Quitar apartado"
                                 Command="{Binding UnmarkSelectedAsApartadoCommand}" />
+                        <TextBlock Text="Filtro estado:"
+                                  VerticalAlignment="Center"
+                                  Margin="12,0,6,0" />
+                        <ComboBox ItemsSource="{Binding OnlineStoreViewFilterOptions}"
+                                  SelectedItem="{Binding OnlineStoreViewFilter, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                  Width="130"
+                                  VerticalAlignment="Center"
+                                  Margin="0,0,8,0" />
                         <CheckBox Content="Mostrar apartados"
                                   IsChecked="{Binding ShowApartadosOnly}"
                                   VerticalAlignment="Center"
                                   Margin="12,0,8,0" />
                         <Border Background="#E5E7EB" CornerRadius="4" Padding="10,4" Margin="4,0,8,0">
-                            <TextBlock Text="{Binding OnlineStorePendingCount, StringFormat=Pendientes: {0}}" FontWeight="SemiBold" />
+                            <TextBlock Text="{Binding OnlineStorePendingCount, StringFormat=Pend. envío: {0}}" FontWeight="SemiBold" />
                         </Border>
                         <Border Background="#E5E7EB" CornerRadius="4" Padding="10,4" Margin="4,0,8,0">
                             <TextBlock Text="{Binding OnlineStoreSelectedCount, StringFormat=Seleccionados: {0}}" FontWeight="SemiBold" />
+                        </Border>
+                        <Border Background="#E5E7EB" CornerRadius="4" Padding="10,4" Margin="4,0,8,0">
+                            <TextBlock Text="{Binding OnlineStoreVisibleCount, StringFormat=Visibles: {0}}" FontWeight="SemiBold" />
                         </Border>
                         <Border Background="#E5E7EB" CornerRadius="4" Padding="10,4" Margin="4,0,8,0">
                             <TextBlock Text="{Binding OnlineStoreApartadosCount, StringFormat=Apartados: {0}}" FontWeight="SemiBold" />
@@ -1153,6 +1179,214 @@
                 <TextBlock Text="{Binding StatusMessage}" Foreground="White" />
             </StatusBarItem>
         </StatusBar>
+
+        <Grid Grid.RowSpan="4"
+              Visibility="{Binding IsOnlineStoreDetailVisible, Converter={StaticResource BoolToVisibility}}"
+              Background="#80000000"
+              Panel.ZIndex="1000">
+            <Border Width="1120"
+                    Height="760"
+                    Background="White"
+                    CornerRadius="8"
+                    BorderBrush="#D1D5DB"
+                    BorderThickness="1"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Padding="16">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Text="Detalle completo del registro"
+                               FontSize="20"
+                               FontWeight="SemiBold" />
+
+                    <Grid Grid.Row="1" Margin="0,10,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Grid.Column="0" Margin="0,0,12,0">
+                            <TextBlock Text="ID" FontWeight="SemiBold" />
+                            <TextBox Text="{Binding OnlineStoreDetailProduct.Product.Id}" IsReadOnly="True" Margin="0,4,0,8" />
+                            <TextBlock Text="Site ID" FontWeight="SemiBold" />
+                            <TextBox Text="{Binding OnlineStoreDetailProduct.Product.SiteId}" IsReadOnly="True" Margin="0,4,0,8" />
+                            <TextBlock Text="SKU" FontWeight="SemiBold" />
+                            <TextBox Text="{Binding OnlineStoreDetailProduct.Product.SkuSource, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Margin="0,4,0,8" />
+                            <TextBlock Text="SKU SAE" FontWeight="SemiBold" />
+                            <TextBox Text="{Binding OnlineStoreDetailProduct.Product.SkuSae, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Margin="0,4,0,0" />
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="1" Margin="0,0,12,0">
+                            <TextBlock Text="Nombre" FontWeight="SemiBold" />
+                            <TextBox Text="{Binding OnlineStoreDetailProduct.ProductName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Margin="0,4,0,8" />
+                            <TextBlock Text="URL origen" FontWeight="SemiBold" />
+                            <TextBox Text="{Binding OnlineStoreDetailProduct.SourceUrl, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Margin="0,4,0,8" />
+                            <TextBlock Text="Precio" FontWeight="SemiBold" />
+                            <TextBox Text="{Binding OnlineStoreDetailProduct.EditablePrice, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Margin="0,4,0,8" />
+                            <TextBlock Text="Moneda" FontWeight="SemiBold" />
+                            <TextBox Text="{Binding OnlineStoreDetailProduct.EditableCurrency, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Margin="0,4,0,8" />
+                            <TextBlock Text="Estado staging" FontWeight="SemiBold" />
+                            <ComboBox SelectedValue="{Binding OnlineStoreDetailProduct.EditableStatus, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                      SelectedValuePath="Tag"
+                                      Margin="0,4,0,0">
+                                <ComboBoxItem Content="pending" Tag="pending" />
+                                <ComboBoxItem Content="validated" Tag="validated" />
+                                <ComboBoxItem Content="synced" Tag="synced" />
+                                <ComboBoxItem Content="error" Tag="error" />
+                                <ComboBoxItem Content="discontinued" Tag="discontinued" />
+                            </ComboBox>
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="Sync tienda" FontWeight="SemiBold" />
+                            <TextBox Text="{Binding OnlineStoreDetailProduct.Product.FlashlySyncStatus}" IsReadOnly="True" Margin="0,4,0,8" />
+                            <TextBlock Text="Último envío" FontWeight="SemiBold" />
+                            <TextBox Text="{Binding OnlineStoreDetailProduct.Product.FlashlySyncedAt, StringFormat={}{0:dd/MM/yyyy HH:mm:ss}}" IsReadOnly="True" Margin="0,4,0,8" />
+                            <TextBlock Text="Última lectura" FontWeight="SemiBold" />
+                            <TextBox Text="{Binding OnlineStoreDetailProduct.Product.LastSeenAt, StringFormat={}{0:dd/MM/yyyy HH:mm:ss}}" IsReadOnly="True" Margin="0,4,0,8" />
+                            <TextBlock Text="Apartado" FontWeight="SemiBold" />
+                            <CheckBox IsChecked="{Binding OnlineStoreDetailProduct.IsApartado, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                      Margin="0,8,0,8" />
+                            <TextBlock Text="Links de imágenes" FontWeight="SemiBold" />
+                            <TextBox Text="{Binding OnlineStoreDetailProduct.ImageLinksText}"
+                                     IsReadOnly="True"
+                                     Margin="0,4,0,0"
+                                     TextWrapping="Wrap"
+                                     AcceptsReturn="True"
+                                     Height="76"
+                                     VerticalScrollBarVisibility="Auto" />
+                        </StackPanel>
+                    </Grid>
+
+                    <Grid Grid.Row="2" Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="1.2*" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <Grid Grid.Column="0" Margin="0,0,8,0">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <TextBlock Text="Imagen principal URL" FontWeight="SemiBold" />
+                            <TextBox Grid.Row="1"
+                                     Text="{Binding OnlineStoreDetailProduct.PrimaryImageUrl, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                     Margin="0,6,0,0"
+                                     TextWrapping="NoWrap" />
+                            <Border Grid.Row="2"
+                                    Margin="0,6,0,0"
+                                    BorderBrush="#D1D5DB"
+                                    BorderThickness="1"
+                                    CornerRadius="6"
+                                    Background="#F9FAFB"
+                                    MinHeight="220">
+                                <Image Source="{Binding OnlineStoreDetailProduct.PrimaryImageUrl}" Stretch="Uniform" />
+                            </Border>
+                            <Button Grid.Row="3"
+                                    Content="Abrir imagen"
+                                    Command="{Binding OnlineStoreDetailProduct.OpenFileCommand}"
+                                    CommandParameter="{Binding OnlineStoreDetailProduct.PrimaryImageUrl}"
+                                    HorizontalAlignment="Left"
+                                    Margin="0,8,0,0" />
+                        </Grid>
+
+                        <Grid Grid.Column="1" Margin="8,0,0,0">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <TextBlock Text="Descripción" FontWeight="SemiBold" />
+                            <TextBox Grid.Row="1"
+                                     Text="{Binding OnlineStoreDetailProduct.EditableDescription, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                     Margin="0,6,0,0"
+                                     TextWrapping="Wrap"
+                                     AcceptsReturn="True"
+                                     VerticalScrollBarVisibility="Auto" />
+                        </Grid>
+
+                        <Grid Grid.Column="2" Margin="8,0,0,0">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <TextBlock Text="Notas de validación" FontWeight="SemiBold" />
+                            <TextBox Grid.Row="1"
+                                     Text="{Binding OnlineStoreDetailProduct.Product.ValidationNotes, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                     Margin="0,6,0,0"
+                                     TextWrapping="Wrap"
+                                     AcceptsReturn="True"
+                                     VerticalScrollBarVisibility="Auto" />
+                        </Grid>
+                    </Grid>
+
+                    <Grid Grid.Row="3" Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <Grid Grid.Column="0" Margin="0,0,8,0">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <TextBlock Text="AI Processed JSON" FontWeight="SemiBold" />
+                            <TextBox Grid.Row="1"
+                                     Text="{Binding OnlineStoreDetailProduct.Product.AIProcessedJson, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                     Margin="0,6,0,0"
+                                     FontFamily="Consolas"
+                                     FontSize="12"
+                                     TextWrapping="NoWrap"
+                                     AcceptsReturn="True"
+                                     VerticalScrollBarVisibility="Auto"
+                                     HorizontalScrollBarVisibility="Auto" />
+                        </Grid>
+
+                        <Grid Grid.Column="1" Margin="8,0,0,0">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <TextBlock Text="Raw Data" FontWeight="SemiBold" />
+                            <TextBox Grid.Row="1"
+                                     Text="{Binding OnlineStoreDetailProduct.Product.RawData, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                     Margin="0,6,0,0"
+                                     FontFamily="Consolas"
+                                     FontSize="12"
+                                     TextWrapping="NoWrap"
+                                     AcceptsReturn="True"
+                                     VerticalScrollBarVisibility="Auto"
+                                     HorizontalScrollBarVisibility="Auto" />
+                        </Grid>
+                    </Grid>
+
+                    <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right">
+                        <Button Content="Guardar cambios"
+                                Command="{Binding SaveOnlineStoreDetailRecordCommand}"
+                                Margin="0,0,8,0" />
+                        <Button Content="Marcar como validado"
+                                Command="{Binding ValidateOnlineStoreDetailRecordCommand}"
+                                Margin="0,0,8,0"
+                                Background="#059669"
+                                BorderBrush="#047857" />
+                        <Button Content="Cerrar"
+                                Command="{Binding CloseOnlineStoreDetailDialogCommand}" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </Grid>
 
         <Grid Grid.RowSpan="4"
               Visibility="{Binding IsSendProgressVisible, Converter={StaticResource BoolToVisibility}}"

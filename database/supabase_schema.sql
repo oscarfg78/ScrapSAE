@@ -16,6 +16,8 @@ CREATE TABLE IF NOT EXISTS config_sites (
     base_url VARCHAR(500) NOT NULL,
     login_url VARCHAR(1000),
     selectors JSONB NOT NULL DEFAULT '{}',
+    secondary_selectors JSONB NOT NULL DEFAULT '{}'::jsonb,
+    strategies JSONB NOT NULL DEFAULT '[]'::jsonb,
     cron_expression VARCHAR(50),
     requires_login BOOLEAN DEFAULT FALSE,
     credentials_encrypted TEXT,
@@ -24,6 +26,10 @@ CREATE TABLE IF NOT EXISTS config_sites (
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+ALTER TABLE config_sites
+    ADD COLUMN IF NOT EXISTS secondary_selectors JSONB NOT NULL DEFAULT '{}'::jsonb,
+    ADD COLUMN IF NOT EXISTS strategies JSONB NOT NULL DEFAULT '[]'::jsonb;
 
 COMMENT ON TABLE config_sites IS 'Configuración de sitios proveedores para scraping';
 COMMENT ON COLUMN config_sites.selectors IS 'JSON con selectores CSS/XPath para extracción';
@@ -154,22 +160,27 @@ ALTER TABLE sync_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE execution_reports ENABLE ROW LEVEL SECURITY;
 
 -- Políticas para service_role (acceso completo desde el Worker)
+DROP POLICY IF EXISTS "Service role has full access to config_sites" ON config_sites;
 CREATE POLICY "Service role has full access to config_sites" 
     ON config_sites FOR ALL 
     USING (auth.role() = 'service_role');
 
+DROP POLICY IF EXISTS "Service role has full access to staging_products" ON staging_products;
 CREATE POLICY "Service role has full access to staging_products" 
     ON staging_products FOR ALL 
     USING (auth.role() = 'service_role');
 
+DROP POLICY IF EXISTS "Service role has full access to category_mapping" ON category_mapping;
 CREATE POLICY "Service role has full access to category_mapping" 
     ON category_mapping FOR ALL 
     USING (auth.role() = 'service_role');
 
+DROP POLICY IF EXISTS "Service role has full access to sync_logs" ON sync_logs;
 CREATE POLICY "Service role has full access to sync_logs" 
     ON sync_logs FOR ALL 
     USING (auth.role() = 'service_role');
 
+DROP POLICY IF EXISTS "Service role has full access to execution_reports" ON execution_reports;
 CREATE POLICY "Service role has full access to execution_reports" 
     ON execution_reports FOR ALL 
     USING (auth.role() = 'service_role');
@@ -188,10 +199,12 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Triggers para actualizar updated_at
+DROP TRIGGER IF EXISTS update_config_sites_updated_at ON config_sites;
 CREATE TRIGGER update_config_sites_updated_at
     BEFORE UPDATE ON config_sites
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_staging_products_updated_at ON staging_products;
 CREATE TRIGGER update_staging_products_updated_at
     BEFORE UPDATE ON staging_products
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

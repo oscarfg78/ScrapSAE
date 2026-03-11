@@ -262,7 +262,8 @@ public sealed class ScrapingRunner
     private async Task<SiteProfile?> GetSiteAsync(Guid siteId)
     {
         var sites = await _supabase.GetAsync<SiteProfile>($"config_sites?id=eq.{siteId}&select=*");
-        return sites.FirstOrDefault();
+        var site = sites.FirstOrDefault();
+        return site == null ? null : SiteProfileSchemaCompatibility.NormalizeFromStorage(site);
     }
 
     private async Task<StagingProduct?> GetStagingBySkuAsync(Guid siteId, string skuSource)
@@ -1153,6 +1154,18 @@ public sealed class ScrapingRunner
 
             if (selectors.CategorySearchTerms.Count == 0)
             {
+                var isSearchaniseListing =
+                    (!string.IsNullOrWhiteSpace(selectors.ProductListSelector) &&
+                     selectors.ProductListSelector.Contains("snize", StringComparison.OrdinalIgnoreCase)) ||
+                    (!string.IsNullOrWhiteSpace(selectors.CategoryLandingUrl) &&
+                     selectors.CategoryLandingUrl.Contains("search-results-page", StringComparison.OrdinalIgnoreCase)) ||
+                    site.BaseUrl.Contains("search-results-page", StringComparison.OrdinalIgnoreCase);
+
+                if (isSearchaniseListing)
+                {
+                    return site;
+                }
+
                 var terms = await LoadCategorySearchTermsAsync();
                 if (terms.Count > 0)
                 {

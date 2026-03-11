@@ -124,7 +124,9 @@ namespace ScrapSAE.Api.Services;
     public async Task<IEnumerable<SiteProfile>> GetActiveSitesAsync()
     {
         var all = await _sitesTable.GetAllAsync();
-        return all.Where(s => s.IsActive);
+        return all
+            .Select(SiteProfileSchemaCompatibility.NormalizeFromStorage)
+            .Where(s => s.IsActive);
     }
 
     private async Task SafeUpdateAsync(Guid id, StagingProduct product)

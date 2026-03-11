@@ -298,19 +298,7 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
         {
 
 
-            string selectorsJson;
-            if (site.Selectors is JsonElement jsonElement)
-            {
-                selectorsJson = jsonElement.GetRawText();
-            }
-            else if (site.Selectors is string s)
-            {
-                selectorsJson = s;
-            }
-            else
-            {
-                selectorsJson = JsonConvert.SerializeObject(site.Selectors);
-            }
+            var selectorsJson = SerializeSelectorsObject(site.Selectors);
             var selectors = JsonConvert.DeserializeObject<SiteSelectors>(selectorsJson);
             if (selectors == null)
             {
@@ -489,8 +477,48 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
                 }
             }
 
+            var isFestoName = site.Name.Contains("Festo", StringComparison.OrdinalIgnoreCase);
+            var isSearchaniseListing =
+                (!string.IsNullOrWhiteSpace(selectors.ProductListSelector) &&
+                 selectors.ProductListSelector.Contains("snize", StringComparison.OrdinalIgnoreCase)) ||
+                (!string.IsNullOrWhiteSpace(selectors.CategoryLandingUrl) &&
+                 selectors.CategoryLandingUrl.Contains("search-results-page", StringComparison.OrdinalIgnoreCase)) ||
+                site.BaseUrl.Contains("search-results-page", StringComparison.OrdinalIgnoreCase) ||
+                site.BaseUrl.Contains("idsupply.com.mx", StringComparison.OrdinalIgnoreCase);
+
+            if (isSearchaniseListing && scrapingMode == "families")
+            {
+                _logger.LogWarning("Searchanise listing detected with families mode. Overriding to traditional mode.");
+                scrapingMode = "traditional";
+                selectors.ScrapingMode = "traditional";
+            }
+
+            if (isSearchaniseListing && !string.IsNullOrWhiteSpace(selectors.CategoryLandingUrl))
+            {
+                try
+                {
+                    if (!page.Url.Contains("search-results-page", StringComparison.OrdinalIgnoreCase))
+                    {
+                        _logger.LogInformation("Searchanise listing detected. Navigating to CategoryLandingUrl: {Url}", selectors.CategoryLandingUrl);
+                        await _scrapeControl.WaitIfPausedAsync(site.Id, cancellationToken);
+                        await page.GotoAsync(selectors.CategoryLandingUrl, new PageGotoOptions
+                        {
+                            WaitUntil = WaitUntilState.DOMContentLoaded,
+                            Timeout = 90000
+                        });
+                        await AcceptCookiesAsync(page, cancellationToken);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Could not navigate to CategoryLandingUrl for Searchanise listing");
+                }
+            }
+
+            var shouldUseFestoHybrid = isFestoName && !isSearchaniseListing;
+
             // --- GANCHO ESPECÍFICO PARA FESTO (MODO HYBRID PROCESS MANAGER) ---
-            if (site.Name.Contains("Festo", StringComparison.OrdinalIgnoreCase))
+            if (shouldUseFestoHybrid)
             {
                 _logger.LogInformation("Activando ScrapingProcessManager (Estrategia Híbrida) para Festo...");
                 
@@ -551,6 +579,10 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
                     return new List<ScrapedProduct>();
                 }
             }
+            else if (isFestoName && isSearchaniseListing)
+            {
+                _logger.LogInformation("Festo distributor with Searchanise listing detected. Skipping Festo Hybrid strategy and using traditional flow.");
+            }
             // --- FIN GANCHO FESTO ---
 
             // Detectar el modo de scraping y usar el método apropiado
@@ -581,20 +613,56 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
             }
             else
             {
-                // Modo tradicional: Búsqueda por categorías
-                searchProducts = await TryScrapeCategorySearchAsync(page, site, selectors, cancellationToken);
-                if (searchProducts.Count > 0)
+                if (isSearchaniseListing)
                 {
-                    await LogStepAsync(site.Id, "success", "Scraping por busqueda de categorias completado.", new { count = searchProducts.Count });
-                    return searchProducts;
+                    // Searchanise ya tiene listado directo por URL/filters.
+                    // Evitar category search por términos (q=...) porque puede llevar a "dead ends".
+                    searchProducts = new List<ScrapedProduct>();
+                    await LogStepAsync(site.Id, "info", "Searchanise detectado: omitiendo búsqueda por términos de categoría.", null);
+                }
+                else
+                {
+                    // Modo tradicional: Búsqueda por categorías
+                    searchProducts = await TryScrapeCategorySearchAsync(page, site, selectors, cancellationToken);
+                    if (searchProducts.Count > 0)
+                    {
+                        await LogStepAsync(site.Id, "success", "Scraping por busqueda de categorias completado.", new { count = searchProducts.Count });
+                        return searchProducts;
+                    }
                 }
             }
 
-            var categoryProducts = await TryScrapeCategoriesAsync(page, site, selectors, cancellationToken);
-            if (categoryProducts.Count > 0)
+            if (!isSearchaniseListing)
             {
-                await LogStepAsync(site.Id, "success", "Scraping por navegacion de categorias completado.", new { count = categoryProducts.Count });
-                return categoryProducts;
+                var categoryProducts = await TryScrapeCategoriesAsync(page, site, selectors, cancellationToken);
+                if (categoryProducts.Count > 0)
+                {
+                    await LogStepAsync(site.Id, "success", "Scraping por navegacion de categorias completado.", new { count = categoryProducts.Count });
+                    return categoryProducts;
+                }
+            }
+            else
+            {
+                await LogStepAsync(site.Id, "info", "Searchanise detectado: omitiendo navegación jerárquica de categorías.", null);
+            }
+
+            if (isSearchaniseListing)
+            {
+                var maxProducts = site.MaxProductsPerScrape > 0 ? site.MaxProductsPerScrape : int.MaxValue;
+                var searchaniseProducts = await TryScrapeSearchaniseListingAsync(
+                    page,
+                    site,
+                    selectors,
+                    maxProducts,
+                    cancellationToken);
+
+                if (searchaniseProducts.Count > 0)
+                {
+                    await LogStepAsync(site.Id, "success", "Scraping Searchanise completado.", new { count = searchaniseProducts.Count });
+                    return searchaniseProducts;
+                }
+
+                await LogStepAsync(site.Id, "warn", "Searchanise fast path no obtuvo productos. Aplicando fallback tradicional.", null);
             }
 
             int currentPage = 1;
@@ -1114,7 +1182,13 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
             var imageEl = await element.QuerySelectorAsync(selectors.ImageSelector);
             if (imageEl != null)
             {
-                product.ImageUrl = await imageEl.GetAttributeAsync("src");
+                var imageUrl = await imageEl.GetAttributeAsync("src")
+                               ?? await imageEl.GetAttributeAsync("data-src")
+                               ?? await imageEl.GetAttributeAsync("data-lazy-src");
+                if (!string.IsNullOrWhiteSpace(imageUrl))
+                {
+                    product.ImageUrl = NormalizeHref(page.Url, imageUrl);
+                }
             }
         }
 
@@ -1123,6 +1197,29 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
         {
             var descEl = await element.QuerySelectorAsync(selectors.DescriptionSelector);
             product.Description = descEl != null ? await descEl.InnerTextAsync() : null;
+        }
+
+        // Extract source URL (detail link) for dedupe/persistence.
+        var href = await element.GetAttributeAsync("href");
+        if (string.IsNullOrWhiteSpace(href) && !string.IsNullOrWhiteSpace(selectors.ProductLinkSelector))
+        {
+            var linkEl = await element.QuerySelectorAsync(selectors.ProductLinkSelector);
+            if (linkEl != null)
+            {
+                href = await linkEl.GetAttributeAsync("href");
+            }
+        }
+        if (string.IsNullOrWhiteSpace(href))
+        {
+            var anchorEl = await element.QuerySelectorAsync("a[href]");
+            if (anchorEl != null)
+            {
+                href = await anchorEl.GetAttributeAsync("href");
+            }
+        }
+        if (!string.IsNullOrWhiteSpace(href))
+        {
+            product.SourceUrl = NormalizeHref(page.Url, href);
         }
 
         // Get raw HTML
@@ -1207,6 +1304,236 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
             previousHeight = currentHeight;
             scrollCount++;
         }
+    }
+
+    private async Task<List<ScrapedProduct>> TryScrapeSearchaniseListingAsync(
+        IPage page,
+        SiteProfile site,
+        SiteSelectors selectors,
+        int maxProducts,
+        CancellationToken cancellationToken)
+    {
+        var products = new List<ScrapedProduct>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        try
+        {
+            await _scrapeControl.WaitIfPausedAsync(site.Id, cancellationToken);
+            await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+            await page.WaitForSelectorAsync("#snize_results, li.snize-product", new() { Timeout = 30000 });
+
+            var initialCount = await page.Locator("li.snize-product").CountAsync();
+            await LogStepAsync(site.Id, "info", "Searchanise listado detectado.", new { count = initialCount, url = page.Url });
+
+            var maxCycles = selectors.MaxPages > 0 ? Math.Min(selectors.MaxPages + 2, 25) : 10;
+            var finalCount = await ExpandSearchaniseResultsAsync(page, maxCycles, cancellationToken);
+            await LogStepAsync(site.Id, "info", "Searchanise expansión finalizada.", new { count = finalCount, cycles = maxCycles });
+
+            var cards = await page.EvaluateAsync<SearchaniseCardDto[]>(
+                """
+                () => {
+                    const normalize = (value) => (value || '').replace(/\s+/g, ' ').trim();
+                    const cards = Array.from(document.querySelectorAll('#snize_results li.snize-product, li.snize-product'));
+                    return cards.map((card) => {
+                        const link = card.querySelector('a.snize-view-link, a[href]');
+                        const image = card.querySelector('img');
+                        const title = card.querySelector('.snize-title');
+                        const description = card.querySelector('.snize-description');
+                        const sku = card.querySelector('.snize-sku');
+                        const price = card.querySelector('.snize-price, .snize-price-list .money');
+
+                        return {
+                            Title: normalize(title?.textContent),
+                            Description: normalize(description?.textContent),
+                            Sku: normalize(sku?.textContent),
+                            PriceText: normalize(price?.textContent),
+                            Href: link?.getAttribute('href') || '',
+                            ImageUrl: image?.getAttribute('src') || image?.getAttribute('data-src') || ''
+                        };
+                    });
+                }
+                """);
+
+            if (cards == null || cards.Length == 0)
+            {
+                return products;
+            }
+
+            foreach (var card in cards)
+            {
+                if (products.Count >= maxProducts)
+                {
+                    break;
+                }
+
+                var sku = card.Sku?.Trim();
+                var title = card.Title?.Trim();
+                var href = string.IsNullOrWhiteSpace(card.Href) ? null : NormalizeHref(page.Url, card.Href);
+
+                var dedupeKey = !string.IsNullOrWhiteSpace(sku)
+                    ? $"sku::{sku}"
+                    : !string.IsNullOrWhiteSpace(href)
+                        ? $"url::{href}"
+                        : !string.IsNullOrWhiteSpace(title)
+                            ? $"title::{title}"
+                            : null;
+
+                if (!string.IsNullOrWhiteSpace(dedupeKey) && !seen.Add(dedupeKey))
+                {
+                    continue;
+                }
+
+                var imageUrl = string.IsNullOrWhiteSpace(card.ImageUrl)
+                    ? null
+                    : NormalizeHref(page.Url, card.ImageUrl);
+
+                var product = new ScrapedProduct
+                {
+                    Title = title,
+                    Description = card.Description?.Trim(),
+                    SkuSource = sku,
+                    Price = ParsePrice(card.PriceText ?? string.Empty),
+                    ImageUrl = imageUrl,
+                    SourceUrl = href,
+                    ScrapedAt = DateTime.UtcNow
+                };
+
+                if (string.IsNullOrWhiteSpace(product.SkuSource) && !string.IsNullOrWhiteSpace(product.SourceUrl))
+                {
+                    try
+                    {
+                        if (Uri.TryCreate(product.SourceUrl, UriKind.Absolute, out var uri))
+                        {
+                            var slug = uri.Segments.LastOrDefault()?.Trim('/');
+                            if (!string.IsNullOrWhiteSpace(slug))
+                            {
+                                product.SkuSource = slug;
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        // Ignore URL parsing failures.
+                    }
+                }
+
+                if (string.IsNullOrWhiteSpace(product.Title) && string.IsNullOrWhiteSpace(product.SkuSource))
+                {
+                    continue;
+                }
+
+                products.Add(product);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Searchanise fast path failed for site {SiteName}", site.Name);
+        }
+
+        return products;
+    }
+
+    private async Task<int> ExpandSearchaniseResultsAsync(IPage page, int maxCycles, CancellationToken cancellationToken)
+    {
+        var stableRounds = 0;
+        var previousCount = -1;
+
+        for (var cycle = 1; cycle <= maxCycles && !cancellationToken.IsCancellationRequested; cycle++)
+        {
+            var before = await page.Locator("li.snize-product").CountAsync();
+            if (before == previousCount)
+            {
+                stableRounds++;
+            }
+            else
+            {
+                stableRounds = 0;
+            }
+
+            previousCount = before;
+            if (stableRounds >= 2)
+            {
+                break;
+            }
+
+            await page.EvaluateAsync("window.scrollTo(0, document.body.scrollHeight)");
+            await Task.Delay(350, cancellationToken);
+
+            var loadMore = page.Locator("a.snize-pagination-load-more, button.snize-pagination-load-more");
+            if (await loadMore.CountAsync() > 0 && await loadMore.First.IsVisibleAsync())
+            {
+                try
+                {
+                    await loadMore.First.ClickAsync(new LocatorClickOptions { Timeout = 5000 });
+                }
+                catch
+                {
+                    // Ignore and keep fallback scroll cycle.
+                }
+            }
+
+            await Task.Delay(900, cancellationToken);
+            var after = await page.Locator("li.snize-product").CountAsync();
+            if (after <= before)
+            {
+                await page.EvaluateAsync("window.scrollBy(0, -250)");
+                await Task.Delay(250, cancellationToken);
+            }
+        }
+
+        return await page.Locator("li.snize-product").CountAsync();
+    }
+
+    private static string SerializeSelectorsObject(object? rawSelectors)
+    {
+        if (rawSelectors == null)
+        {
+            return "{}";
+        }
+
+        try
+        {
+            if (rawSelectors is string json)
+            {
+                return string.IsNullOrWhiteSpace(json) ? "{}" : json;
+            }
+
+            if (rawSelectors is JsonElement jsonElement)
+            {
+                return jsonElement.GetRawText();
+            }
+
+            if (rawSelectors is System.Text.Json.Nodes.JsonNode jsonNode)
+            {
+                return jsonNode.ToJsonString();
+            }
+
+            var serialized = System.Text.Json.JsonSerializer.Serialize(rawSelectors);
+            return string.IsNullOrWhiteSpace(serialized) || string.Equals(serialized, "null", StringComparison.OrdinalIgnoreCase)
+                ? "{}"
+                : serialized;
+        }
+        catch
+        {
+            try
+            {
+                return JsonConvert.SerializeObject(rawSelectors);
+            }
+            catch
+            {
+                return "{}";
+            }
+        }
+    }
+
+    private sealed class SearchaniseCardDto
+    {
+        public string? Title { get; set; }
+        public string? Description { get; set; }
+        public string? Sku { get; set; }
+        public string? PriceText { get; set; }
+        public string? Href { get; set; }
+        public string? ImageUrl { get; set; }
     }
 
     private static decimal? ParsePrice(string priceText)
@@ -4219,13 +4546,18 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
 
         selectorList.AddRange(new[]
         {
+            "#snize_results li.snize-product",
+            "#snize-search-results-grid-mode li.snize-product",
+            "li.snize-product",
+            "a.snize-view-link",
             ".result-list-item",
             ".product-list-item",
             ".product-item",
             ".tile",
             ".teaser",
             "article",
-            "a[href*='/p/']"
+            "a[href*='/p/']",
+            "a[href*='/products/']"
         });
 
         foreach (var selector in selectorList)

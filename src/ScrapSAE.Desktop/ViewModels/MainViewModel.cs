@@ -55,7 +55,7 @@ public sealed class MainViewModel : ViewModelBase
     private DiagnosticsResult? _diagnosticsResult;
     private bool _hasSites;
     private bool _manualLoginEnabled;
-    private bool _headlessEnabled = true;
+    private bool _headlessEnabled = false;
     private bool _isScraping;
     private string _scrapeStatusText = "Idle";
     private int _selectedTabIndex;
@@ -79,6 +79,9 @@ public sealed class MainViewModel : ViewModelBase
     private double _sendProgressValue;
     private double _sendProgressMaximum = 1;
     private bool _showApartadosOnly;
+    private string _onlineStoreViewFilter = "Validados";
+    private bool _isOnlineStoreDetailVisible;
+    private StagingProductUi? _onlineStoreDetailProduct;
     private bool _rescrapeManualLoginEnabled;
     private bool _showRescrapeConfirmLoginButton;
     private bool _showRescrapeControlButtons;
@@ -144,9 +147,21 @@ public sealed class MainViewModel : ViewModelBase
         SendSelectedToOnlineStoreCommand = new AsyncCommand(() => SafeExecuteAsync(SendSelectedToOnlineStoreAsync, "Enviar seleccionados a tienda en línea"));
         RescrapeSelectedOnlineStoreCommand = new AsyncCommand(() => SafeExecuteAsync(RescrapeSelectedOnlineStoreAsync, "Rescrapear seleccionados de tienda en línea"));
         SaveSelectedOnlineStoreRecordCommand = new AsyncCommand(() => SafeExecuteAsync(SaveSelectedOnlineStoreRecordAsync, "Guardar cambios en registro"));
+        SaveOnlineStoreDetailRecordCommand = new AsyncCommand(
+            () => SafeExecuteAsync(SaveOnlineStoreDetailRecordAsync, "Guardar cambios desde detalle"),
+            () => OnlineStoreDetailProduct != null);
         DeleteSelectedOnlineStoreRecordsCommand = new AsyncCommand(() => SafeExecuteAsync(DeleteSelectedOnlineStoreRecordsAsync, "Eliminar registros seleccionados"));
+        ValidateSelectedOnlineStoreRecordsCommand = new AsyncCommand(
+            () => SafeExecuteAsync(ValidateSelectedOnlineStoreRecordsAsync, "Validar seleccionados de tienda en línea"),
+            () => OnlineStoreProducts.Any(p => p.IsSelected));
+        ValidateOnlineStoreDetailRecordCommand = new AsyncCommand(
+            () => SafeExecuteAsync(ValidateOnlineStoreDetailRecordAsync, "Validar registro desde detalle"),
+            () => OnlineStoreDetailProduct != null &&
+                  !string.Equals(OnlineStoreDetailProduct.Status, "validated", StringComparison.OrdinalIgnoreCase));
         MarkSelectedAsApartadoCommand = new AsyncCommand(() => SafeExecuteAsync(MarkSelectedAsApartadoAsync, "Marcar apartados"));
         UnmarkSelectedAsApartadoCommand = new AsyncCommand(() => SafeExecuteAsync(UnmarkSelectedAsApartadoAsync, "Quitar apartado"));
+        OpenOnlineStoreDetailDialogCommand = new RelayCommand(OpenOnlineStoreDetailDialog, () => SelectedStagingProduct != null);
+        CloseOnlineStoreDetailDialogCommand = new RelayCommand(CloseOnlineStoreDetailDialog);
 
         LoadSettingsCommand = new AsyncCommand(() => SafeExecuteAsync(LoadSettingsAsync, "Cargar configuración"));
         SaveSettingsCommand = new AsyncCommand(() => SafeExecuteAsync(SaveSettingsAsync, "Guardar configuración"));
@@ -340,7 +355,21 @@ public sealed class MainViewModel : ViewModelBase
     public int OnlineStorePendingCount => StagingProducts.Count(IsPendingForOnlineStore);
     public int OnlineStoreApartadosCount => StagingProducts.Count(p => p.IsApartado);
     public int OnlineStoreSelectedCount => OnlineStoreProducts.Count(p => p.IsSelected);
+    public int OnlineStoreVisibleCount => OnlineStoreProducts.Count();
     public IEnumerable<StagingProductUi> OnlineStoreProducts => StagingProducts.Where(FilterOnlineStoreProducts);
+    public IReadOnlyList<string> OnlineStoreViewFilterOptions { get; } = new[] { "Todos", "Validados", "Pendientes" };
+
+    public string OnlineStoreViewFilter
+    {
+        get => _onlineStoreViewFilter;
+        set
+        {
+            if (SetField(ref _onlineStoreViewFilter, value))
+            {
+                RaiseOnlineStoreViewChanged();
+            }
+        }
+    }
 
     public bool ShowApartadosOnly
     {
@@ -349,8 +378,7 @@ public sealed class MainViewModel : ViewModelBase
         {
             if (SetField(ref _showApartadosOnly, value))
             {
-                OnPropertyChanged(nameof(OnlineStoreProducts));
-                OnPropertyChanged(nameof(OnlineStoreSelectedCount));
+                RaiseOnlineStoreViewChanged();
             }
         }
     }
@@ -384,6 +412,25 @@ public sealed class MainViewModel : ViewModelBase
         _currentRescrapeJobId.HasValue &&
         ShowRescrapeControlButtons;
 
+    public bool IsOnlineStoreDetailVisible
+    {
+        get => _isOnlineStoreDetailVisible;
+        set => SetField(ref _isOnlineStoreDetailVisible, value);
+    }
+
+    public StagingProductUi? OnlineStoreDetailProduct
+    {
+        get => _onlineStoreDetailProduct;
+        set
+        {
+            if (SetField(ref _onlineStoreDetailProduct, value))
+            {
+                ValidateOnlineStoreDetailRecordCommand.RaiseCanExecuteChanged();
+                SaveOnlineStoreDetailRecordCommand.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
     private bool FilterOnlineStoreProducts(StagingProductUi p)
     {
         if (ShowApartadosOnly)
@@ -391,13 +438,22 @@ public sealed class MainViewModel : ViewModelBase
             return p.IsApartado;
         }
 
-        return IsPendingForOnlineStore(p);
+        if (p.IsApartado)
+        {
+            return false;
+        }
+
+        return OnlineStoreViewFilter switch
+        {
+            "Todos" => true,
+            "Pendientes" => string.Equals(p.Status, "pending", StringComparison.OrdinalIgnoreCase),
+            _ => string.Equals(p.Status, "validated", StringComparison.OrdinalIgnoreCase)
+        };
     }
 
     private static bool IsPendingForOnlineStore(StagingProductUi p)
     {
-        return string.Equals(p.Status, "validated", StringComparison.OrdinalIgnoreCase)
-            && !p.IsApartado
+        return !p.IsApartado
             && !string.Equals(p.FlashlySyncStatus, "synced", StringComparison.OrdinalIgnoreCase);
     }
 
@@ -506,6 +562,7 @@ public sealed class MainViewModel : ViewModelBase
             if (SetField(ref _selectedStagingProduct, value))
             {
                 ((AsyncCommand)SendSelectedToSaeCommand).RaiseCanExecuteChanged();
+                OpenOnlineStoreDetailDialogCommand.RaiseCanExecuteChanged();
             }
         }
     }
@@ -848,7 +905,10 @@ public sealed class MainViewModel : ViewModelBase
     public AsyncCommand SendSelectedToOnlineStoreCommand { get; }
     public AsyncCommand RescrapeSelectedOnlineStoreCommand { get; }
     public AsyncCommand SaveSelectedOnlineStoreRecordCommand { get; }
+    public AsyncCommand SaveOnlineStoreDetailRecordCommand { get; }
     public AsyncCommand DeleteSelectedOnlineStoreRecordsCommand { get; }
+    public AsyncCommand ValidateSelectedOnlineStoreRecordsCommand { get; }
+    public AsyncCommand ValidateOnlineStoreDetailRecordCommand { get; }
     public AsyncCommand MarkSelectedAsApartadoCommand { get; }
     public AsyncCommand UnmarkSelectedAsApartadoCommand { get; }
     public AsyncCommand LoadSettingsCommand { get; }
@@ -874,6 +934,8 @@ public sealed class MainViewModel : ViewModelBase
     public RelayCommand ShowWindowCommand { get; }
     public RelayCommand ExitApplicationCommand { get; }
     public RelayCommand<string> NavigateCommand { get; }
+    public RelayCommand OpenOnlineStoreDetailDialogCommand { get; }
+    public RelayCommand CloseOnlineStoreDetailDialogCommand { get; }
     public RelayCommand CloseSendProgressCommand { get; }
     public RelayCommand ShowSendProgressCommand { get; }
     public RelayCommand CopySendProgressCommand { get; }
@@ -906,10 +968,7 @@ public sealed class MainViewModel : ViewModelBase
 
             ResetStagingProducts(await _apiClient.GetStagingProductsAsync());
             OnPropertyChanged(nameof(SelectedForSaeCount));
-            OnPropertyChanged(nameof(OnlineStorePendingCount));
-            OnPropertyChanged(nameof(OnlineStoreApartadosCount));
-            OnPropertyChanged(nameof(OnlineStoreSelectedCount));
-            OnPropertyChanged(nameof(OnlineStoreProducts));
+            RaiseOnlineStoreDataChanged();
             SendCheckedToSaeCommand.RaiseCanExecuteChanged();
 
             CategoryMappings.Clear();
@@ -1301,10 +1360,7 @@ public sealed class MainViewModel : ViewModelBase
             StagingProducts.Add(uiModel);
             SelectedStagingProduct = uiModel;
             OnPropertyChanged(nameof(SelectedForSaeCount));
-            OnPropertyChanged(nameof(OnlineStorePendingCount));
-            OnPropertyChanged(nameof(OnlineStoreApartadosCount));
-            OnPropertyChanged(nameof(OnlineStoreSelectedCount));
-            OnPropertyChanged(nameof(OnlineStoreProducts));
+            RaiseOnlineStoreDataChanged();
             SendCheckedToSaeCommand.RaiseCanExecuteChanged();
         }
     }
@@ -1335,10 +1391,7 @@ public sealed class MainViewModel : ViewModelBase
         StagingProducts.Remove(SelectedStagingProduct);
         SelectedStagingProduct = null;
         OnPropertyChanged(nameof(SelectedForSaeCount));
-        OnPropertyChanged(nameof(OnlineStorePendingCount));
-        OnPropertyChanged(nameof(OnlineStoreApartadosCount));
-        OnPropertyChanged(nameof(OnlineStoreSelectedCount));
-        OnPropertyChanged(nameof(OnlineStoreProducts));
+        RaiseOnlineStoreDataChanged();
         SendCheckedToSaeCommand.RaiseCanExecuteChanged();
     }
 
@@ -1730,15 +1783,20 @@ public sealed class MainViewModel : ViewModelBase
 
     private async Task SendPendingToOnlineStoreAsync()
     {
-        var pending = OnlineStoreProducts
+        var pending = StagingProducts
             .Where(p => !p.IsApartado)
-            .Where(p => string.Equals(p.Status, "validated", StringComparison.OrdinalIgnoreCase))
             .Where(p => !string.Equals(p.FlashlySyncStatus, "synced", StringComparison.OrdinalIgnoreCase))
             .ToList();
 
         if (pending.Count == 0)
         {
             StatusMessage = "No hay productos pendientes por enviar a tienda en línea.";
+            return;
+        }
+
+        if (!ConfirmOnlineStoreSend(pending, "pendientes"))
+        {
+            StatusMessage = "Envío a tienda en línea cancelado por el usuario.";
             return;
         }
 
@@ -1754,7 +1812,40 @@ public sealed class MainViewModel : ViewModelBase
             return;
         }
 
+        if (!ConfirmOnlineStoreSend(selected, "seleccionados"))
+        {
+            StatusMessage = "Envío a tienda en línea cancelado por el usuario.";
+            return;
+        }
+
         await SendOnlineStoreProductsWithProgressAsync(selected, "Envio de seleccionados a tienda en linea");
+    }
+
+    private static bool ConfirmOnlineStoreSend(IReadOnlyCollection<StagingProductUi> products, string sourceLabel)
+    {
+        var nonValidated = products.Count(p => !string.Equals(p.Status, "validated", StringComparison.OrdinalIgnoreCase));
+        var validationWarning = nonValidated > 0
+            ? $"\nIncluye {nonValidated} registro(s) no validado(s)."
+            : "\nTodos los registros están validados.";
+
+        var firstConfirmation = MessageBox.Show(
+            $"Se enviarán {products.Count} registro(s) a tienda en línea ({sourceLabel}).{validationWarning}\n\n¿Deseas continuar?",
+            "Confirmar envío a tienda en línea",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning);
+
+        if (firstConfirmation != MessageBoxResult.Yes)
+        {
+            return false;
+        }
+
+        var secondConfirmation = MessageBox.Show(
+            "Confirmación final: este envío puede crear/actualizar productos en la tienda en línea.\n\n¿Confirmas ejecutar el envío?",
+            "Confirmación final",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning);
+
+        return secondConfirmation == MessageBoxResult.Yes;
     }
 
     private async Task RescrapeSelectedOnlineStoreAsync()
@@ -2078,6 +2169,128 @@ public sealed class MainViewModel : ViewModelBase
         var updated = await _apiClient.UpdateStagingProductAsync(SelectedStagingProduct.Product.Id, SelectedStagingProduct.Product);
         StatusMessage = updated != null ? "Registro actualizado." : "No se pudo actualizar el registro.";
         await RefreshStagingProductsAsync();
+    }
+
+    private async Task SaveOnlineStoreDetailRecordAsync()
+    {
+        if (OnlineStoreDetailProduct == null)
+        {
+            StatusMessage = "No hay registro abierto en el detalle.";
+            return;
+        }
+
+        var productId = OnlineStoreDetailProduct.Product.Id;
+        var updated = await _apiClient.UpdateStagingProductAsync(productId, OnlineStoreDetailProduct.Product);
+        if (updated == null)
+        {
+            StatusMessage = "No se pudo guardar el registro desde detalle.";
+            return;
+        }
+
+        await RefreshStagingProductsAsync();
+        var refreshed = StagingProducts.FirstOrDefault(p => p.Product.Id == productId);
+        SelectedStagingProduct = refreshed;
+        OnlineStoreDetailProduct = refreshed;
+        StatusMessage = "Registro guardado desde detalle.";
+    }
+
+    private void OpenOnlineStoreDetailDialog()
+    {
+        if (SelectedStagingProduct == null)
+        {
+            StatusMessage = "Selecciona un registro para ver el detalle.";
+            return;
+        }
+
+        OnlineStoreDetailProduct = SelectedStagingProduct;
+        IsOnlineStoreDetailVisible = true;
+    }
+
+    private void CloseOnlineStoreDetailDialog()
+    {
+        IsOnlineStoreDetailVisible = false;
+        OnlineStoreDetailProduct = null;
+    }
+
+    private async Task ValidateOnlineStoreDetailRecordAsync()
+    {
+        if (OnlineStoreDetailProduct == null)
+        {
+            StatusMessage = "No hay registro abierto en el detalle.";
+            return;
+        }
+
+        var productId = OnlineStoreDetailProduct.Product.Id;
+        await ValidateProductsAsValidatedAsync(new List<StagingProductUi> { OnlineStoreDetailProduct }, "desde detalle");
+
+        var refreshed = StagingProducts.FirstOrDefault(p => p.Product.Id == productId);
+        SelectedStagingProduct = refreshed;
+        OnlineStoreDetailProduct = refreshed;
+
+        if (refreshed == null)
+        {
+            IsOnlineStoreDetailVisible = false;
+        }
+    }
+
+    private async Task ValidateSelectedOnlineStoreRecordsAsync()
+    {
+        var selected = OnlineStoreProducts.Where(p => p.IsSelected).ToList();
+        if (selected.Count == 0)
+        {
+            StatusMessage = "No hay registros seleccionados para validar.";
+            return;
+        }
+
+        await ValidateProductsAsValidatedAsync(selected, "seleccionados");
+    }
+
+    private async Task ValidateProductsAsValidatedAsync(List<StagingProductUi> products, string sourceLabel)
+    {
+        var toValidate = products
+            .GroupBy(p => p.Product.Id)
+            .Select(g => g.First())
+            .Where(p => !string.Equals(p.Product.Status, "validated", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (toValidate.Count == 0)
+        {
+            StatusMessage = "Todos los registros seleccionados ya están validados.";
+            return;
+        }
+
+        var confirmation = MessageBox.Show(
+            $"Se marcarán como validados {toValidate.Count} registro(s) ({sourceLabel}).\n\n¿Deseas continuar?",
+            "Validar registros",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Question);
+
+        if (confirmation != MessageBoxResult.Yes)
+        {
+            StatusMessage = "Validación cancelada por el usuario.";
+            return;
+        }
+
+        var validated = 0;
+        var failed = 0;
+        foreach (var item in toValidate)
+        {
+            item.Product.Status = "validated";
+            var updated = await _apiClient.UpdateStagingProductAsync(item.Product.Id, item.Product);
+            if (updated != null)
+            {
+                validated++;
+            }
+            else
+            {
+                failed++;
+            }
+        }
+
+        await RefreshStagingProductsAsync();
+        StatusMessage = failed == 0
+            ? $"Registros validados: {validated}."
+            : $"Registros validados: {validated}. Fallidos: {failed}.";
     }
 
     private async Task DeleteSelectedOnlineStoreRecordsAsync()
@@ -2590,10 +2803,7 @@ public sealed class MainViewModel : ViewModelBase
         {
             ResetStagingProducts(products);
             OnPropertyChanged(nameof(SelectedForSaeCount));
-            OnPropertyChanged(nameof(OnlineStorePendingCount));
-            OnPropertyChanged(nameof(OnlineStoreApartadosCount));
-            OnPropertyChanged(nameof(OnlineStoreSelectedCount));
-            OnPropertyChanged(nameof(OnlineStoreProducts));
+            RaiseOnlineStoreDataChanged();
             SendCheckedToSaeCommand.RaiseCanExecuteChanged();
         });
     }
@@ -2611,19 +2821,22 @@ public sealed class MainViewModel : ViewModelBase
         {
             OnPropertyChanged(nameof(SelectedForSaeCount));
             OnPropertyChanged(nameof(OnlineStoreSelectedCount));
+            OnPropertyChanged(nameof(OnlineStoreVisibleCount));
             SendCheckedToSaeCommand.RaiseCanExecuteChanged();
+            ValidateSelectedOnlineStoreRecordsCommand.RaiseCanExecuteChanged();
         }
 
         if (e.PropertyName == nameof(StagingProductUi.IsApartado))
         {
-            OnPropertyChanged(nameof(OnlineStorePendingCount));
-            OnPropertyChanged(nameof(OnlineStoreApartadosCount));
-            OnPropertyChanged(nameof(OnlineStoreProducts));
+            RaiseOnlineStoreDataChanged();
         }
     }
 
     private void ResetStagingProducts(IEnumerable<StagingProduct> products)
     {
+        var selectedId = SelectedStagingProduct?.Product.Id;
+        var detailId = OnlineStoreDetailProduct?.Product.Id;
+
         foreach (var existing in StagingProducts)
         {
             existing.PropertyChanged -= OnStagingProductPropertyChanged;
@@ -2635,10 +2848,39 @@ public sealed class MainViewModel : ViewModelBase
             StagingProducts.Add(CreateStagingProductUi(item));
         }
 
+        SelectedStagingProduct = selectedId.HasValue
+            ? StagingProducts.FirstOrDefault(p => p.Product.Id == selectedId.Value)
+            : null;
+
+        if (detailId.HasValue)
+        {
+            OnlineStoreDetailProduct = StagingProducts.FirstOrDefault(p => p.Product.Id == detailId.Value);
+            if (IsOnlineStoreDetailVisible && OnlineStoreDetailProduct == null)
+            {
+                IsOnlineStoreDetailVisible = false;
+            }
+        }
+        else
+        {
+            OnlineStoreDetailProduct = null;
+        }
+
+        RaiseOnlineStoreDataChanged();
+    }
+
+    private void RaiseOnlineStoreDataChanged()
+    {
         OnPropertyChanged(nameof(OnlineStorePendingCount));
         OnPropertyChanged(nameof(OnlineStoreApartadosCount));
-        OnPropertyChanged(nameof(OnlineStoreSelectedCount));
+        RaiseOnlineStoreViewChanged();
+    }
+
+    private void RaiseOnlineStoreViewChanged()
+    {
         OnPropertyChanged(nameof(OnlineStoreProducts));
+        OnPropertyChanged(nameof(OnlineStoreSelectedCount));
+        OnPropertyChanged(nameof(OnlineStoreVisibleCount));
+        ValidateSelectedOnlineStoreRecordsCommand.RaiseCanExecuteChanged();
     }
 
     private async Task RefreshLiveLogsAsync()

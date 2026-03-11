@@ -103,6 +103,27 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+app.Use(async (context, next) =>
+{
+    try
+    {
+        await next();
+    }
+    catch (SupabaseConfigurationException ex)
+    {
+        Log.Warning(ex, "Supabase no configurado correctamente para la solicitud {Path}", context.Request.Path);
+        if (!context.Response.HasStarted)
+        {
+            context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+            await context.Response.WriteAsJsonAsync(new
+            {
+                code = "supabase_not_configured",
+                message = ex.Message
+            });
+        }
+    }
+});
+
 app.MapGet("/api/health", () => Results.Ok(new { status = "ok" }));
 app.MapGet("/api/settings", (SettingsStore store) =>
 {
@@ -140,18 +161,10 @@ app.MapGet("/api/sync-logs/screenshot/{fileName}", (string fileName) =>
     return Results.File(path, "image/png");
 });
 
-MapCrud(app, "/api/sites", "Site", 
+MapSiteCrud(
+    app,
     app.Services.GetRequiredService<SupabaseTableService<SiteProfile>>(),
-    entity =>
-    {
-        if (entity.Id == Guid.Empty)
-        {
-            entity.Id = Guid.NewGuid();
-        }
-        entity.CreatedAt = DateTime.UtcNow;
-        entity.UpdatedAt = DateTime.UtcNow;
-    },
-    entity => entity.UpdatedAt = DateTime.UtcNow);
+    app.Services.GetRequiredService<ISupabaseRestClient>());
 
 MapCrud(app, "/api/staging-products", "StagingProduct",
     app.Services.GetRequiredService<SupabaseTableService<StagingProduct>>(),
@@ -587,7 +600,6 @@ app.MapPost("/api/online-store/send-pending", async (
 
     var products = await stagingService.GetAllAsync();
     var toSend = products
-        .Where(p => string.Equals(p.Status, "validated", StringComparison.OrdinalIgnoreCase))
         .Where(p => !p.IsApartado)
         .Where(p => !string.Equals(p.FlashlySyncStatus, "synced", StringComparison.OrdinalIgnoreCase))
         .Where(p => !string.IsNullOrWhiteSpace(p.SkuSource))
@@ -746,11 +758,6 @@ app.MapPost("/api/online-store/send/{productId:guid}", async (
         return Results.BadRequest(new { message = "Configuracion incompleta de tienda en linea (Base URL / API Key)." });
     }
 
-    if (!string.Equals(product.Status, "validated", StringComparison.OrdinalIgnoreCase))
-    {
-        return Results.BadRequest(new { message = "Solo se pueden enviar productos con estado validated." });
-    }
-
     if (string.IsNullOrWhiteSpace(product.SkuSource))
     {
         return Results.BadRequest(new { message = "SKU fuente vacio." });
@@ -833,6 +840,61 @@ app.MapPost("/api/online-store/send/{productId:guid}", async (
 
 app.Run();
 Log.CloseAndFlush();
+
+static void MapSiteCrud(
+    WebApplication app,
+    SupabaseTableService<SiteProfile> service,
+    ISupabaseRestClient supabase)
+{
+    var group = app.MapGroup("/api/sites").WithTags("Site");
+
+    group.MapGet("/", async () =>
+    {
+        var sites = await service.GetAllAsync();
+        var normalized = sites
+            .Select(SiteProfileSchemaCompatibility.NormalizeFromStorage)
+            .ToList();
+        return Results.Ok(normalized);
+    });
+
+    group.MapGet("/{id:guid}", async (Guid id) =>
+    {
+        var entity = await service.GetByIdAsync(id);
+        if (entity == null)
+        {
+            return Results.NotFound();
+        }
+
+        return Results.Ok(SiteProfileSchemaCompatibility.NormalizeFromStorage(entity));
+    });
+
+    group.MapPost("/", async (SiteProfile entity) =>
+    {
+        if (entity.Id == Guid.Empty)
+        {
+            entity.Id = Guid.NewGuid();
+        }
+
+        entity.CreatedAt = DateTime.UtcNow;
+        entity.UpdatedAt = DateTime.UtcNow;
+        var created = await SiteProfileSchemaCompatibility.CreateWithFallbackAsync(service, supabase, entity);
+        return Results.Ok(created);
+    });
+
+    group.MapPut("/{id:guid}", async (Guid id, SiteProfile entity) =>
+    {
+        entity.Id = id;
+        entity.UpdatedAt = DateTime.UtcNow;
+        var updated = await SiteProfileSchemaCompatibility.UpdateWithFallbackAsync(service, supabase, id, entity);
+        return Results.Ok(updated);
+    });
+
+    group.MapDelete("/{id:guid}", async (Guid id) =>
+    {
+        await service.DeleteAsync(id);
+        return Results.NoContent();
+    });
+}
 
 static void MapCrud<T>(
     WebApplication app,

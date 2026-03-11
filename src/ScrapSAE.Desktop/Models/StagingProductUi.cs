@@ -52,7 +52,12 @@ public class StagingProductUi : ViewModelBase
         set => SetField(ref _isSelected, value);
     }
 
-    public string Title => GetProcessed()?.Name ?? GetFallbackValue("Title") ?? _product.SkuSource ?? "Sin titulo";
+    public string Title => FirstNonEmpty(
+        GetProcessed()?.Name,
+        GetFallbackValue("Name"),
+        GetFallbackValue("Title"),
+        _product.SkuSource,
+        "Sin titulo");
 
     public string ProductName
     {
@@ -67,7 +72,7 @@ public class StagingProductUi : ViewModelBase
         }
     }
 
-    public string Sku => GetProcessed()?.Sku ?? _product.SkuSource ?? "";
+    public string Sku => FirstNonEmpty(GetProcessed()?.Sku, _product.SkuSource, string.Empty);
 
     public string SourceUrl
     {
@@ -86,7 +91,24 @@ public class StagingProductUi : ViewModelBase
                ?? ReadSingleImageUrl(_product.AIProcessedJson)
                ?? ReadSingleImageUrl(_product.RawData)
                ?? "";
-        set => SetField(ref _overrideImageUrl, value);
+        set
+        {
+            var normalized = value?.Trim() ?? string.Empty;
+            if (!SetField(ref _overrideImageUrl, normalized))
+            {
+                return;
+            }
+
+            UpsertAiString("ImageUrl", normalized);
+            UpsertAiString("imageUrl", normalized);
+            UpsertAiString("primaryImageUrl", normalized);
+            UpsertAiString("thumbnailUrl", normalized);
+            UpsertPrimaryImageArray(normalized);
+            InvalidateParsed();
+            OnPropertyChanged(nameof(ImageUrl));
+            OnPropertyChanged(nameof(ImageLinksText));
+            OnPropertyChanged(nameof(Images));
+        }
     }
 
     public string ImageUrl => PrimaryImageUrl;
@@ -118,7 +140,21 @@ public class StagingProductUi : ViewModelBase
         }
     }
 
-    public string Currency => GetProcessed()?.Currency ?? "MXN";
+    public string Currency => FirstNonEmpty(GetProcessed()?.Currency, GetFallbackValue("Currency"), "MXN");
+
+    public string EditableCurrency
+    {
+        get => Currency;
+        set
+        {
+            var normalized = value?.Trim();
+            UpsertAiString("Currency", normalized);
+            UpsertAiString("currency", normalized);
+            InvalidateParsed();
+            OnPropertyChanged(nameof(Currency));
+            OnPropertyChanged();
+        }
+    }
 
     public int? Stock => GetProcessed()?.Stock;
 
@@ -126,7 +162,20 @@ public class StagingProductUi : ViewModelBase
 
     public List<string> Categories => GetProcessed()?.Categories ?? new List<string>();
 
-    public string Description => GetProcessed()?.Description ?? GetFallbackValue("Description") ?? "";
+    public string Description => FirstNonEmpty(GetProcessed()?.Description, GetFallbackValue("Description"), GetFallbackValue("description"), string.Empty);
+
+    public string EditableDescription
+    {
+        get => Description;
+        set
+        {
+            UpsertAiString("Description", value);
+            UpsertAiString("description", value);
+            InvalidateParsed();
+            OnPropertyChanged(nameof(Description));
+            OnPropertyChanged();
+        }
+    }
 
     public decimal? Price => GetProcessed()?.Price ?? TryGetFallbackPrice();
 
@@ -143,6 +192,29 @@ public class StagingProductUi : ViewModelBase
     }
 
     public string Status => _product.Status;
+
+    public string EditableStatus
+    {
+        get => _product.Status ?? string.Empty;
+        set
+        {
+            var normalized = string.IsNullOrWhiteSpace(value) ? "pending" : value.Trim().ToLowerInvariant();
+            if (string.Equals(_product.Status, normalized, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            _product.Status = normalized;
+            OnPropertyChanged(nameof(Status));
+            OnPropertyChanged();
+        }
+    }
+
+    public DateTime CreatedAt => _product.CreatedAt;
+
+    public DateTime UpdatedAt => _product.UpdatedAt;
+
+    public DateTime? LastSeenAt => _product.LastSeenAt;
 
     public string FlashlySyncStatus => _product.FlashlySyncStatus;
 
@@ -286,6 +358,24 @@ public class StagingProductUi : ViewModelBase
     {
         var node = ParseOrCreateAiNode();
         node[key] = value.HasValue ? JsonValue.Create(value.Value) : null;
+        _product.AIProcessedJson = node.ToJsonString();
+    }
+
+    private void UpsertPrimaryImageArray(string value)
+    {
+        var node = ParseOrCreateAiNode();
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            node["Images"] = null;
+            node["images"] = null;
+        }
+        else
+        {
+            var images = new JsonArray(value);
+            node["Images"] = images;
+            node["images"] = new JsonArray(value);
+        }
+
         _product.AIProcessedJson = node.ToJsonString();
     }
 
@@ -488,5 +578,18 @@ public class StagingProductUi : ViewModelBase
 
         value = default;
         return false;
+    }
+
+    private static string FirstNonEmpty(params string?[] values)
+    {
+        foreach (var value in values)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value.Trim();
+            }
+        }
+
+        return string.Empty;
     }
 }

@@ -14,7 +14,10 @@ public sealed class SettingsStore
 
     public SettingsStore(IWebHostEnvironment environment)
     {
-        _settingsPath = Path.Combine(environment.ContentRootPath, "appsettings.runtime.json");
+        var overridePath = Environment.GetEnvironmentVariable("SCRAPSAE_RUNTIME_SETTINGS_PATH");
+        _settingsPath = !string.IsNullOrWhiteSpace(overridePath)
+            ? overridePath
+            : Path.Combine(environment.ContentRootPath, "appsettings.runtime.json");
     }
 
     public AppSettingsDto? Get()
