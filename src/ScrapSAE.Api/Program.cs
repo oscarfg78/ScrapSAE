@@ -12,6 +12,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 
 
+using ScrapSAE.Api.Endpoints;
 using Serilog; // Added for file logging
 
 // Configure Serilog early
@@ -837,6 +838,9 @@ app.MapPost("/api/online-store/send/{productId:guid}", async (
         return Results.Problem(title: "Error inesperado en envio a tienda en linea.", detail: message);
     }
 });
+
+// Extension endpoints (Chrome Extension + Stripe + Layouts)
+app.MapExtensionEndpoints();
 
 app.Run();
 Log.CloseAndFlush();

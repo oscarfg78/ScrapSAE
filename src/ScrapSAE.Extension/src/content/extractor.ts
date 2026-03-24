@@ -114,7 +114,28 @@ function getAttachments(container: Element | Document, selector?: string): Produ
  */
 function parsePrice(text?: string): number | undefined {
   if (!text) return undefined;
-  const cleaned = text.replace(/[^0-9.,]/g, '').replace(',', '.');
+  let cleaned = text.replace(/[^0-9.,]/g, '');
+  // Detectar formato: si hay punto y coma, determinar cuál es el separador decimal
+  const hasComma = cleaned.includes(',');
+  const hasDot = cleaned.includes('.');
+  if (hasComma && hasDot) {
+    // Formato 1,234.56 o 1.234,56
+    if (cleaned.lastIndexOf(',') > cleaned.lastIndexOf('.')) {
+      // Formato europeo: 1.234,56 -> eliminar puntos, reemplazar coma por punto
+      cleaned = cleaned.replace(/\./g, '').replace(',', '.');
+    } else {
+      // Formato americano: 1,234.56 -> eliminar comas
+      cleaned = cleaned.replace(/,/g, '');
+    }
+  } else if (hasComma) {
+    // Solo coma: puede ser decimal (3,50) o miles (1,234)
+    const parts = cleaned.split(',');
+    if (parts.length === 2 && parts[1].length <= 2) {
+      cleaned = cleaned.replace(',', '.'); // Decimal
+    } else {
+      cleaned = cleaned.replace(/,/g, ''); // Miles
+    }
+  }
   const num = parseFloat(cleaned);
   return isNaN(num) ? undefined : num;
 }

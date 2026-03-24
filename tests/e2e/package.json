@@ -1,0 +1,16 @@
+{
+  "name": "scrapsae-e2e-tests",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pruebas E2E para ScrapSAE Extension y Landing Page",
+  "scripts": {
+    "test": "npx playwright test",
+    "test:landing": "npx playwright test --project=landing-page-desktop",
+    "test:landing:mobile": "npx playwright test --project=landing-page-mobile",
+    "test:extension": "npx playwright test --project=extension-chromium",
+    "test:report": "npx playwright show-report ../../reports/e2e"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.40.0"
+  }
+}

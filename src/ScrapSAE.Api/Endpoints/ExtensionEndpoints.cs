@@ -8,6 +8,7 @@
 
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using ScrapSAE.Api.Services;
 using ScrapSAE.Core.DTOs;
 using ScrapSAE.Core.Interfaces;
 
@@ -24,7 +25,8 @@ public static class ExtensionEndpoints
 
     // ============================================================
     // POST /api/extension/process
-    // Recibe productos crudos de la extensión y los procesa con IA
+    // Recibe productos crudos de la extensión y los procesa con IA.
+    // La firma de IAIProcessorService.ProcessProductAsync recibe string.
     // ============================================================
     private static void MapExtensionProcessEndpoint(WebApplication app)
     {
@@ -49,14 +51,20 @@ public static class ExtensionEndpoints
                 {
                     try
                     {
-                        var processed = await aiProcessor.ProcessProductAsync(scraped, token);
+                        // Serializar el ScrapedProduct a JSON string para la IA
+                        var rawJson = JsonSerializer.Serialize(scraped, new JsonSerializerOptions
+                        {
+                            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+                        });
+
+                        var processed = await aiProcessor.ProcessProductAsync(rawJson, token);
                         if (processed != null)
                         {
                             processedProducts.Add(processed);
                         }
                         else
                         {
-                            // Fallback: convertir sin IA
                             processedProducts.Add(ConvertRawToProcessed(scraped));
                         }
                     }
@@ -84,6 +92,11 @@ public static class ExtensionEndpoints
 
     // ============================================================
     // /api/layouts - CRUD de layouts del usuario
+    // Usa ISupabaseRestClient con la interfaz real:
+    //   GetAsync(string pathAndQuery) -> string (JSON)
+    //   PostAsync<T>(string path, T body) -> T?
+    //   PatchAsync(string pathAndQuery, string jsonBody) -> void
+    //   DeleteAsync(string pathAndQuery) -> void
     // ============================================================
     private static void MapLayoutEndpoints(WebApplication app)
     {
@@ -95,24 +108,15 @@ public static class ExtensionEndpoints
         {
             try
             {
-                var response = await supabase.GetAsync(
-                    "user_layouts",
-                    $"user_id=eq.{userId}&order=created_at.desc");
+                var json = await supabase.GetAsync(
+                    $"user_layouts?user_id=eq.{userId}&order=created_at.desc&select=*");
 
-                if (!response.IsSuccessStatusCode)
-                {
-                    var error = await response.Content.ReadAsStringAsync();
-                    logger.LogWarning("[Extension] Error fetching layouts: {Error}", error);
-                    return Results.Problem("Error al obtener layouts: " + error);
-                }
-
-                var json = await response.Content.ReadAsStringAsync();
                 return Results.Content(json, "application/json");
             }
             catch (Exception ex)
             {
                 logger.LogError(ex, "[Extension] Error en GET /api/layouts");
-                return Results.Problem(ex.Message);
+                return Results.Problem("Error al obtener layouts: " + ex.Message);
             }
         })
         .WithName("GetLayouts")
@@ -133,28 +137,14 @@ public static class ExtensionEndpoints
                     layout.CreatedAt = DateTime.UtcNow;
                 }
 
-                var json = JsonSerializer.Serialize(layout, new JsonSerializerOptions
-                {
-                    PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
-                    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
-                });
+                var saved = await supabase.PostAsync("user_layouts", layout);
 
-                var response = await supabase.PostAsync("user_layouts", json);
-
-                if (!response.IsSuccessStatusCode)
-                {
-                    var error = await response.Content.ReadAsStringAsync();
-                    logger.LogWarning("[Extension] Error saving layout: {Error}", error);
-                    return Results.Problem("Error al guardar layout: " + error);
-                }
-
-                var result = await response.Content.ReadAsStringAsync();
-                return Results.Created($"/api/layouts/{layout.Id}", result);
+                return Results.Created($"/api/layouts/{layout.Id}", saved);
             }
             catch (Exception ex)
             {
                 logger.LogError(ex, "[Extension] Error en POST /api/layouts");
-                return Results.Problem(ex.Message);
+                return Results.Problem("Error al guardar layout: " + ex.Message);
             }
         })
         .WithName("SaveLayout")
@@ -168,20 +158,13 @@ public static class ExtensionEndpoints
         {
             try
             {
-                var response = await supabase.DeleteAsync("user_layouts", $"id=eq.{id}");
-
-                if (!response.IsSuccessStatusCode)
-                {
-                    var error = await response.Content.ReadAsStringAsync();
-                    return Results.Problem("Error al eliminar layout: " + error);
-                }
-
+                await supabase.DeleteAsync($"user_layouts?id=eq.{id}");
                 return Results.NoContent();
             }
             catch (Exception ex)
             {
                 logger.LogError(ex, "[Extension] Error en DELETE /api/layouts/{Id}", id);
-                return Results.Problem(ex.Message);
+                return Results.Problem("Error al eliminar layout: " + ex.Message);
             }
         })
         .WithName("DeleteLayout")
@@ -283,10 +266,6 @@ public static class ExtensionEndpoints
                 var body = await new StreamReader(httpRequest.Body).ReadToEndAsync();
                 var signature = httpRequest.Headers["Stripe-Signature"].FirstOrDefault();
 
-                // Nota: En producción, verificar la firma con Stripe SDK.
-                // Para esta implementación, se procesa el evento directamente.
-                // Se recomienda instalar Stripe.net y usar EventUtility.ConstructEvent()
-
                 var eventDoc = JsonDocument.Parse(body);
                 var eventType = eventDoc.RootElement.GetProperty("type").GetString();
 
@@ -373,6 +352,7 @@ public static class ExtensionEndpoints
 
     // ============================================================
     // Stripe Webhook Handlers
+    // Usan ISupabaseRestClient.PatchAsync(pathAndQuery, jsonBody)
     // ============================================================
 
     private static async Task HandleCheckoutCompleted(
@@ -402,20 +382,11 @@ public static class ExtensionEndpoints
                 updated_at = DateTime.UtcNow
             });
 
-            var response = await supabase.PatchAsync(
-                "user_profiles",
-                $"id=eq.{userId}",
+            await supabase.PatchAsync(
+                $"user_profiles?id=eq.{userId}",
                 updateJson);
 
-            if (response.IsSuccessStatusCode)
-            {
-                logger.LogInformation("[Stripe] Usuario {UserId} actualizado a plan {Plan}", userId, planType);
-            }
-            else
-            {
-                var error = await response.Content.ReadAsStringAsync();
-                logger.LogWarning("[Stripe] Error actualizando perfil: {Error}", error);
-            }
+            logger.LogInformation("[Stripe] Usuario {UserId} actualizado a plan {Plan}", userId, planType);
         }
     }
 
@@ -432,15 +403,6 @@ public static class ExtensionEndpoints
         {
             var planType = status == "active" ? "pro" : "free";
 
-            // Intentar obtener el plan del price
-            if (subscription.TryGetProperty("items", out var items) &&
-                items.TryGetProperty("data", out var itemsData) &&
-                itemsData.GetArrayLength() > 0)
-            {
-                var priceId = itemsData[0].GetProperty("price").GetProperty("id").GetString();
-                // Mapear price ID a plan type (se configura en appsettings)
-            }
-
             var updateJson = JsonSerializer.Serialize(new
             {
                 subscription_status = planType,
@@ -449,8 +411,7 @@ public static class ExtensionEndpoints
             });
 
             await supabase.PatchAsync(
-                "user_profiles",
-                $"stripe_customer_id=eq.{customerId}",
+                $"user_profiles?stripe_customer_id=eq.{customerId}",
                 updateJson);
 
             logger.LogInformation("[Stripe] Suscripción actualizada para customer {CustomerId}: {Status}", customerId, status);
@@ -475,8 +436,7 @@ public static class ExtensionEndpoints
             });
 
             await supabase.PatchAsync(
-                "user_profiles",
-                $"stripe_customer_id=eq.{customerId}",
+                $"user_profiles?stripe_customer_id=eq.{customerId}",
                 updateJson);
 
             logger.LogInformation("[Stripe] Suscripción cancelada para customer {CustomerId}", customerId);
