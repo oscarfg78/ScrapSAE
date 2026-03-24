@@ -1,0 +1,110 @@
+/* SidePanel-specific styles */
+body {
+  width: 100%;
+  min-height: 100vh;
+}
+
+.selector-group {
+  margin-bottom: 12px;
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius);
+  padding: 10px;
+}
+.selector-group summary {
+  margin-bottom: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+.selector-group[open] summary {
+  margin-bottom: 12px;
+}
+
+/* Layout card in list */
+.layout-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: white;
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius);
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.layout-card:hover {
+  border-color: var(--primary);
+}
+.layout-card .layout-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.layout-card .layout-name {
+  font-weight: 500;
+  font-size: 13px;
+}
+.layout-card .layout-meta {
+  font-size: 11px;
+  color: var(--gray-400);
+}
+.layout-card .layout-default {
+  font-size: 10px;
+  background: var(--primary-light);
+  color: var(--primary);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+/* History item */
+.history-item {
+  padding: 10px 14px;
+  background: white;
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius);
+  margin-bottom: 8px;
+}
+.history-item .history-url {
+  font-size: 12px;
+  color: var(--gray-600);
+  word-break: break-all;
+  margin-bottom: 4px;
+}
+.history-item .history-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--gray-400);
+}
+
+/* Column mapping row */
+.column-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.column-row .form-input,
+.column-row .form-select {
+  flex: 1;
+  padding: 5px 8px;
+  font-size: 12px;
+}
+.column-row .btn-remove {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: var(--danger-light);
+  color: var(--danger);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+}
+.column-row .btn-remove:hover {
+  background: var(--danger);
+  color: white;
+}

@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="ScrapSAE - Extrae datos de cualquier sitio web y exporta a Excel. Extensión de Chrome con layouts configurables, simulación humana e IA.">
+  <meta name="keywords" content="web scraper, chrome extension, excel export, data extraction, scraping tool">
+  <meta name="author" content="ScrapSAE">
+
+  <!-- Open Graph -->
+  <meta property="og:title" content="ScrapSAE - Web Scraper to Excel">
+  <meta property="og:description" content="Extrae datos de cualquier sitio web directamente desde tu navegador y exporta a Excel con un clic.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://scrapsae.com">
+  <meta property="og:image" content="images/og-image.png">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="ScrapSAE - Web Scraper to Excel">
+  <meta name="twitter:description" content="Extrae datos de cualquier sitio web y exporta a Excel con layouts configurables.">
+
+  <title>ScrapSAE - Extrae Datos de la Web a Excel | Extensión de Chrome</title>
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+  <!-- Styles -->
+  <link rel="stylesheet" href="css/styles.css">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" sizes="32x32" href="images/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="images/favicon-16.png">
+
+  <!-- Structured Data -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "ScrapSAE",
+    "applicationCategory": "BrowserApplication",
+    "operatingSystem": "Chrome, Firefox",
+    "offers": [
+      { "@type": "Offer", "price": "0", "priceCurrency": "USD", "name": "Free" },
+      { "@type": "Offer", "price": "19", "priceCurrency": "USD", "name": "Pro" },
+      { "@type": "Offer", "price": "79", "priceCurrency": "USD", "name": "Enterprise" }
+    ],
+    "description": "Extrae datos de cualquier sitio web y exporta a Excel con layouts configurables."
+  }
+  </script>
+</head>
+<body>
+
+  <!-- ==================== NAVIGATION ==================== -->
+  <nav class="navbar" id="navbar">
+    <div class="container">
+      <a href="#" class="navbar-brand">
+        <img src="images/logo.svg" alt="ScrapSAE Logo">
+        <span>ScrapSAE</span>
+      </a>
+
+      <ul class="navbar-nav">
+        <li><a href="#features">Funciones</a></li>
+        <li><a href="#how-it-works">Cómo Funciona</a></li>
+        <li><a href="#pricing">Precios</a></li>
+        <li><a href="#faq">FAQ</a></li>
+      </ul>
+
+      <div class="navbar-cta">
+        <a href="#pricing" class="btn btn-outline btn-sm">Ver Planes</a>
+        <a href="#install" class="btn btn-primary btn-sm">Instalar Gratis</a>
+      </div>
+
+      <button class="navbar-toggle" id="navbar-toggle" aria-label="Menú">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+  </nav>
+
+  <!-- ==================== HERO ==================== -->
+  <section class="hero" id="hero">
+    <div class="container">
+      <div class="hero-content">
+        <div class="hero-badge">
+          <span class="dot"></span>
+          <span>Disponible para Chrome y Firefox</span>
+        </div>
+
+        <h1>Extrae datos de la web a <span class="highlight">Excel</span> en segundos</h1>
+
+        <p class="hero-description">
+          Configura tus layouts de extracción, ejecuta el scraping desde la pestaña activa
+          y descarga los resultados en un archivo Excel listo para usar. Sin código, sin complicaciones.
+        </p>
+
+        <div class="hero-actions">
+          <a href="#install" class="btn btn-primary btn-lg">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Instalar Extensión Gratis
+          </a>
+          <a href="#how-it-works" class="btn btn-outline btn-lg">Ver Demo</a>
+        </div>
+
+        <div class="hero-stats">
+          <div class="hero-stat">
+            <div class="number">50+</div>
+            <div class="label">Sitios compatibles</div>
+          </div>
+          <div class="hero-stat">
+            <div class="number">10K+</div>
+            <div class="label">Productos extraídos</div>
+          </div>
+          <div class="hero-stat">
+            <div class="number">99.5%</div>
+            <div class="label">Tasa de éxito</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="hero-visual">
+        <div class="hero-mockup">
+          <div class="hero-mockup-header">
+            <span class="hero-mockup-dot red"></span>
+            <span class="hero-mockup-dot yellow"></span>
+            <span class="hero-mockup-dot green"></span>
+          </div>
+          <div class="hero-mockup-body">
+            <div class="line"><span class="keyword">layout</span>: "Festo Productos"</div>
+            <div class="line"><span class="keyword">selector</span>: <span class="string">".product-card"</span></div>
+            <div class="line"><span class="keyword">campos</span>: [SKU, Nombre, Precio, Stock]</div>
+            <div class="line">&nbsp;</div>
+            <div class="line"><span class="keyword">estado</span>: <span class="string">"Extrayendo..."</span></div>
+            <div class="line"><span class="keyword">productos</span>: <span class="number">247</span> encontrados</div>
+            <div class="line"><span class="keyword">progreso</span>: <span class="number">85%</span> completado</div>
+            <div class="line">&nbsp;</div>
+            <div class="line" style="color: var(--success);">Exportando a Excel...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== FEATURES ==================== -->
+  <section class="features" id="features">
+    <div class="container">
+      <div class="section-header">
+        <span class="section-tag">Funciones</span>
+        <h2>Todo lo que necesitas para extraer datos profesionalmente</h2>
+        <p>Diseñado para equipos de compras, analistas de datos y profesionales que necesitan datos estructurados de la web.</p>
+      </div>
+
+      <div class="features-grid">
+        <div class="feature-card">
+          <div class="feature-icon blue">&#9881;</div>
+          <h3>Layouts Configurables</h3>
+          <p>Crea y guarda múltiples configuraciones de extracción con selectores CSS personalizados. Cada layout define qué datos extraer y cómo organizarlos en el Excel.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon green">&#128196;</div>
+          <h3>Exportación a Excel</h3>
+          <p>Descarga los resultados directamente como archivo .xlsx con columnas configurables, hojas de metadatos y formato profesional listo para usar.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon amber">&#129302;</div>
+          <h3>Simulación Humana</h3>
+          <p>Movimientos de ratón con curvas de Bézier, pausas aleatorias y scroll progresivo que evitan la detección de bots en sitios protegidos.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon purple">&#129504;</div>
+          <h3>Procesamiento con IA</h3>
+          <p>Los datos extraídos se enriquecen automáticamente con inteligencia artificial: categorización, normalización de nombres y detección de especificaciones.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon rose">&#128202;</div>
+          <h3>Historial de Ejecuciones</h3>
+          <p>Consulta el registro completo de todas tus extracciones: fecha, URL, productos encontrados, duración y estado. Todo sincronizado en la nube.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon cyan">&#128274;</div>
+          <h3>Seguro y Privado</h3>
+          <p>Tus datos nunca se comparten con terceros. La extensión opera directamente en tu navegador y los layouts se almacenan cifrados en tu cuenta.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== HOW IT WORKS ==================== -->
+  <section class="how-it-works" id="how-it-works">
+    <div class="container">
+      <div class="section-header">
+        <span class="section-tag">Cómo Funciona</span>
+        <h2>De la web a Excel en 4 pasos</h2>
+        <p>Sin código, sin configuración de servidores. Solo instala, configura y extrae.</p>
+      </div>
+
+      <div class="steps-grid">
+        <div class="step">
+          <div class="step-number">1</div>
+          <h3>Instala la Extensión</h3>
+          <p>Descarga ScrapSAE desde Chrome Web Store o Firefox Add-ons. Es gratis y toma menos de 30 segundos.</p>
+        </div>
+        <div class="step">
+          <div class="step-number">2</div>
+          <h3>Configura tu Layout</h3>
+          <p>Define los selectores CSS para los datos que quieres extraer: SKU, nombre, precio, imágenes y más.</p>
+        </div>
+        <div class="step">
+          <div class="step-number">3</div>
+          <h3>Ejecuta el Scraping</h3>
+          <p>Navega al sitio web objetivo y haz clic en "Iniciar". La extensión extrae los datos automáticamente.</p>
+        </div>
+        <div class="step">
+          <div class="step-number">4</div>
+          <h3>Descarga tu Excel</h3>
+          <p>Los datos procesados se descargan como archivo .xlsx con el formato que configuraste.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== PRICING ==================== -->
+  <section class="pricing" id="pricing">
+    <div class="container">
+      <div class="section-header">
+        <span class="section-tag">Precios</span>
+        <h2>Un plan para cada necesidad</h2>
+        <p>Comienza gratis y escala cuando lo necesites. Sin compromisos, cancela cuando quieras.</p>
+      </div>
+
+      <div class="pricing-grid">
+        <!-- Free -->
+        <div class="pricing-card">
+          <div class="pricing-plan">Free</div>
+          <div class="pricing-price">
+            <span class="amount">$0</span>
+            <span class="period">/ mes</span>
+          </div>
+          <p class="pricing-description">Perfecto para probar y extracciones ocasionales.</p>
+          <ul class="pricing-features">
+            <li>50 extracciones por día</li>
+            <li>1 layout guardado</li>
+            <li>3 páginas por scraping</li>
+            <li>Exportación a Excel (.xlsx)</li>
+            <li>Simulación humana básica</li>
+            <li class="disabled">Procesamiento con IA</li>
+            <li class="disabled">Soporte prioritario</li>
+          </ul>
+          <a href="#install" class="btn btn-outline" style="width: 100%;">Instalar Gratis</a>
+        </div>
+
+        <!-- Pro -->
+        <div class="pricing-card featured">
+          <span class="popular-badge">Más Popular</span>
+          <div class="pricing-plan">Pro</div>
+          <div class="pricing-price">
+            <span class="amount">$19</span>
+            <span class="period">/ mes</span>
+          </div>
+          <p class="pricing-description">Para profesionales que necesitan datos de forma regular.</p>
+          <ul class="pricing-features">
+            <li>1,000 extracciones por día</li>
+            <li>20 layouts guardados</li>
+            <li>50 páginas por scraping</li>
+            <li>Exportación a Excel, CSV y JSON</li>
+            <li>Simulación humana avanzada</li>
+            <li>Procesamiento con IA</li>
+            <li>Soporte por email (24h)</li>
+          </ul>
+          <a href="#" class="btn btn-primary" style="width: 100%;" data-plan="pro" onclick="handleCheckout('pro')">Comenzar con Pro</a>
+        </div>
+
+        <!-- Enterprise -->
+        <div class="pricing-card">
+          <div class="pricing-plan">Enterprise</div>
+          <div class="pricing-price">
+            <span class="amount">$79</span>
+            <span class="period">/ mes</span>
+          </div>
+          <p class="pricing-description">Para equipos y operaciones de extracción a gran escala.</p>
+          <ul class="pricing-features">
+            <li>Extracciones ilimitadas</li>
+            <li>Layouts ilimitados</li>
+            <li>Páginas ilimitadas por scraping</li>
+            <li>Todos los formatos de exportación</li>
+            <li>Simulación humana avanzada</li>
+            <li>Procesamiento con IA prioritario</li>
+            <li>Soporte dedicado (1h respuesta)</li>
+          </ul>
+          <a href="#" class="btn btn-accent" style="width: 100%;" data-plan="enterprise" onclick="handleCheckout('enterprise')">Contactar Ventas</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== FAQ ==================== -->
+  <section class="faq" id="faq">
+    <div class="container">
+      <div class="section-header">
+        <span class="section-tag">FAQ</span>
+        <h2>Preguntas Frecuentes</h2>
+      </div>
+
+      <div class="faq-list">
+        <div class="faq-item">
+          <button class="faq-question">
+            <span>¿Qué navegadores son compatibles?</span>
+            <span class="icon">+</span>
+          </button>
+          <div class="faq-answer">
+            <div class="faq-answer-inner">
+              ScrapSAE es compatible con Google Chrome (versión 116+) y Mozilla Firefox (versión 109+). Ambas versiones comparten la misma base de código y funcionalidades gracias a la compatibilidad de Manifest V3.
+            </div>
+          </div>
+        </div>
+
+        <div class="faq-item">
+          <button class="faq-question">
+            <span>¿Es legal hacer web scraping?</span>
+            <span class="icon">+</span>
+          </button>
+          <div class="faq-answer">
+            <div class="faq-answer-inner">
+              El web scraping de datos públicos es generalmente legal. Sin embargo, es responsabilidad del usuario respetar los Términos de Servicio de cada sitio web, así como las regulaciones de protección de datos aplicables (GDPR, LFPDPPP, etc.). ScrapSAE incluye simulación de comportamiento humano para minimizar el impacto en los servidores objetivo.
+            </div>
+          </div>
+        </div>
+
+        <div class="faq-item">
+          <button class="faq-question">
+            <span>¿Necesito conocimientos técnicos?</span>
+            <span class="icon">+</span>
+          </button>
+          <div class="faq-answer">
+            <div class="faq-answer-inner">
+              Se requiere un conocimiento básico de selectores CSS para configurar los layouts. Sin embargo, la interfaz incluye ayudas visuales y ejemplos para facilitar la configuración. En futuras versiones, incluiremos un modo de selección visual que no requerirá conocimientos técnicos.
+            </div>
+          </div>
+        </div>
+
+        <div class="faq-item">
+          <button class="faq-question">
+            <span>¿Puedo cancelar mi suscripción en cualquier momento?</span>
+            <span class="icon">+</span>
+          </button>
+          <div class="faq-answer">
+            <div class="faq-answer-inner">
+              Sí, puedes cancelar tu suscripción en cualquier momento desde el portal de facturación. Tu plan seguirá activo hasta el final del período de facturación actual. No hay cargos por cancelación ni compromisos a largo plazo.
+            </div>
+          </div>
+        </div>
+
+        <div class="faq-item">
+          <button class="faq-question">
+            <span>¿Mis datos están seguros?</span>
+            <span class="icon">+</span>
+          </button>
+          <div class="faq-answer">
+            <div class="faq-answer-inner">
+              Absolutamente. Los datos extraídos se procesan localmente en tu navegador y se descargan directamente a tu computadora. Los layouts y el historial se almacenan en tu cuenta personal con cifrado en tránsito y en reposo. Nunca compartimos tus datos con terceros. Los pagos se procesan de forma segura a través de Stripe.
+            </div>
+          </div>
+        </div>
+
+        <div class="faq-item">
+          <button class="faq-question">
+            <span>¿Qué pasa si un sitio bloquea el scraping?</span>
+            <span class="icon">+</span>
+          </button>
+          <div class="faq-answer">
+            <div class="faq-answer-inner">
+              ScrapSAE incluye un módulo avanzado de simulación humana que utiliza curvas de Bézier para movimientos de ratón, pausas aleatorias entre acciones y técnicas anti-detección. Esto reduce significativamente la probabilidad de bloqueo. Además, al ejecutarse en tu navegador real (no en uno automatizado), las huellas digitales son idénticas a las de una sesión normal.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== CTA ==================== -->
+  <section class="cta" id="install">
+    <div class="container">
+      <h2>Comienza a extraer datos hoy</h2>
+      <p>Instala ScrapSAE gratis y descubre lo fácil que es obtener datos estructurados de cualquier sitio web.</p>
+      <div class="btn-group">
+        <a href="#" class="btn btn-primary btn-lg" id="btn-chrome-install">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="4" fill="currentColor"/></svg>
+          Instalar en Chrome
+        </a>
+        <a href="#" class="btn btn-outline btn-lg" style="color: white; border-color: rgba(255,255,255,0.3);" id="btn-firefox-install">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 2a10 10 0 0 1 0 20" fill="currentColor" opacity="0.3"/></svg>
+          Instalar en Firefox
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== FOOTER ==================== -->
+  <footer class="footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <a href="#" class="navbar-brand" style="color: white;">
+            <img src="images/logo.svg" alt="ScrapSAE">
+            <span>ScrapSAE</span>
+          </a>
+          <p>Extrae datos de la web a Excel de forma profesional. Diseñado para equipos de compras, analistas y desarrolladores.</p>
+        </div>
+
+        <div>
+          <h4>Producto</h4>
+          <ul class="footer-links">
+            <li><a href="#features">Funciones</a></li>
+            <li><a href="#pricing">Precios</a></li>
+            <li><a href="#faq">FAQ</a></li>
+            <li><a href="changelog.html">Changelog</a></li>
+          </ul>
+        </div>
+
+        <div>
+          <h4>Recursos</h4>
+          <ul class="footer-links">
+            <li><a href="docs.html">Documentación</a></li>
+            <li><a href="api.html">API Reference</a></li>
+            <li><a href="blog.html">Blog</a></li>
+            <li><a href="support.html">Soporte</a></li>
+          </ul>
+        </div>
+
+        <div>
+          <h4>Legal</h4>
+          <ul class="footer-links">
+            <li><a href="privacy.html">Política de Privacidad</a></li>
+            <li><a href="terms.html">Términos de Servicio</a></li>
+            <li><a href="cookies.html">Política de Cookies</a></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="footer-bottom">
+        <p>&copy; 2026 ScrapSAE. Todos los derechos reservados.</p>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Scripts -->
+  <script src="js/main.js"></script>
+</body>
+</html>

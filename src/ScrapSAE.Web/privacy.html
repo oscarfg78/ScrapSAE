@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Política de Privacidad - ScrapSAE</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css">
+  <style>
+    .legal-content { max-width: 800px; margin: 120px auto 60px; padding: 0 24px; }
+    .legal-content h1 { margin-bottom: 8px; }
+    .legal-content .date { color: var(--gray-400); margin-bottom: 40px; font-size: 0.95rem; }
+    .legal-content h2 { font-size: 1.3rem; margin-top: 36px; margin-bottom: 12px; }
+    .legal-content p { margin-bottom: 16px; font-size: 0.95rem; line-height: 1.8; }
+    .legal-content ul { margin: 12px 0 16px 24px; }
+    .legal-content li { margin-bottom: 8px; font-size: 0.95rem; color: var(--gray-600); }
+  </style>
+</head>
+<body>
+  <nav class="navbar scrolled">
+    <div class="container">
+      <a href="index.html" class="navbar-brand">
+        <img src="images/logo.svg" alt="ScrapSAE">
+        <span>ScrapSAE</span>
+      </a>
+    </div>
+  </nav>
+
+  <div class="legal-content">
+    <h1>Política de Privacidad</h1>
+    <p class="date">Última actualización: 24 de marzo de 2026</p>
+
+    <p>En ScrapSAE ("nosotros", "nuestro"), respetamos su privacidad y nos comprometemos a proteger sus datos personales. Esta política describe cómo recopilamos, usamos y protegemos la información cuando utiliza nuestra extensión de navegador y servicios relacionados.</p>
+
+    <h2>1. Información que Recopilamos</h2>
+    <p>Recopilamos la siguiente información:</p>
+    <ul>
+      <li><strong>Información de cuenta:</strong> Correo electrónico y nombre al registrarse.</li>
+      <li><strong>Datos de configuración:</strong> Los layouts de scraping que usted crea y guarda.</li>
+      <li><strong>Historial de uso:</strong> Registros de ejecuciones de scraping (URL, cantidad de productos, duración).</li>
+      <li><strong>Datos de pago:</strong> Procesados exclusivamente por Stripe. No almacenamos números de tarjeta.</li>
+    </ul>
+
+    <h2>2. Información que NO Recopilamos</h2>
+    <ul>
+      <li>No recopilamos el contenido de las páginas web que usted visita.</li>
+      <li>No recopilamos los datos extraídos por el scraper (estos se descargan directamente a su computadora).</li>
+      <li>No recopilamos su historial de navegación general.</li>
+      <li>No vendemos ni compartimos sus datos con terceros.</li>
+    </ul>
+
+    <h2>3. Cómo Usamos su Información</h2>
+    <p>Utilizamos la información recopilada para:</p>
+    <ul>
+      <li>Proporcionar y mantener el servicio de la extensión.</li>
+      <li>Sincronizar sus layouts y configuraciones entre dispositivos.</li>
+      <li>Gestionar su suscripción y facturación.</li>
+      <li>Mejorar el rendimiento y la experiencia del usuario.</li>
+      <li>Enviar comunicaciones relacionadas con el servicio (no marketing).</li>
+    </ul>
+
+    <h2>4. Almacenamiento y Seguridad</h2>
+    <p>Sus datos se almacenan en servidores de Supabase con cifrado en tránsito (TLS 1.3) y en reposo (AES-256). Implementamos Row Level Security (RLS) para garantizar que cada usuario solo pueda acceder a sus propios datos.</p>
+
+    <h2>5. Permisos de la Extensión</h2>
+    <p>La extensión solicita los siguientes permisos, cada uno con una justificación específica:</p>
+    <ul>
+      <li><strong>activeTab:</strong> Para acceder al contenido de la pestaña activa cuando usted inicia un scraping.</li>
+      <li><strong>storage:</strong> Para guardar sus preferencias y sesión de forma local.</li>
+      <li><strong>downloads:</strong> Para descargar el archivo Excel generado a su computadora.</li>
+      <li><strong>scripting:</strong> Para inyectar el script de extracción en la página objetivo.</li>
+      <li><strong>sidePanel:</strong> Para mostrar el panel lateral de gestión de layouts.</li>
+    </ul>
+
+    <h2>6. Sus Derechos</h2>
+    <p>Usted tiene derecho a:</p>
+    <ul>
+      <li>Acceder a sus datos personales almacenados.</li>
+      <li>Solicitar la corrección de datos inexactos.</li>
+      <li>Solicitar la eliminación de su cuenta y todos los datos asociados.</li>
+      <li>Exportar sus datos en formato legible por máquina.</li>
+      <li>Retirar su consentimiento en cualquier momento.</li>
+    </ul>
+
+    <h2>7. Retención de Datos</h2>
+    <p>Conservamos sus datos mientras su cuenta esté activa. Si elimina su cuenta, todos los datos personales se eliminan en un plazo de 30 días. Los registros de facturación se conservan según las obligaciones legales aplicables.</p>
+
+    <h2>8. Cambios a esta Política</h2>
+    <p>Podemos actualizar esta política periódicamente. Le notificaremos de cambios significativos a través de la extensión o por correo electrónico. La fecha de última actualización se indica al inicio del documento.</p>
+
+    <h2>9. Contacto</h2>
+    <p>Para preguntas sobre esta política o para ejercer sus derechos, contacte a:</p>
+    <p>Email: <a href="mailto:privacidad@scrapsae.com">privacidad@scrapsae.com</a></p>
+  </div>
+
+  <footer class="footer">
+    <div class="container">
+      <div class="footer-bottom" style="border: none; padding: 0;">
+        <p>&copy; 2026 ScrapSAE. Todos los derechos reservados.</p>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>

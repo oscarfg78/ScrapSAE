@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="../shared/styles.css">
+  <link rel="stylesheet" href="sidepanel.css">
+  <title>ScrapSAE - Panel</title>
+</head>
+<body>
+  <!-- Header -->
+  <div class="header">
+    <img src="../../icons/icon-32.png" alt="ScrapSAE">
+    <h1>ScrapSAE Panel</h1>
+    <span class="version">v1.0.0</span>
+  </div>
+
+  <!-- Tabs -->
+  <div class="container">
+    <div class="tabs">
+      <div class="tab active" data-tab="layouts">Layouts</div>
+      <div class="tab" data-tab="history">Historial</div>
+      <div class="tab" data-tab="settings">Ajustes</div>
+    </div>
+
+    <!-- ==================== TAB: LAYOUTS ==================== -->
+    <div id="tab-layouts" class="tab-content">
+      <div class="flex-between mb-2">
+        <span class="card-title" style="margin: 0;">Mis Layouts</span>
+        <button id="btn-new-layout" class="btn btn-primary btn-sm">+ Nuevo</button>
+      </div>
+
+      <div id="layouts-list"></div>
+
+      <!-- Layout Editor (hidden by default) -->
+      <div id="layout-editor" class="hidden">
+        <div class="card">
+          <div class="flex-between mb-2">
+            <span class="card-title" style="margin: 0;">Editor de Layout</span>
+            <button id="btn-close-editor" class="btn btn-outline btn-sm">Cerrar</button>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Nombre del Layout</label>
+            <input type="text" id="layout-name" class="form-input" placeholder="Ej: Festo Productos">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Modo de Scraping</label>
+            <select id="layout-mode" class="form-select">
+              <option value="traditional">Tradicional (Listado + Detalle)</option>
+              <option value="families">Familias (Categorías + Variantes)</option>
+            </select>
+          </div>
+
+          <!-- Selectores Principales -->
+          <details class="selector-group" open>
+            <summary class="card-title" style="cursor: pointer;">Selectores de Listado</summary>
+            <div class="form-group">
+              <label class="form-label">Selector de Lista de Productos</label>
+              <input type="text" id="sel-productList" class="form-input" placeholder=".result-list-item">
+              <span class="form-hint">CSS selector del contenedor de cada producto en el listado</span>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Prefijo de Clase del Card</label>
+              <input type="text" id="sel-productCardClass" class="form-input" placeholder="single-product-container--">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Enlace al Detalle</label>
+              <input type="text" id="sel-productLink" class="form-input" placeholder="a.product-link">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Siguiente Página</label>
+              <input type="text" id="sel-nextPage" class="form-input" placeholder=".pagination-next">
+            </div>
+            <div class="toggle-row">
+              <span class="toggle-label">Usa Infinite Scroll</span>
+              <div id="toggle-infinite-scroll" class="toggle" data-active="false"></div>
+            </div>
+          </details>
+
+          <!-- Selectores de Detalle -->
+          <details class="selector-group">
+            <summary class="card-title" style="cursor: pointer;">Selectores de Producto</summary>
+            <div class="form-group">
+              <label class="form-label">Título</label>
+              <input type="text" id="sel-title" class="form-input" placeholder=".product-name">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Precio</label>
+              <input type="text" id="sel-price" class="form-input" placeholder=".price-value">
+            </div>
+            <div class="form-group">
+              <label class="form-label">SKU</label>
+              <input type="text" id="sel-sku" class="form-input" placeholder=".part-number">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Descripción</label>
+              <input type="text" id="sel-description" class="form-input" placeholder=".product-description">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Imagen</label>
+              <input type="text" id="sel-image" class="form-input" placeholder=".product-image img">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Marca</label>
+              <input type="text" id="sel-brand" class="form-input" placeholder=".brand-name">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Categoría</label>
+              <input type="text" id="sel-category" class="form-input" placeholder=".breadcrumb-item">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Stock</label>
+              <input type="text" id="sel-stock" class="form-input" placeholder=".stock-info">
+            </div>
+          </details>
+
+          <!-- Mapeo de Columnas Excel -->
+          <details class="selector-group">
+            <summary class="card-title" style="cursor: pointer;">Columnas del Excel</summary>
+            <div id="column-mapping-list"></div>
+            <button id="btn-add-column" class="btn btn-outline btn-sm mt-2">+ Agregar Columna</button>
+          </details>
+
+          <div class="btn-group mt-4">
+            <button id="btn-save-layout" class="btn btn-primary" style="flex:1;">Guardar Layout</button>
+            <button id="btn-delete-layout" class="btn btn-danger btn-sm hidden">Eliminar</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== TAB: HISTORY ==================== -->
+    <div id="tab-history" class="tab-content hidden">
+      <div class="card-title">Historial de Ejecuciones</div>
+      <div id="history-list">
+        <div class="empty-state">
+          <div class="icon">&#128203;</div>
+          <p>No hay ejecuciones registradas</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== TAB: SETTINGS ==================== -->
+    <div id="tab-settings" class="tab-content hidden">
+      <div class="card">
+        <div class="card-title">Conexión al Backend</div>
+        <div class="form-group">
+          <label class="form-label">URL del API</label>
+          <input type="text" id="settings-api-url" class="form-input" placeholder="https://api.scrapsae.com">
+          <span class="form-hint">Déjalo vacío para usar el servidor por defecto</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Supabase</div>
+        <div class="form-group">
+          <label class="form-label">URL de Supabase</label>
+          <input type="text" id="settings-supabase-url" class="form-input" placeholder="https://xxx.supabase.co">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Anon Key</label>
+          <input type="text" id="settings-supabase-key" class="form-input" placeholder="eyJ...">
+        </div>
+      </div>
+
+      <button id="btn-save-settings" class="btn btn-primary btn-block">Guardar Ajustes</button>
+    </div>
+  </div>
+
+  <script type="module" src="sidepanel.ts"></script>
+</body>
+</html>
