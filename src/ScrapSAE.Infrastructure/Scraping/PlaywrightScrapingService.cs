@@ -1,4 +1,4 @@
-﻿using Microsoft.Playwright;
+using Microsoft.Playwright;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using ScrapSAE.Core.DTOs;
@@ -659,7 +659,32 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
                 if (searchaniseProducts.Count > 0)
                 {
                     await LogStepAsync(site.Id, "success", "Scraping Searchanise completado.", new { count = searchaniseProducts.Count });
-                    return searchaniseProducts;
+                    
+                    var enrichedProducts = new List<ScrapedProduct>();
+                    foreach (var product in searchaniseProducts)
+                    {
+                        if (cancellationToken.IsCancellationRequested)
+                        {
+                            break;
+                        }
+
+                        try
+                        {
+                            // 1. Visit IDSupply detail page to extract description, SKU, and all gallery images
+                            await EnrichIdSupplyProductFromDetailPageAsync(page, product, cancellationToken);
+                            
+                            // 2. Search SKU on Festo to extract technical data and datasheet PDF
+                            await SearchAndEnrichFromFestoAsync(page, product, cancellationToken);
+                            
+                            enrichedProducts.Add(product);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Error enriching product {Sku} from IDSupply detail or Festo search", product.SkuSource);
+                            enrichedProducts.Add(product);
+                        }
+                    }
+                    return enrichedProducts;
                 }
 
                 await LogStepAsync(site.Id, "warn", "Searchanise fast path no obtuvo productos. Aplicando fallback tradicional.", null);
@@ -4902,20 +4927,7 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
             return products;
         }
 
-        string selectorsJson;
-        if (site.Selectors is JsonElement jsonElement)
-        {
-            selectorsJson = jsonElement.GetRawText();
-        }
-        else if (site.Selectors is string s)
-        {
-            selectorsJson = s;
-        }
-        else
-        {
-            selectorsJson = JsonConvert.SerializeObject(site.Selectors);
-        }
-
+        var selectorsJson = SerializeSelectorsObject(site.Selectors);
         var selectors = JsonConvert.DeserializeObject<SiteSelectors>(selectorsJson) ?? new SiteSelectors();
         FillSelectorsFromJson(selectors, selectorsJson);
 
@@ -6271,14 +6283,7 @@ private async Task HumanClickAsync(ILocator locator)
         await LogStepAsync(site.Id, "info", "🔍 El scraper intentará extraer datos de cada URL usando los selectores configurados.");
         
         // Parsear selectores del sitio
-        string selectorsJson;
-        if (site.Selectors is JsonElement jsonElement)
-            selectorsJson = jsonElement.GetRawText();
-        else if (site.Selectors is string s)
-            selectorsJson = s;
-        else
-            selectorsJson = JsonConvert.SerializeObject(site.Selectors);
-        
+        var selectorsJson = SerializeSelectorsObject(site.Selectors);
         var selectors = JsonConvert.DeserializeObject<SiteSelectors>(selectorsJson) ?? new SiteSelectors();
         FillSelectorsFromJson(selectors, selectorsJson);
         
@@ -6501,5 +6506,210 @@ private async Task HumanClickAsync(ILocator locator)
 
         return product;
     }
-}
 
+    private async Task EnrichIdSupplyProductFromDetailPageAsync(IPage page, ScrapedProduct product, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(product.SourceUrl))
+        {
+            return;
+        }
+
+        _logger.LogInformation("Enriching idsupply product from detail page: {Url}", product.SourceUrl);
+        await page.GotoAsync(product.SourceUrl, new PageGotoOptions
+        {
+            WaitUntil = WaitUntilState.DOMContentLoaded,
+            Timeout = 90000
+        });
+        await AcceptCookiesAsync(page, cancellationToken);
+        await Task.Delay(2000, cancellationToken); // Grace delay
+
+        // Extract SKU
+        var skuEl = await page.QuerySelectorAsync("h2.gp-product-sku, [class*='product-sku'], .gp-product-sku");
+        if (skuEl != null)
+        {
+            var skuText = (await skuEl.InnerTextAsync())?.Trim();
+            if (skuText != null)
+            {
+                if (skuText.StartsWith("SKU:", StringComparison.OrdinalIgnoreCase))
+                {
+                    skuText = skuText.Substring(4).Trim();
+                }
+                product.SkuSource = skuText;
+            }
+        }
+
+        // Extract Description
+        var descEl = await page.QuerySelectorAsync("div.gp-p-description-text, [class*='description-text'], [class*='description'], .gp-p-description-text");
+        if (descEl != null)
+        {
+            product.Description = (await descEl.InnerTextAsync())?.Trim();
+        }
+
+        // Extract Gallery Images
+        var images = await page.EvaluateAsync<List<string>>(@"
+            async () => {
+                const urls = new Set();
+                const mainImg = document.querySelector('img[class*=""image--""], img[alt*=""Festo""], .gp-relative img');
+                if (mainImg && mainImg.src) urls.add(mainImg.src);
+
+                const thumbs = Array.from(document.querySelectorAll('button img, .gp-cursor-pointer img, [class*=""thumbnail""] img'));
+                for (const thumb of thumbs) {
+                    try {
+                        const clickTarget = thumb.closest('button') || thumb.closest('.gp-cursor-pointer') || thumb;
+                        clickTarget.click();
+                        await new Promise(resolve => setTimeout(resolve, 350));
+                        const currentMainImg = document.querySelector('img[class*=""image--""], img[alt*=""Festo""], .gp-relative img');
+                        if (currentMainImg && currentMainImg.src) {
+                            urls.add(currentMainImg.src);
+                        }
+                    } catch (e) {}
+                }
+
+                // Fallback
+                for (const thumb of thumbs) {
+                    if (thumb.src) {
+                        const originalUrl = thumb.src.replace(/_(?:[0-9]+x[0-9]*|[0-9]*x[0-9]+|small|thumb|medium|large|grande)(?=\.(?:jpe?g|png|webp|gif))/i, '');
+                        urls.add(originalUrl);
+                    }
+                }
+
+                return Array.from(urls);
+            }
+        ");
+
+        if (images != null && images.Count > 0)
+        {
+            product.ImageUrls = images.Where(img => !string.IsNullOrWhiteSpace(img)).Select(img => NormalizeHref(page.Url, img)).Distinct().ToList();
+            product.ImageUrl = product.ImageUrls.FirstOrDefault();
+        }
+    }
+
+    private async Task SearchAndEnrichFromFestoAsync(IPage page, ScrapedProduct product, CancellationToken cancellationToken)
+    {
+        var searchQuery = product.SkuSource;
+        if (string.IsNullOrWhiteSpace(searchQuery))
+        {
+            return;
+        }
+
+        _logger.LogInformation("Navigating to festo.com to search for SKU: {Sku}", searchQuery);
+        await page.GotoAsync("https://www.festo.com/mx/es/", new PageGotoOptions
+        {
+            WaitUntil = WaitUntilState.DOMContentLoaded,
+            Timeout = 90000
+        });
+        await AcceptCookiesAsync(page, cancellationToken);
+        await Task.Delay(2000, cancellationToken);
+
+        var searchInputSelector = "input[data-testid='first-search-input'], #first-search-input, input[type='search']";
+        var searchInput = await page.QuerySelectorAsync(searchInputSelector);
+        if (searchInput != null)
+        {
+            await searchInput.ClickAsync();
+            await searchInput.FillAsync("");
+            await searchInput.FillAsync(searchQuery);
+
+            var searchButton = await page.QuerySelectorAsync("button[data-testid='magnifier-button'], button.search-button");
+            if (searchButton != null)
+            {
+                await searchButton.ClickAsync();
+            }
+            else
+            {
+                await page.Keyboard.PressAsync("Enter");
+            }
+
+            await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+            await Task.Delay(3000, cancellationToken);
+
+            var orderCodeLinkSelector = "[class*='product-order-code-'], [class*='order-code-'], a:has-text('" + searchQuery + "')";
+            try
+            {
+                await page.WaitForSelectorAsync(orderCodeLinkSelector, new() { Timeout = 10000 });
+            }
+            catch
+            {
+                // Try to fallback to searching by the last/numeric part of SKU if it fails
+                var parts = searchQuery.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length > 1)
+                {
+                    var numericPart = parts.FirstOrDefault(p => p.All(char.IsDigit));
+                    if (!string.IsNullOrEmpty(numericPart))
+                    {
+                        _logger.LogInformation("Full SKU Festo search failed. Retrying with numeric part: {Part}", numericPart);
+                        await page.GotoAsync("https://www.festo.com/mx/es/", new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 90000 });
+                        await AcceptCookiesAsync(page, cancellationToken);
+                        var input = await page.QuerySelectorAsync(searchInputSelector);
+                        if (input != null)
+                        {
+                            await input.FillAsync(numericPart);
+                            await page.Keyboard.PressAsync("Enter");
+                            await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+                            await Task.Delay(3000, cancellationToken);
+                            orderCodeLinkSelector = "[class*='product-order-code-'], [class*='order-code-'], a:has-text('" + numericPart + "')";
+                            try { await page.WaitForSelectorAsync(orderCodeLinkSelector, new() { Timeout = 10000 }); } catch { }
+                        }
+                    }
+                }
+            }
+
+            var orderCodeLinks = await page.QuerySelectorAllAsync("[class*='product-order-code-'], [class*='order-code-']");
+            if (orderCodeLinks.Count > 0)
+            {
+                _logger.LogInformation("Clicking on Festo order code link: {Selector}", orderCodeLinkSelector);
+                await orderCodeLinks[0].ClickAsync();
+                await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+                await Task.Delay(3000, cancellationToken);
+            }
+            else
+            {
+                // Fallback to first matching link in search results containing p/ or a/
+                var fallbackLink = await page.QuerySelectorAsync("a[href*='/p/'], a[href*='/a/']");
+                if (fallbackLink != null)
+                {
+                    _logger.LogInformation("Clicking fallback link to open product detail page.");
+                    await fallbackLink.ClickAsync();
+                    await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+                    await Task.Delay(3000, cancellationToken);
+                }
+            }
+
+            // Click Technical Data tab and extract attributes
+            await ExtractFestoTechnicalDataAsync(page, product, cancellationToken);
+
+            // Locate and extract the datasheet PDF URL
+            var pdfLinks = await page.QuerySelectorAllAsync("a[href*='.pdf'], a[href*='download-document'], a[href*='datasheet']");
+            string? pdfUrl = null;
+            foreach (var link in pdfLinks)
+            {
+                var href = await link.GetAttributeAsync("href");
+                var text = await link.InnerTextAsync();
+                if (!string.IsNullOrWhiteSpace(href) && 
+                    (href.Contains(".pdf", StringComparison.OrdinalIgnoreCase) || 
+                     href.Contains("datasheet", StringComparison.OrdinalIgnoreCase) || 
+                     (text != null && (text.Contains("Hoja de datos", StringComparison.OrdinalIgnoreCase) || 
+                                       text.Contains("Ficha técnica", StringComparison.OrdinalIgnoreCase) || 
+                                       text.Contains("Datasheet", StringComparison.OrdinalIgnoreCase)))))
+                {
+                    pdfUrl = NormalizeHref(page.Url, href);
+                    break;
+                }
+            }
+
+            if (!string.IsNullOrEmpty(pdfUrl))
+            {
+                _logger.LogInformation("Enriched Festo datasheet PDF: {Url}", pdfUrl);
+                var existing = product.Attachments.FirstOrDefault(a => a.FileUrl == pdfUrl);
+                if (existing == null)
+                {
+                    product.Attachments.Add(new ProductAttachment
+                    {
+                        FileName = $"datasheet_{product.SkuSource}.pdf",
+                        FileUrl = pdfUrl,
+                        FileType = "application/pdf"
+                    });
+                }
+            }
+        }
+    }
+}

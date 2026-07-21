@@ -47,6 +47,11 @@ internal static class FlashlyProductMapper
             }
         }
 
+        if (productUrl != null && productUrl.Contains("idsupply.com.mx", StringComparison.OrdinalIgnoreCase))
+        {
+            supplierName = null;
+        }
+
         return new FlashlyProductSyncDto
         {
             SourceSku = sourceSku,

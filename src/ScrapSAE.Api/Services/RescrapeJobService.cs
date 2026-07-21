@@ -767,9 +767,17 @@ public sealed class RescrapeJobService : IRescrapeJobService
             var normalizedProvider = providerName.Trim();
             if (!string.IsNullOrWhiteSpace(normalizedProvider))
             {
-                product.Brand = normalizedProvider;
-                product.Attributes["brand"] = normalizedProvider;
-                product.Attributes["supplier_name"] = normalizedProvider;
+                if (normalizedProvider.Contains("idsupply", StringComparison.OrdinalIgnoreCase))
+                {
+                    product.Brand = "Festo";
+                    product.Attributes["brand"] = "Festo";
+                }
+                else
+                {
+                    product.Brand = normalizedProvider;
+                    product.Attributes["brand"] = normalizedProvider;
+                    product.Attributes["supplier_name"] = normalizedProvider;
+                }
             }
         }
 
