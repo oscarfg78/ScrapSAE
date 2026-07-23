@@ -31,6 +31,53 @@ public sealed class ApiClient
     public Task<SiteProfile?> UpdateSiteAsync(Guid id, SiteProfile site) => PutAsync($"api/sites/{id}", site);
     public Task DeleteSiteAsync(Guid id) => DeleteAsync($"api/sites/{id}");
 
+    /// <summary>
+    /// Analiza la URL de un proveedor con IA para detectar la estructura del catálogo de productos.
+    /// Puede tomar hasta 30 segundos (descarga HTML con Playwright + análisis GPT).
+    /// </summary>
+    public async Task<PageAnalysisResult?> AnalyzePageAsync(string url)
+    {
+        var body = new { url };
+        try
+        {
+            var response = await _httpClient.PostAsJsonAsync("api/sites/analyze", body);
+            if (!response.IsSuccessStatusCode)
+            {
+                var content = await response.Content.ReadAsStringAsync();
+                AppLogger.Error($"POST api/sites/analyze failed. Status={(int)response.StatusCode}. Body={content}");
+                return null;
+            }
+            return await response.Content.ReadFromJsonAsync<PageAnalysisResult>(_jsonOptions);
+        }
+        catch (Exception ex)
+        {
+            AppLogger.Error("AnalyzePageAsync exception.", ex);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Elimina manualmente todos los SiteProfile prefijados [TEMP] (limpieza del wizard).
+    /// </summary>
+    public async Task<int> DeleteTempSitesAsync()
+    {
+        try
+        {
+            var response = await _httpClient.DeleteAsync("api/sites/temp");
+            if (!response.IsSuccessStatusCode)
+            {
+                return 0;
+            }
+            var result = await response.Content.ReadFromJsonAsync<JsonElement>(_jsonOptions);
+            return result.TryGetProperty("deleted", out var deleted) ? deleted.GetInt32() : 0;
+        }
+        catch (Exception ex)
+        {
+            AppLogger.Error("DeleteTempSitesAsync exception.", ex);
+            return 0;
+        }
+    }
+
     public Task<List<StagingProduct>> GetStagingProductsAsync() => GetAllAsync<StagingProduct>("api/staging-products");
     public Task<StagingProduct?> CreateStagingProductAsync(StagingProduct product) => PostAsync("api/staging-products", product);
     public Task<StagingProduct?> UpsertStagingProductAsync(StagingProduct product) => PostAsync("api/staging-products/upsert", product);

@@ -1,4 +1,4 @@
-﻿using ScrapSAE.Api.Models;
+using ScrapSAE.Api.Models;
 using ScrapSAE.Api.Services;
 using ScrapSAE.Core.DTOs;
 using ScrapSAE.Core.Entities;
@@ -14,6 +14,7 @@ using System.Text.Json.Nodes;
 
 using ScrapSAE.Api.Endpoints;
 using Serilog; // Added for file logging
+using Polly;
 
 // Configure Serilog early
 Log.Logger = new LoggerConfiguration()
@@ -81,10 +82,21 @@ builder.Services.AddSingleton<IBrowserSharingService, BrowserSharingService>();
 
 builder.Services.AddSingleton<ScrapingProcessManager>();
 builder.Services.AddSingleton<IScrapingService, PlaywrightScrapingService>();
+builder.Services.AddKeyedSingleton<ScrapSAE.Core.Interfaces.IProviderScraperStrategy, ScrapSAE.Infrastructure.Scraping.Strategies.GenericPlaywrightStrategy>("Generic");
+builder.Services.AddKeyedSingleton<ScrapSAE.Core.Interfaces.IProviderScraperStrategy, ScrapSAE.Infrastructure.Scraping.Strategies.ShopifyApiStrategy>("Shopify");
+builder.Services.AddHttpClient("ShopifyClient")
+    .AddTransientHttpErrorPolicy(policyBuilder =>
+        policyBuilder.WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))));
 builder.Services.AddSingleton<ScrapingRunner>();
 builder.Services.AddSingleton<IScrapingSignalService, ScrapingSignalService>();
 builder.Services.AddSingleton<IRescrapeJobService, RescrapeJobService>();
 builder.Services.AddHostedService<RescrapeJobBackgroundService>();
+
+// ===== WIZARD DE PROVEEDOR =====
+// Servicio de análisis de página IA para el wizard de creación de proveedores
+builder.Services.AddSingleton<IPageAnalysisService, ScrapSAE.Infrastructure.AI.PageAnalysisService>();
+// Job de limpieza de sites temporales creados por el wizard
+builder.Services.AddHostedService<TempSiteCleanupService>();
 
 var saeProvider = builder.Configuration["SAE:Provider"] ?? "firebird";
 if (string.Equals(saeProvider, "firebird", StringComparison.OrdinalIgnoreCase))
@@ -166,6 +178,72 @@ MapSiteCrud(
     app,
     app.Services.GetRequiredService<SupabaseTableService<SiteProfile>>(),
     app.Services.GetRequiredService<ISupabaseRestClient>());
+
+// ─── Wizard: Análisis de página IA ─────────────────────────────────────────
+app.MapPost("/api/sites/analyze", async (
+    PageAnalysisRequest request,
+    IPageAnalysisService pageAnalysis,
+    CancellationToken token) =>
+{
+    if (string.IsNullOrWhiteSpace(request.Url))
+    {
+        return Results.BadRequest(new { error = "La URL es requerida." });
+    }
+    if (!Uri.TryCreate(request.Url, UriKind.Absolute, out var uri)
+        || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+    {
+        return Results.UnprocessableEntity(new { error = "La URL debe ser http o https válida." });
+    }
+
+    try
+    {
+        var result = await pageAnalysis.AnalyzeAsync(request.Url, token);
+        return Results.Ok(result);
+    }
+    catch (TimeoutException ex)
+    {
+        return Results.Problem(
+            title: "Timeout de análisis",
+            detail: ex.Message,
+            statusCode: StatusCodes.Status408RequestTimeout);
+    }
+    catch (InvalidOperationException ex) when (ex.Message.Contains("inaccesible") || ex.Message.Contains("Failed") || ex.Message.Contains("net::"))
+    {
+        return Results.UnprocessableEntity(new { error = $"No se pudo acceder a la página: {ex.Message}" });
+    }
+    catch (Exception ex)
+    {
+        Log.Error(ex, "[PageAnalysis] Error analizando {Url}", request.Url);
+        return Results.UnprocessableEntity(new { error = ex.Message });
+    }
+}).WithTags("Site");
+
+// ─── Wizard: Eliminar sites temporales (manuales) ────────────────────────────
+app.MapDelete("/api/sites/temp", async (
+    SupabaseTableService<SiteProfile> siteService,
+    CancellationToken token) =>
+{
+    var allSites = await siteService.GetAllAsync();
+    var tempSites = allSites
+        .Where(s => s.Name.StartsWith("[TEMP]", StringComparison.OrdinalIgnoreCase))
+        .ToList();
+
+    var deleted = 0;
+    foreach (var site in tempSites)
+    {
+        try
+        {
+            await siteService.DeleteAsync(site.Id);
+            deleted++;
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "[TempCleanup] No se pudo eliminar site temporal {SiteId}", site.Id);
+        }
+    }
+
+    return Results.Ok(new { deleted, message = $"{deleted} site(s) temporal(es) eliminado(s)." });
+}).WithTags("Site");
 
 MapCrud(app, "/api/staging-products", "StagingProduct",
     app.Services.GetRequiredService<SupabaseTableService<StagingProduct>>(),

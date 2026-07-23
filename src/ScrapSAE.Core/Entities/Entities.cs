@@ -23,6 +23,7 @@ public class SiteProfile
     // Nuevas propiedades para el sistema adaptativo
     public Dictionary<string, List<string>> SecondarySelectors { get; set; } = new();
     public List<ScrapingStrategyDefinition> Strategies { get; set; } = new();
+    public string StrategyType { get; set; } = "Generic";
 }
 
 /// <summary>

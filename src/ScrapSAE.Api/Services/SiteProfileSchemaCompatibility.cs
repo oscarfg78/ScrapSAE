@@ -8,6 +8,7 @@ public static class SiteProfileSchemaCompatibility
 {
     private const string LegacySecondarySelectorsKey = "__legacySecondarySelectors";
     private const string LegacyStrategiesKey = "__legacyStrategies";
+    private const string LegacyStrategyTypeKey = "__legacyStrategyType";
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -35,8 +36,22 @@ public static class SiteProfileSchemaCompatibility
             site.Strategies = legacyStrategies;
         }
 
+        if ((string.IsNullOrEmpty(site.StrategyType) || site.StrategyType == "Generic") &&
+            selectors.TryGetPropertyValue(LegacyStrategyTypeKey, out var legacyStrategyTypeNode))
+        {
+            var kind = legacyStrategyTypeNode?.GetValueKind();
+            Console.WriteLine($"[DEBUG] NormalizeFromStorage: Found {LegacyStrategyTypeKey}. Kind: {kind}, Value: {legacyStrategyTypeNode}");
+            
+            if (kind == JsonValueKind.String || kind == JsonValueKind.Object)
+            {
+                site.StrategyType = legacyStrategyTypeNode?.ToString() ?? "Generic";
+                Console.WriteLine($"[DEBUG] NormalizeFromStorage: Restored StrategyType to {site.StrategyType}");
+            }
+        }
+
         selectors.Remove(LegacySecondarySelectorsKey);
         selectors.Remove(LegacyStrategiesKey);
+        selectors.Remove(LegacyStrategyTypeKey);
         site.Selectors = selectors;
 
         EnsureCollections(site);
@@ -57,7 +72,8 @@ public static class SiteProfileSchemaCompatibility
     {
         var message = ex.ToString();
         return message.Contains("secondary_selectors", StringComparison.OrdinalIgnoreCase)
-            || message.Contains("strategies", StringComparison.OrdinalIgnoreCase);
+            || message.Contains("strategies", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("strategy_type", StringComparison.OrdinalIgnoreCase);
     }
 
     public static async Task<SiteProfile?> CreateWithFallbackAsync(
@@ -108,6 +124,11 @@ public static class SiteProfileSchemaCompatibility
         var selectors = ParseSelectors(site.Selectors);
         selectors[LegacySecondarySelectorsKey] = JsonSerializer.SerializeToNode(site.SecondarySelectors, JsonOptions) ?? new JsonObject();
         selectors[LegacyStrategiesKey] = JsonSerializer.SerializeToNode(site.Strategies, JsonOptions) ?? new JsonArray();
+        
+        if (!string.IsNullOrEmpty(site.StrategyType))
+        {
+            selectors[LegacyStrategyTypeKey] = site.StrategyType;
+        }
 
         return new SiteProfileLegacyPayload
         {

@@ -1,4 +1,4 @@
-﻿<Window x:Class="ScrapSAE.Desktop.MainWindow"
+<Window x:Class="ScrapSAE.Desktop.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
@@ -345,7 +345,8 @@
                                 <TextBlock Text="Proveedores registrados" FontWeight="SemiBold" FontSize="14" />
                                 <TextBlock Text="Selecciona un proveedor para editarlo o crea uno nuevo." Foreground="#6B7280" FontSize="12" Margin="0,2,0,10" />
                                 <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                                    <Button Content="Nuevo" Command="{Binding CreateSiteCommand}" Margin="0,0,8,0" />
+                                    <Button Content="✨ Wizard IA" Command="{Binding LaunchWizardCommand}" Background="#8B5CF6" BorderBrush="#7C3AED" Margin="0,0,8,0" ToolTip="Analiza la URL con IA para autoconfigurar selectores"/>
+                                    <Button Content="Nuevo (Manual)" Command="{Binding CreateSiteCommand}" Margin="0,0,8,0" />
                                     <Button Content="{Binding SiteSaveButtonText}" Command="{Binding UpdateSiteCommand}" Background="#059669" BorderBrush="#047857" Margin="0,0,8,0" />
                                     <Button Content="Eliminar" Command="{Binding DeleteSiteCommand}" Background="#DC2626" BorderBrush="#B91C1C" />
                                 </StackPanel>

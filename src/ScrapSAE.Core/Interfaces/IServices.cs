@@ -292,3 +292,18 @@ public interface IStrategyOrchestrator
         CancellationToken cancellationToken = default);
 }
 
+/// <summary>
+/// Interface para el servicio de análisis de página web para detección de estructura de catálogo de productos
+/// </summary>
+public interface IPageAnalysisService
+{
+    /// <summary>
+    /// Descarga el HTML de la URL con Playwright y lo analiza con GPT para detectar
+    /// la estructura del catálogo de productos (selectores, campos, estrategias).
+    /// El proceso completo tiene un timeout de 30 segundos.
+    /// </summary>
+    /// <param name="url">URL de la página a analizar</param>
+    /// <param name="cancellationToken">Token de cancelación</param>
+    /// <returns>Resultado del análisis con selectores y estrategias sugeridas</returns>
+    Task<ScrapSAE.Core.DTOs.PageAnalysisResult> AnalyzeAsync(string url, CancellationToken cancellationToken = default);
+}

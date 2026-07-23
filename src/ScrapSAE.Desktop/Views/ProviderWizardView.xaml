@@ -1,0 +1,568 @@
+<Window x:Class="ScrapSAE.Desktop.Views.ProviderWizardView"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:ScrapSAE.Desktop.Views"
+        Title="Agregar Proveedor — Wizard"
+        Width="840" Height="700"
+        MinWidth="720" MinHeight="580"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="CanResizeWithGrip"
+        ShowInTaskbar="False">
+
+    <Window.Resources>
+        <local:BoolToVisibilityConverter x:Key="BoolToVisibility"/>
+        <local:InverseBoolToVisibilityConverter x:Key="InverseBoolToVisibility"/>
+        <local:InverseBoolConverter x:Key="InverseBool"/>
+        <local:NullToCollapsedConverter x:Key="NullToCollapsed"/>
+        <local:StringToVisibilityConverter x:Key="StringToVisibility"/>
+        <local:CountToVisibilityConverter x:Key="CountToVisibility"/>
+        <local:StepColorConverter x:Key="StepColor"/>
+        <local:CoverageToBrushConverter x:Key="CoverageToBrush"/>
+
+        <!-- Step circle style -->
+        <Style x:Key="StepCircle" TargetType="Border">
+            <Setter Property="Width" Value="32"/>
+            <Setter Property="Height" Value="32"/>
+            <Setter Property="CornerRadius" Value="16"/>
+        </Style>
+
+        <!-- Primary button style -->
+        <Style x:Key="PrimaryBtn" TargetType="Button">
+            <Setter Property="Background" Value="#2563EB"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="Padding" Value="18,8"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" CornerRadius="6" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.45"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" Value="#1D4ED8"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Secondary button style -->
+        <Style x:Key="SecondaryBtn" TargetType="Button">
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="Foreground" Value="#374151"/>
+            <Setter Property="Padding" Value="18,8"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="BorderBrush" Value="#D1D5DB"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="6" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" Value="#F9FAFB"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Input -->
+        <Style x:Key="Input" TargetType="TextBox">
+            <Setter Property="Padding" Value="8,6"/>
+            <Setter Property="BorderBrush" Value="#D1D5DB"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="FontSize" Value="13"/>
+        </Style>
+
+        <Style x:Key="FieldLabel" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="#374151"/>
+            <Setter Property="Margin" Value="0,0,0,4"/>
+        </Style>
+
+        <Style x:Key="SectionHeader" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="15"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="#111827"/>
+            <Setter Property="Margin" Value="0,0,0,10"/>
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- ═══ HEADER: Step breadcrumb ═══════════════════════════════════ -->
+        <Border Grid.Row="0" Background="White" BorderBrush="#E5E7EB" BorderThickness="0,0,0,1" Padding="28,16">
+            <StackPanel Orientation="Horizontal">
+
+                <!-- Step 1 -->
+                <StackPanel Width="72" HorizontalAlignment="Center">
+                    <Border Style="{StaticResource StepCircle}" HorizontalAlignment="Center">
+                        <Border.Background>
+                            <MultiBinding Converter="{StaticResource StepColor}">
+                                <Binding Path="Step1Completed"/>
+                                <Binding Path="IsStep1"/>
+                            </MultiBinding>
+                        </Border.Background>
+                        <TextBlock Text="1" Foreground="White" FontWeight="Bold" FontSize="14"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <TextBlock Text="URL" FontSize="11" Foreground="#6B7280" HorizontalAlignment="Center" Margin="0,4,0,0"/>
+                </StackPanel>
+
+                <Rectangle Width="30" Height="2" Fill="#E5E7EB" VerticalAlignment="Center" Margin="0,0,0,16"/>
+
+                <!-- Step 2 -->
+                <StackPanel Width="72" HorizontalAlignment="Center">
+                    <Border Style="{StaticResource StepCircle}" HorizontalAlignment="Center">
+                        <Border.Background>
+                            <MultiBinding Converter="{StaticResource StepColor}">
+                                <Binding Path="Step2Completed"/>
+                                <Binding Path="IsStep2"/>
+                            </MultiBinding>
+                        </Border.Background>
+                        <TextBlock Text="2" Foreground="White" FontWeight="Bold" FontSize="14"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <TextBlock Text="Análisis" FontSize="11" Foreground="#6B7280" HorizontalAlignment="Center" Margin="0,4,0,0"/>
+                </StackPanel>
+
+                <Rectangle Width="30" Height="2" Fill="#E5E7EB" VerticalAlignment="Center" Margin="0,0,0,16"/>
+
+                <!-- Step 3 -->
+                <StackPanel Width="72" HorizontalAlignment="Center">
+                    <Border Style="{StaticResource StepCircle}" HorizontalAlignment="Center">
+                        <Border.Background>
+                            <MultiBinding Converter="{StaticResource StepColor}">
+                                <Binding Path="Step3Completed"/>
+                                <Binding Path="IsStep3"/>
+                            </MultiBinding>
+                        </Border.Background>
+                        <TextBlock Text="3" Foreground="White" FontWeight="Bold" FontSize="14"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <TextBlock Text="Config." FontSize="11" Foreground="#6B7280" HorizontalAlignment="Center" Margin="0,4,0,0"/>
+                </StackPanel>
+
+                <Rectangle Width="30" Height="2" Fill="#E5E7EB" VerticalAlignment="Center" Margin="0,0,0,16"/>
+
+                <!-- Step 4 -->
+                <StackPanel Width="72" HorizontalAlignment="Center">
+                    <Border Style="{StaticResource StepCircle}" HorizontalAlignment="Center">
+                        <Border.Background>
+                            <MultiBinding Converter="{StaticResource StepColor}">
+                                <Binding Path="Step4Completed"/>
+                                <Binding Path="IsStep4"/>
+                            </MultiBinding>
+                        </Border.Background>
+                        <TextBlock Text="4" Foreground="White" FontWeight="Bold" FontSize="14"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <TextBlock Text="Test" FontSize="11" Foreground="#6B7280" HorizontalAlignment="Center" Margin="0,4,0,0"/>
+                </StackPanel>
+
+                <Rectangle Width="30" Height="2" Fill="#E5E7EB" VerticalAlignment="Center" Margin="0,0,0,16"/>
+
+                <!-- Step 5 -->
+                <StackPanel Width="72" HorizontalAlignment="Center">
+                    <Border Style="{StaticResource StepCircle}" HorizontalAlignment="Center">
+                        <Border.Background>
+                            <MultiBinding Converter="{StaticResource StepColor}">
+                                <Binding Path="WasSuccessful"/>
+                                <Binding Path="IsStep5"/>
+                            </MultiBinding>
+                        </Border.Background>
+                        <TextBlock Text="5" Foreground="White" FontWeight="Bold" FontSize="14"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <TextBlock Text="Guardar" FontSize="11" Foreground="#6B7280" HorizontalAlignment="Center" Margin="0,4,0,0"/>
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
+        <!-- ═══ CONTENT ════════════════════════════════════════════════════ -->
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <Grid Margin="28,22">
+
+                <!-- STEP 1: URL input -->
+                <StackPanel Visibility="{Binding IsStep1, Converter={StaticResource BoolToVisibility}}">
+                    <TextBlock Text="Ingresa la URL del catálogo del proveedor" Style="{StaticResource SectionHeader}" FontSize="18"/>
+                    <TextBlock Foreground="#6B7280" FontSize="13" Margin="0,0,0,24" TextWrapping="Wrap"
+                               Text="La IA analizará la estructura de la página y propondrá los selectores de productos automáticamente."/>
+
+                    <TextBlock Style="{StaticResource FieldLabel}" Text="URL del catálogo de productos"/>
+                    <TextBox Text="{Binding Url, UpdateSourceTrigger=PropertyChanged}"
+                             Style="{StaticResource Input}" FontSize="14" Padding="10,8"/>
+                    <TextBlock Margin="0,6,0,0" FontSize="12" Foreground="#9CA3AF">
+                        Ej: https://proveedor.com/productos
+                    </TextBlock>
+
+                    <Border Background="#FEF2F2" BorderBrush="#DC2626" BorderThickness="1"
+                            CornerRadius="6" Padding="12,8" Margin="0,16,0,0"
+                            Visibility="{Binding HasError, Converter={StaticResource BoolToVisibility}}">
+                        <TextBlock Text="{Binding ErrorMessage}" Foreground="#DC2626" FontSize="13" TextWrapping="Wrap"/>
+                    </Border>
+                </StackPanel>
+
+                <!-- STEP 2: Analysis in progress / results -->
+                <StackPanel Visibility="{Binding IsStep2, Converter={StaticResource BoolToVisibility}}">
+
+                    <!-- Loading state -->
+                    <StackPanel Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibility}}">
+                        <TextBlock Text="Analizando el catálogo con IA..." Style="{StaticResource SectionHeader}" FontSize="18"/>
+                        <TextBlock Foreground="#6B7280" FontSize="13" Margin="0,0,0,20" TextWrapping="Wrap"
+                                   Text="Descargando la página (Playwright) y enviando al modelo GPT para análisis estructural. Puede tardar hasta 30 segundos."/>
+                        <ProgressBar IsIndeterminate="True" Height="5" Margin="0,0,0,20" Foreground="#2563EB"/>
+                        <TextBlock Text="{Binding StatusMessage}" Foreground="#6B7280" FontSize="12"/>
+                    </StackPanel>
+
+                    <!-- Results state -->
+                    <StackPanel Visibility="{Binding IsBusy, Converter={StaticResource InverseBoolToVisibility}}">
+                        <TextBlock Text="Resultado del Análisis" Style="{StaticResource SectionHeader}" FontSize="18"/>
+                        <TextBlock Text="{Binding StatusMessage}" Foreground="#374151" FontSize="13" Margin="0,0,0,12" TextWrapping="Wrap"/>
+
+                        <!-- Summary box -->
+                        <Border Background="#EFF6FF" BorderBrush="#2563EB" BorderThickness="1"
+                                CornerRadius="6" Padding="14,10" Margin="0,0,0,16"
+                                Visibility="{Binding AnalysisResult.AnalysisSummary, Converter={StaticResource StringToVisibility}}">
+                            <TextBlock Text="{Binding AnalysisResult.AnalysisSummary}" TextWrapping="Wrap" FontSize="13"/>
+                        </Border>
+
+                        <!-- Detected fields table -->
+                        <TextBlock Text="Campos detectados" Style="{StaticResource SectionHeader}"
+                                   Visibility="{Binding AnalysisResult, Converter={StaticResource NullToCollapsed}}"/>
+                        <DataGrid ItemsSource="{Binding AnalysisResult.DetectedFields}"
+                                  AutoGenerateColumns="False" IsReadOnly="True"
+                                  HeadersVisibility="Column" GridLinesVisibility="Horizontal"
+                                  BorderBrush="#E5E7EB" BorderThickness="1"
+                                  RowHeight="32" FontSize="12" MaxHeight="200" Margin="0,0,0,16"
+                                  Visibility="{Binding AnalysisResult, Converter={StaticResource NullToCollapsed}}">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Campo" Binding="{Binding Name}" Width="90"/>
+                                <DataGridTextColumn Header="Selector CSS sugerido" Binding="{Binding Selector}" Width="*"/>
+                                <DataGridTextColumn Header="Confianza" Binding="{Binding Confidence}" Width="80"/>
+                                <DataGridTextColumn Header="Nota" Binding="{Binding Note}" Width="190"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+
+                        <!-- Strategies -->
+                        <TextBlock Text="Estrategias recomendadas" Style="{StaticResource SectionHeader}"
+                                   Visibility="{Binding AnalysisResult, Converter={StaticResource NullToCollapsed}}"/>
+                        <ItemsControl ItemsSource="{Binding AnalysisResult.RecommendedStrategies}" Margin="0,0,0,16"
+                                      Visibility="{Binding AnalysisResult, Converter={StaticResource NullToCollapsed}}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Background="#F9FAFB" BorderBrush="#E5E7EB" BorderThickness="1"
+                                            CornerRadius="4" Padding="10,6" Margin="0,0,0,4">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="{Binding Priority}" FontWeight="Bold" Foreground="#2563EB" Width="20"/>
+                                            <TextBlock Text="{Binding StrategyName}" FontWeight="SemiBold" Width="90"/>
+                                            <TextBlock Text="{Binding Reason}" Foreground="#6B7280" FontSize="12"/>
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+
+                        <!-- Error -->
+                        <Border Background="#FEF2F2" BorderBrush="#DC2626" BorderThickness="1"
+                                CornerRadius="6" Padding="12,8"
+                                Visibility="{Binding HasError, Converter={StaticResource BoolToVisibility}}">
+                            <TextBlock Text="{Binding ErrorMessage}" Foreground="#DC2626" FontSize="13" TextWrapping="Wrap"/>
+                        </Border>
+                    </StackPanel>
+                </StackPanel>
+
+                <!-- STEP 3: Config form -->
+                <StackPanel Visibility="{Binding IsStep3, Converter={StaticResource BoolToVisibility}}">
+                    <TextBlock Text="Revisa y ajusta la configuración" Style="{StaticResource SectionHeader}" FontSize="18"/>
+                    <TextBlock Foreground="#6B7280" FontSize="13" Margin="0,0,0,20" TextWrapping="Wrap"
+                               Text="Los selectores fueron propuestos por IA. Puedes editarlos antes de ejecutar el test de scraping."/>
+
+                    <!-- Name + URL row -->
+                    <Grid Margin="0,0,0,16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="12"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Style="{StaticResource FieldLabel}" Text="Nombre del proveedor *"/>
+                            <TextBox Text="{Binding WizardConfig.Name, UpdateSourceTrigger=PropertyChanged}"
+                                     Style="{StaticResource Input}"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Style="{StaticResource FieldLabel}" Text="URL base (solo lectura)"/>
+                            <TextBox Text="{Binding WizardConfig.BaseUrl}" Style="{StaticResource Input}"
+                                     IsReadOnly="True" Background="#F9FAFB"/>
+                        </StackPanel>
+                    </Grid>
+
+                    <!-- Selectors -->
+                    <TextBlock Text="Selectores CSS" Style="{StaticResource SectionHeader}"/>
+                    <Grid Margin="0,0,0,4">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="12"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="8"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="8"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="8"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <StackPanel Grid.Row="0" Grid.Column="0">
+                            <TextBlock Style="{StaticResource FieldLabel}" Text="Contenedor de lista"/>
+                            <TextBox Text="{Binding WizardConfig.ProductContainerSelector, UpdateSourceTrigger=PropertyChanged}"
+                                     Style="{StaticResource Input}"/>
+                        </StackPanel>
+                        <StackPanel Grid.Row="0" Grid.Column="2">
+                            <TextBlock Style="{StaticResource FieldLabel}" Text="Tarjeta de producto"/>
+                            <TextBox Text="{Binding WizardConfig.ProductCardSelector, UpdateSourceTrigger=PropertyChanged}"
+                                     Style="{StaticResource Input}"/>
+                        </StackPanel>
+
+                        <StackPanel Grid.Row="2" Grid.Column="0">
+                            <TextBlock Style="{StaticResource FieldLabel}" Text="SKU / Código ⭐"/>
+                            <TextBox Text="{Binding WizardConfig.SkuSelector, UpdateSourceTrigger=PropertyChanged}"
+                                     Style="{StaticResource Input}"/>
+                        </StackPanel>
+                        <StackPanel Grid.Row="2" Grid.Column="2">
+                            <TextBlock Style="{StaticResource FieldLabel}" Text="Nombre del producto ⭐"/>
+                            <TextBox Text="{Binding WizardConfig.NameSelector, UpdateSourceTrigger=PropertyChanged}"
+                                     Style="{StaticResource Input}"/>
+                        </StackPanel>
+
+                        <StackPanel Grid.Row="4" Grid.Column="0">
+                            <TextBlock Style="{StaticResource FieldLabel}" Text="Imagen ⭐"/>
+                            <TextBox Text="{Binding WizardConfig.ImageSelector, UpdateSourceTrigger=PropertyChanged}"
+                                     Style="{StaticResource Input}"/>
+                        </StackPanel>
+                        <StackPanel Grid.Row="4" Grid.Column="2">
+                            <TextBlock Style="{StaticResource FieldLabel}" Text="Precio"/>
+                            <TextBox Text="{Binding WizardConfig.PriceSelector, UpdateSourceTrigger=PropertyChanged}"
+                                     Style="{StaticResource Input}"/>
+                        </StackPanel>
+
+                        <StackPanel Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="3">
+                            <TextBlock Style="{StaticResource FieldLabel}" Text="Características / Especificaciones"/>
+                            <TextBox Text="{Binding WizardConfig.CharacteristicsSelector, UpdateSourceTrigger=PropertyChanged}"
+                                     Style="{StaticResource Input}"/>
+                        </StackPanel>
+                    </Grid>
+
+                    <!-- Strategies -->
+                    <TextBlock Text="Estrategias de scraping" Style="{StaticResource SectionHeader}" Margin="0,12,0,8"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                        <CheckBox IsChecked="{Binding WizardConfig.UseDirectStrategy}" Content="Direct (lista directa)" Margin="0,0,20,0"/>
+                        <CheckBox IsChecked="{Binding WizardConfig.UseListStrategy}" Content="List (paginación)" Margin="0,0,20,0"/>
+                        <CheckBox IsChecked="{Binding WizardConfig.UseFamiliesStrategy}" Content="Families (categorías)"/>
+                    </StackPanel>
+
+                    <!-- Validation message -->
+                    <Border Background="#FEF2F2" BorderBrush="#DC2626" BorderThickness="1"
+                            CornerRadius="6" Padding="10,6"
+                            Visibility="{Binding ConfigValidationMessage, Converter={StaticResource StringToVisibility}}">
+                        <TextBlock Text="{Binding ConfigValidationMessage}" Foreground="#DC2626" FontSize="12"/>
+                    </Border>
+                </StackPanel>
+
+                <!-- STEP 4: Test Scrape -->
+                <StackPanel Visibility="{Binding IsStep4, Converter={StaticResource BoolToVisibility}}">
+
+                    <!-- Busy -->
+                    <StackPanel Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibility}}">
+                        <TextBlock Text="Ejecutando scrape de prueba..." Style="{StaticResource SectionHeader}" FontSize="18"/>
+                        <TextBlock Foreground="#6B7280" FontSize="13" Margin="0,0,0,20" TextWrapping="Wrap"
+                                   Text="Creando proveedor temporal y ejecutando el motor de scraping con los selectores configurados."/>
+                        <ProgressBar IsIndeterminate="True" Height="5" Foreground="#2563EB"/>
+                    </StackPanel>
+
+                    <!-- Results -->
+                    <StackPanel Visibility="{Binding IsBusy, Converter={StaticResource InverseBoolToVisibility}}">
+                        <TextBlock Text="Resultados del scrape de prueba" Style="{StaticResource SectionHeader}" FontSize="18"/>
+
+                        <!-- Product count banner -->
+                        <Border Background="#EFF6FF" BorderBrush="#2563EB" BorderThickness="1"
+                                CornerRadius="6" Padding="12,8" Margin="0,0,0,12"
+                                Visibility="{Binding PreviewProducts.Count, Converter={StaticResource CountToVisibility}}">
+                            <TextBlock Text="{Binding PreviewSummary}" FontWeight="SemiBold" FontSize="13"/>
+                        </Border>
+
+                        <!-- Error or zero products -->
+                        <Border Background="#FFFBEB" BorderBrush="#D97706" BorderThickness="1"
+                                CornerRadius="6" Padding="12,8" Margin="0,0,0,12"
+                                Visibility="{Binding HasError, Converter={StaticResource BoolToVisibility}}">
+                            <StackPanel>
+                                <TextBlock Text="{Binding ErrorMessage}" Foreground="#92400E" FontSize="13" TextWrapping="Wrap"/>
+                                <Button Content="← Volver a ajustar selectores" Margin="0,8,0,0"
+                                        Style="{StaticResource SecondaryBtn}"
+                                        Command="{Binding GoBackToConfigCommand}"
+                                        HorizontalAlignment="Left"/>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Products DataGrid -->
+                        <DataGrid ItemsSource="{Binding PreviewProducts}"
+                                  AutoGenerateColumns="False" IsReadOnly="True"
+                                  HeadersVisibility="Column" GridLinesVisibility="Horizontal"
+                                  BorderBrush="#E5E7EB" BorderThickness="1"
+                                  RowHeight="32" FontSize="12" MaxHeight="360"
+                                  Visibility="{Binding PreviewProducts.Count, Converter={StaticResource CountToVisibility}}">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="SKU" Binding="{Binding Sku}" Width="110"/>
+                                <DataGridTextColumn Header="Nombre" Binding="{Binding Name}" Width="*"/>
+                                <DataGridTextColumn Header="Precio" Binding="{Binding Price}" Width="75"/>
+                                <DataGridTextColumn Header="# Caract." Binding="{Binding CharacteristicsCount}" Width="65"/>
+                                <DataGridTextColumn Header="Campos OK" Binding="{Binding FoundFieldsSummary}" Width="130"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </StackPanel>
+                </StackPanel>
+
+                <!-- STEP 5: Confirmation & Save -->
+                <StackPanel Visibility="{Binding IsStep5, Converter={StaticResource BoolToVisibility}}">
+
+                    <!-- Success banner -->
+                    <Border Background="#F0FDF4" BorderBrush="#16A34A" BorderThickness="1"
+                            CornerRadius="8" Padding="16,12" Margin="0,0,0,24">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="✓" FontSize="24" Foreground="#16A34A" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                            <StackPanel>
+                                <TextBlock Text="¡Test exitoso!" FontWeight="Bold" FontSize="16" Foreground="#16A34A"/>
+                                <TextBlock Text="{Binding PreviewSummary}" FontSize="13" Foreground="#166534"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Coverage stats -->
+                    <TextBlock Text="Cobertura de campos detectados" Style="{StaticResource SectionHeader}"/>
+                    <Grid Margin="0,0,0,24">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="8"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="8"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="8"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <local:CoverageCard Grid.Column="0" Label="SKU" Coverage="{Binding SkuCoverage}"/>
+                        <local:CoverageCard Grid.Column="2" Label="Nombre" Coverage="{Binding NameCoverage}"/>
+                        <local:CoverageCard Grid.Column="4" Label="Imagen" Coverage="{Binding ImageCoverage}"/>
+                        <local:CoverageCard Grid.Column="6" Label="Precio" Coverage="{Binding PriceCoverage}"/>
+                    </Grid>
+
+                    <!-- Name field -->
+                    <TextBlock Style="{StaticResource FieldLabel}" Text="Nombre final del proveedor"/>
+                    <TextBox Text="{Binding WizardConfig.Name, UpdateSourceTrigger=PropertyChanged}"
+                             Style="{StaticResource Input}" FontSize="15" Padding="10,8" Margin="0,0,0,16"/>
+
+                    <!-- Error -->
+                    <Border Background="#FEF2F2" BorderBrush="#DC2626" BorderThickness="1"
+                            CornerRadius="6" Padding="12,8" Margin="0,0,0,8"
+                            Visibility="{Binding HasError, Converter={StaticResource BoolToVisibility}}">
+                        <TextBlock Text="{Binding ErrorMessage}" Foreground="#DC2626" FontSize="13" TextWrapping="Wrap"/>
+                    </Border>
+
+                    <!-- Save success confirmation -->
+                    <Border Background="#F0FDF4" BorderBrush="#16A34A" BorderThickness="1"
+                            CornerRadius="6" Padding="12,8"
+                            Visibility="{Binding WasSuccessful, Converter={StaticResource BoolToVisibility}}">
+                        <TextBlock Text="{Binding StatusMessage}" Foreground="#16A34A" FontSize="13" TextWrapping="Wrap"/>
+                    </Border>
+                </StackPanel>
+
+            </Grid>
+        </ScrollViewer>
+
+        <!-- ═══ FOOTER: Action buttons ═════════════════════════════════════ -->
+        <Border Grid.Row="2" Background="#F9FAFB" BorderBrush="#E5E7EB" BorderThickness="0,1,0,0" Padding="24,14">
+            <Grid>
+                <Button Content="Cancelar" Style="{StaticResource SecondaryBtn}"
+                        HorizontalAlignment="Left"
+                        IsEnabled="{Binding WasSuccessful, Converter={StaticResource InverseBool}}"
+                        Click="OnCancelClicked"/>
+
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+
+                    <!-- Step 1 primary action -->
+                    <Button Content="🔍  Analizar página" Style="{StaticResource PrimaryBtn}"
+                            Command="{Binding AnalyzeCommand}"
+                            Visibility="{Binding IsStep1, Converter={StaticResource BoolToVisibility}}"/>
+
+                    <!-- Step 2 primary action -->
+                    <Button Content="Continuar →" Style="{StaticResource PrimaryBtn}"
+                            Command="{Binding GoToConfigCommand}"
+                            Visibility="{Binding IsStep2, Converter={StaticResource BoolToVisibility}}"/>
+
+                    <!-- Step 3 primary action -->
+                    <Button Content="▶  Ejecutar test de scraping" Style="{StaticResource PrimaryBtn}"
+                            Command="{Binding RunTestScrapeCommand}"
+                            Visibility="{Binding IsStep3, Converter={StaticResource BoolToVisibility}}"/>
+
+                    <!-- Step 4 actions -->
+                    <StackPanel Orientation="Horizontal"
+                                Visibility="{Binding IsStep4, Converter={StaticResource BoolToVisibility}}">
+                        <Button Content="← Ajustar selectores" Style="{StaticResource SecondaryBtn}"
+                                Command="{Binding GoBackToConfigCommand}" Margin="0,0,8,0"/>
+                        <Button Content="→ Ver resultados" Style="{StaticResource PrimaryBtn}"
+                                Command="{Binding GoToConfigCommand}"
+                                IsEnabled="{Binding IsBusy, Converter={StaticResource InverseBool}}"
+                                Visibility="{Binding PreviewProducts.Count, Converter={StaticResource CountToVisibility}}"/>
+                    </StackPanel>
+
+                    <!-- Step 5 actions -->
+                    <StackPanel Orientation="Horizontal"
+                                Visibility="{Binding IsStep5, Converter={StaticResource BoolToVisibility}}">
+                        <Button Content="← Volver a ajustar" Style="{StaticResource SecondaryBtn}"
+                                Command="{Binding GoBackToConfigCommand}" Margin="0,0,8,0"
+                                Visibility="{Binding WasSuccessful, Converter={StaticResource InverseBoolToVisibility}}"/>
+                        <Button Content="✓  Guardar Proveedor" Style="{StaticResource PrimaryBtn}"
+                                Command="{Binding SaveProviderCommand}"
+                                Visibility="{Binding WasSuccessful, Converter={StaticResource InverseBoolToVisibility}}"/>
+                        <Button Content="✓  Cerrar" Style="{StaticResource PrimaryBtn}"
+                                Visibility="{Binding WasSuccessful, Converter={StaticResource BoolToVisibility}}"
+                                Click="OnCloseSuccessClicked"/>
+                    </StackPanel>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- Busy overlay with cancel button -->
+        <Grid Grid.Row="0" Grid.RowSpan="3" Background="#50000000"
+              Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibility}}">
+            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                <Button Content="✕  Cancelar operación" Style="{StaticResource SecondaryBtn}"
+                        Command="{Binding CancelCommand}"/>
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>

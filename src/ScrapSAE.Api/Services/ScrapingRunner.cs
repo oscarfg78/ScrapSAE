@@ -4,11 +4,13 @@ using ScrapSAE.Core.Entities;
 using ScrapSAE.Core.Interfaces;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace ScrapSAE.Api.Services;
 
 public sealed class ScrapingRunner
 {
+    private readonly IServiceProvider _serviceProvider;
     private readonly IScrapingService _scrapingService;
     private readonly ISupabaseRestClient _supabase;
     private readonly IAIProcessorService _aiProcessorService;
@@ -29,6 +31,7 @@ public sealed class ScrapingRunner
     };
 
     public ScrapingRunner(
+        IServiceProvider serviceProvider,
         IScrapingService scrapingService,
         ISupabaseRestClient supabase,
         IAIProcessorService aiProcessorService,
@@ -42,6 +45,7 @@ public sealed class ScrapingRunner
         ILearningService? learningService = null,
         IPdfAttachmentAnalyzer? pdfAttachmentAnalyzer = null)
     {
+        _serviceProvider = serviceProvider;
         _scrapingService = scrapingService;
         _supabase = supabase;
         _aiProcessorService = aiProcessorService;
@@ -123,7 +127,16 @@ public sealed class ScrapingRunner
         List<ScrapedProduct> scraped;
         try
         {
-            scraped = (await _scrapingService.ScrapeAsync(site, linkedCts.Token)).ToList();
+            var strategyKey = site.StrategyType.ToString();
+            var strategy = _serviceProvider.GetKeyedService<IProviderScraperStrategy>(strategyKey)
+                           ?? _serviceProvider.GetKeyedService<IProviderScraperStrategy>("Generic");
+            
+            if (strategy == null)
+            {
+                throw new InvalidOperationException($"No scraper strategy found for {strategyKey} or Generic fallback.");
+            }
+
+            scraped = (await strategy.ScrapeAsync(site, linkedCts.Token)).ToList();
         }
 
         catch (Exception ex)

@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
 using System.IO;
@@ -120,6 +120,7 @@ public sealed class MainViewModel : ViewModelBase
 
         LoadAllCommand = new AsyncCommand(() => SafeExecuteAsync(LoadAllAsync, "Cargar datos"));
         CreateSiteCommand = new AsyncCommand(() => SafeExecuteAsync(PrepareNewSiteAsync, "Nuevo proveedor"));
+        LaunchWizardCommand = new RelayCommand(LaunchWizard);
         UpdateSiteCommand = new AsyncCommand(() => SafeExecuteAsync(SaveSiteAsync, "Guardar proveedor"));
         DeleteSiteCommand = new AsyncCommand(() => SafeExecuteAsync(DeleteSiteAsync, "Eliminar proveedor"), () => SelectedSite != null);
 
@@ -930,6 +931,7 @@ public sealed class MainViewModel : ViewModelBase
     public AsyncCommand PauseRescrapeCommand { get; }
     public AsyncCommand ResumeRescrapeCommand { get; }
     public AsyncCommand CancelRescrapeCommand { get; }
+    public RelayCommand LaunchWizardCommand { get; }
     
     public RelayCommand ShowWindowCommand { get; }
     public RelayCommand ExitApplicationCommand { get; }
@@ -1111,6 +1113,22 @@ public sealed class MainViewModel : ViewModelBase
         ReplaceSiteInCollection(updated);
         SelectedSite = updated;
         StatusMessage = "Proveedor actualizado.";
+    }
+
+    private void LaunchWizard()
+    {
+        var wizard = new Views.ProviderWizardView(_apiClient);
+        if (wizard.ShowDialog() == true && wizard.CreatedSite != null)
+        {
+            ReplaceSiteInCollection(wizard.CreatedSite);
+            SelectedSite = wizard.CreatedSite;
+            StatusMessage = $"Proveedor \"{wizard.CreatedSite.Name}\" creado mediante el Wizard.";
+            OnPropertyChanged(nameof(SitesView));
+        }
+        else
+        {
+            StatusMessage = "Wizard cancelado.";
+        }
     }
 
     private void ReplaceSiteInCollection(SiteProfile site)
