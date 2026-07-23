@@ -103,7 +103,7 @@ public class ShopifyApiStrategy : IProviderScraperStrategy
                 Id = Guid.NewGuid(),
                 SiteId = site.Id,
                 OperationType = "scrape",
-                Status = "completed",
+                Status = "success",
                 Message = $"Se encontraron {allProducts.Count} productos.",
                 DurationMs = (int)(DateTime.UtcNow - startTime).TotalMilliseconds,
                 CreatedAt = DateTime.UtcNow
