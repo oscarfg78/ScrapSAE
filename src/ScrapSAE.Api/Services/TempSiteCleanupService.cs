@@ -64,7 +64,7 @@ public sealed class TempSiteCleanupService : BackgroundService
         var cutoffTime = DateTime.UtcNow - TempSiteMaxAge;
         var tempSitesToDelete = allSites
             .Where(s => s.Name.StartsWith("[TEMP]", StringComparison.OrdinalIgnoreCase)
-                     && s.CreatedAt < cutoffTime)
+                     && s.CreatedAt.ToUniversalTime() < cutoffTime)
             .ToList();
 
         if (tempSitesToDelete.Count == 0)

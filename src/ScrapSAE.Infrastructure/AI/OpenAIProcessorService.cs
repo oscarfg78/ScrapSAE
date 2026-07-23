@@ -230,7 +230,7 @@ public sealed class OpenAIProcessorService : IAIProcessorService
                 {
                     type = "json_schema",
                     name = "processed_product",
-                    strict = true,
+                    strict = false,
                     schema = new
                     {
                         type = "object",
@@ -344,7 +344,7 @@ public sealed class OpenAIProcessorService : IAIProcessorService
                 {
                     type = "json_schema",
                     name = "processed_product",
-                    strict = true,
+                    strict = false,
                     schema = new
                     {
                         type = "object",
