@@ -197,7 +197,7 @@ app.MapPost("/api/sites/analyze", async (
 
     try
     {
-        var result = await pageAnalysis.AnalyzeAsync(request.Url, token);
+        var result = await pageAnalysis.AnalyzeAsync(request.Url, request.ProductDetailUrl, token);
         return Results.Ok(result);
     }
     catch (TimeoutException ex)
@@ -935,6 +935,8 @@ static void MapSiteCrud(
         var sites = await service.GetAllAsync();
         var normalized = sites
             .Select(SiteProfileSchemaCompatibility.NormalizeFromStorage)
+            .Where(s => !s.Name.StartsWith("[TEMP]", StringComparison.OrdinalIgnoreCase))
+            .DistinctBy(s => (s.Name ?? string.Empty).Trim().ToLowerInvariant())
             .ToList();
         return Results.Ok(normalized);
     });

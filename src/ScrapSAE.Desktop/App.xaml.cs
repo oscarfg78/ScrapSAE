@@ -36,6 +36,6 @@ public partial class App : Application
         };
 
         window.Show();
-        _ = viewModel.LoadAllAsync();
+        // NOTE: LoadAllAsync is called by MainWindow_OnLoaded; do NOT call it again here.
     }
 }

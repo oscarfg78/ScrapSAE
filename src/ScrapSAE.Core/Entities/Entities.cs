@@ -24,6 +24,9 @@ public class SiteProfile
     public Dictionary<string, List<string>> SecondarySelectors { get; set; } = new();
     public List<ScrapingStrategyDefinition> Strategies { get; set; } = new();
     public string StrategyType { get; set; } = "Generic";
+    
+    // Configuración específica de exportación a tienda
+    public string? BrandOverride { get; set; }
 }
 
 /// <summary>

@@ -8,6 +8,7 @@ internal static class FlashlyProductMapper
 {
     public static FlashlyProductSyncDto ToFlashlyDto(StagingProduct product)
     {
+        var brandOverride = product.Site?.BrandOverride;
         var sourceSku = product.SkuSource?.Trim() ?? string.Empty;
         var name = string.Empty;
         var description = string.Empty;
@@ -39,7 +40,12 @@ internal static class FlashlyProductMapper
                 productUrl = FirstNonEmpty(ReadString(root, "productUrl", "product_url", "url", "sourceUrl", "source_url"), productUrl);
                 imageUrls = ReadStringArray(root, "imageUrls", "image_urls", "images", "Images", "imageUrls");
                 supplierName = FirstNonEmpty(ReadString(root, "supplierName", "supplier_name", "supplier", "brand", "Brand"), supplierName);
-                specificationsJson = ReadRawJson(root, "specifications", "Specifications");
+                if (!string.IsNullOrWhiteSpace(brandOverride))
+                {
+                    supplierName = brandOverride;
+                }
+                var rawSpecs = ReadRawJson(root, "specifications", "Specifications");
+                specificationsJson = ProcessSpecifications(rawSpecs, brandOverride);
             }
             catch
             {
@@ -65,6 +71,51 @@ internal static class FlashlyProductMapper
             SupplierName = supplierName,
             SpecificationsJson = specificationsJson
         };
+    }
+
+    private static string? ProcessSpecifications(string? rawJson, string? brandOverride)
+    {
+        if (string.IsNullOrWhiteSpace(rawJson))
+            return rawJson;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(rawJson);
+            if (doc.RootElement.ValueKind == JsonValueKind.Object)
+            {
+                var dict = new Dictionary<string, object?>();
+                foreach (var prop in doc.RootElement.EnumerateObject())
+                {
+                    if (prop.Name.Equals("source_url", StringComparison.OrdinalIgnoreCase) ||
+                        prop.Name.Equals("supplier name", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(brandOverride) &&
+                        prop.Name.Equals("brand", StringComparison.OrdinalIgnoreCase))
+                    {
+                        dict[prop.Name] = brandOverride;
+                        continue;
+                    }
+
+                    dict[prop.Name] = prop.Value.ValueKind == JsonValueKind.String ? prop.Value.GetString() : prop.Value.Clone();
+                }
+
+                if (!string.IsNullOrWhiteSpace(brandOverride) && !dict.Keys.Any(k => k.Equals("brand", StringComparison.OrdinalIgnoreCase)))
+                {
+                    dict["brand"] = brandOverride;
+                }
+
+                return JsonSerializer.Serialize(dict, new JsonSerializerOptions { WriteIndented = false });
+            }
+        }
+        catch
+        {
+            // Ignored
+        }
+
+        return rawJson;
     }
 
     private static string? ReadString(JsonElement element, params string[] names)

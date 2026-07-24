@@ -28,10 +28,7 @@ public sealed class TempSiteCleanupService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("[TempCleanup] Servicio de limpieza de sites temporales iniciado. Intervalo: {Interval}min", CheckInterval.TotalMinutes);
-
-        // Initial delay to let the API finish starting up
-        await Task.Delay(TimeSpan.FromMinutes(2), stoppingToken);
+        _logger.LogInformation("[TempCleanup] Servicio de limpieza de sites temporales y duplicados iniciado.");
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -41,7 +38,7 @@ public sealed class TempSiteCleanupService : BackgroundService
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                _logger.LogWarning(ex, "[TempCleanup] Error durante limpieza de sites temporales.");
+                _logger.LogWarning(ex, "[TempCleanup] Error durante limpieza de sites.");
             }
 
             await Task.Delay(CheckInterval, stoppingToken);
@@ -61,42 +58,50 @@ public sealed class TempSiteCleanupService : BackgroundService
             return;
         }
 
+        // 1. Limpieza de sites temporales expirados
         var cutoffTime = DateTime.UtcNow - TempSiteMaxAge;
         var tempSitesToDelete = allSites
             .Where(s => s.Name.StartsWith("[TEMP]", StringComparison.OrdinalIgnoreCase)
                      && s.CreatedAt.ToUniversalTime() < cutoffTime)
             .ToList();
 
-        if (tempSitesToDelete.Count == 0)
-        {
-            return;
-        }
-
-        _logger.LogInformation("[TempCleanup] Eliminando {Count} site(s) temporal(es) expirado(s).", tempSitesToDelete.Count);
-
-        var deleted = 0;
         foreach (var site in tempSitesToDelete)
         {
-            if (cancellationToken.IsCancellationRequested)
-            {
-                break;
-            }
-
+            if (cancellationToken.IsCancellationRequested) break;
             try
             {
                 await _siteService.DeleteAsync(site.Id);
-                deleted++;
-                _logger.LogDebug("[TempCleanup] Site temporal eliminado: {SiteId} ({SiteName})", site.Id, site.Name);
+                _logger.LogInformation("[TempCleanup] Site temporal eliminado: {SiteId} ({SiteName})", site.Id, site.Name);
             }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "[TempCleanup] No se pudo eliminar site temporal {SiteId} ({SiteName}).", site.Id, site.Name);
-            }
+            catch { }
         }
 
-        if (deleted > 0)
+        // 2. Limpieza de proveedores duplicados por nombre
+        var duplicateGroups = allSites
+            .Where(s => !s.Name.StartsWith("[TEMP]", StringComparison.OrdinalIgnoreCase))
+            .GroupBy(s => s.Name.Trim().ToLowerInvariant())
+            .Where(g => g.Count() > 1);
+
+        foreach (var group in duplicateGroups)
         {
-            _logger.LogInformation("[TempCleanup] Limpieza completada: {Deleted} site(s) eliminado(s).", deleted);
+            if (cancellationToken.IsCancellationRequested) break;
+
+            // Mantener el registro más reciente
+            var toKeep = group.OrderByDescending(s => s.CreatedAt).First();
+            var duplicates = group.Where(s => s.Id != toKeep.Id).ToList();
+
+            foreach (var dup in duplicates)
+            {
+                try
+                {
+                    await _siteService.DeleteAsync(dup.Id);
+                    _logger.LogInformation("[TempCleanup] Registro duplicado de proveedor eliminado de Supabase: {Name} (ID: {Id})", dup.Name, dup.Id);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "[TempCleanup] No se pudo eliminar duplicado {Name}.", dup.Name);
+                }
+            }
         }
     }
 }

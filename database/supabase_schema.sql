@@ -29,7 +29,8 @@ CREATE TABLE IF NOT EXISTS config_sites (
 
 ALTER TABLE config_sites
     ADD COLUMN IF NOT EXISTS secondary_selectors JSONB NOT NULL DEFAULT '{}'::jsonb,
-    ADD COLUMN IF NOT EXISTS strategies JSONB NOT NULL DEFAULT '[]'::jsonb;
+    ADD COLUMN IF NOT EXISTS strategies JSONB NOT NULL DEFAULT '[]'::jsonb,
+    ADD COLUMN IF NOT EXISTS brand_override VARCHAR(255);
 
 COMMENT ON TABLE config_sites IS 'Configuración de sitios proveedores para scraping';
 COMMENT ON COLUMN config_sites.selectors IS 'JSON con selectores CSS/XPath para extracción';

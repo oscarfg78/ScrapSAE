@@ -911,6 +911,15 @@
                                     
                                     <TextBlock Text="Estado:" FontWeight="SemiBold" Margin="0,8,0,2" FontSize="11" />
                                     <TextBlock Text="{Binding ScrapeStatusText}" Foreground="#2563EB" TextWrapping="Wrap" FontSize="11" />
+
+                                    <!-- Granular phase indicator -->
+                                    <TextBlock Text="Fase actual:" FontWeight="SemiBold" Margin="0,6,0,2" FontSize="11" />
+                                    <Border CornerRadius="4" Padding="6,3" Margin="0,0,0,2"
+                                            Background="#1F2937">
+                                        <TextBlock Text="{Binding ScrapingPhaseText}"
+                                                   Foreground="{Binding ScrapingPhaseColor}"
+                                                   FontSize="10" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                    </Border>
                                 </StackPanel>
                             </Border>
 
@@ -967,13 +976,20 @@
                                     <RowDefinition Height="*" />
                                 </Grid.RowDefinitions>
                                 <Border Background="#111827" Padding="12,8" CornerRadius="6,6,0,0" BorderBrush="#374151" BorderThickness="0,0,0,1">
-                                    <StackPanel Orientation="Horizontal">
-                                        <TextBlock Text="📡 Consola en tiempo real" Foreground="#10B981" FontWeight="SemiBold" VerticalAlignment="Center" />
-                                        <TextBlock Text=" (scroll auto)" Foreground="#6B7280" FontSize="11" VerticalAlignment="Center" Margin="8,0,0,0" />
-                                    </StackPanel>
+                                    <DockPanel LastChildFill="True">
+                                        <CheckBox Content="Solo errores" IsChecked="{Binding LogFilterErrorsOnly}"
+                                                  DockPanel.Dock="Right"
+                                                  FontSize="10" Foreground="#9CA3AF" VerticalAlignment="Center"
+                                                  ToolTip="Filtra la consola para mostrar solo errores y advertencias"
+                                                  Margin="8,0,0,0"/>
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="📡 Consola en tiempo real" Foreground="#10B981" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                            <TextBlock Text=" (scroll auto)" Foreground="#6B7280" FontSize="11" VerticalAlignment="Center" Margin="8,0,0,0" />
+                                        </StackPanel>
+                                    </DockPanel>
                                 </Border>
                                 <ListBox Grid.Row="1" 
-                                         ItemsSource="{Binding LiveLogs}"
+                                        ItemsSource="{Binding FilteredLiveLogs}"
                                          FontFamily="Consolas"
                                          FontSize="12"
                                          Background="Transparent"

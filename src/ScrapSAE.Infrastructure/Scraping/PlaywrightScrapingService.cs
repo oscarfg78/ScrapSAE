@@ -252,6 +252,84 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
         }
     }
 
+    /// <summary>
+    /// Descubre URLs de productos/catálogo usando la misma lógica robusta del Wizard.
+    /// Es aditivo: agrega URLs al pool de procesamiento en lugar de reemplazar el flujo existente.
+    /// Devuelve lista vacía si no aplica el descubrimiento (sitio sin BaseUrl, o ya con URLs configuradas).
+    /// </summary>
+    public async Task<List<string>> DiscoverProductUrlsAsync(SiteProfile site, CancellationToken cancellationToken = default)
+    {
+        var discovered = new List<string>();
+        if (site == null || string.IsNullOrWhiteSpace(site.BaseUrl))
+        {
+            return discovered;
+        }
+
+        RegisterSite(site);
+
+        try
+        {
+            var selectorsJson = SerializeSelectorsObject(site.Selectors);
+            var selectors = JsonConvert.DeserializeObject<SiteSelectors>(selectorsJson);
+            if (selectors == null)
+            {
+                _logger.LogWarning("[Discovery] Invalid selectors for site {SiteName}; skipping discovery.", site.Name);
+                return discovered;
+            }
+            FillSelectorsFromJson(selectors, selectorsJson);
+
+            await LogStepAsync(site.Id, "info", "🔍 [Discovery] Iniciando descubrimiento de catálogo...", null);
+
+            var contextOptions = new BrowserNewContextOptions();
+            var storageStatePath = GetStorageStatePath(site.Name);
+            if (File.Exists(storageStatePath))
+            {
+                contextOptions.StorageStatePath = storageStatePath;
+            }
+
+            var context = await GetContextAsync(contextOptions);
+            var page = await context.NewPageAsync();
+            try
+            {
+                await page.GotoAsync(site.BaseUrl, new PageGotoOptions
+                {
+                    WaitUntil = WaitUntilState.DOMContentLoaded,
+                    Timeout = 60000
+                });
+                await AcceptCookiesAsync(page, cancellationToken);
+
+                // Use the same related-URL discovery used in the Wizard/Hybrid strategy
+                var relatedUrls = await DiscoverRelatedProductUrlsAsync(page, cancellationToken);
+                var distinctUrls = relatedUrls.Where(u => !string.IsNullOrWhiteSpace(u)).Distinct();
+                if (site.MaxProductsPerScrape > 0)
+                {
+                    distinctUrls = distinctUrls.Take(site.MaxProductsPerScrape);
+                }
+                discovered.AddRange(distinctUrls);
+
+                await LogStepAsync(site.Id, "info",
+                    $"🔍 [Discovery] {discovered.Count} URL(s) descubiertas desde {site.BaseUrl}.",
+                    new { count = discovered.Count });
+            }
+            finally
+            {
+                try { await page.CloseAsync(); } catch { /* best-effort */ }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[Discovery] Error durante descubrimiento de URLs para {SiteName}; continuando con scraping normal.", site.Name);
+            await LogStepAsync(site.Id, "warn", $"[Discovery] Error en descubrimiento: {ex.Message}. Continuando con flujo estándar.", null);
+        }
+
+        if (site.MaxProductsPerScrape > 0 && discovered.Count > site.MaxProductsPerScrape)
+        {
+            discovered = discovered.Take(site.MaxProductsPerScrape).ToList();
+        }
+
+        return discovered;
+    }
+
     public async Task<IEnumerable<ScrapedProduct>> ScrapeAsync(SiteProfile site, CancellationToken cancellationToken = default)
     {
         RegisterSite(site);
@@ -263,6 +341,10 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
         {
             _logger.LogInformation("Modo de inspección directa de URLs activado");
             var urls = System.Text.Json.JsonSerializer.Deserialize<List<string>>(directUrlsJson) ?? new List<string>();
+            if (site.MaxProductsPerScrape > 0 && urls.Count > site.MaxProductsPerScrape)
+            {
+                urls = urls.Take(site.MaxProductsPerScrape).ToList();
+            }
             return await ScrapeDirectUrlsAsync(
                 urls,
                 site.Id,
@@ -282,6 +364,10 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
             _logger.LogInformation("Modo de scraping con URLs aprendidas activado");
             await LogStepAsync(site.Id, "info", "Usando URLs aprendidas para scraping", null);
             var urls = System.Text.Json.JsonSerializer.Deserialize<List<string>>(learnedUrlsJson) ?? new List<string>();
+            if (site.MaxProductsPerScrape > 0 && urls.Count > site.MaxProductsPerScrape)
+            {
+                urls = urls.Take(site.MaxProductsPerScrape).ToList();
+            }
             return await ScrapeDirectUrlsAsync(
                 urls,
                 site.Id,
@@ -469,7 +555,8 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
                     page,
                     startUrl,
                     selectors,
-                    cancellationToken);
+                    cancellationToken,
+                    site.SecondarySelectors);
                 if (startProducts.Count > 0)
                 {
                     await LogStepAsync(site.Id, "success", "Scraping por URL directa completado.", new { count = startProducts.Count });
@@ -2221,7 +2308,8 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
         IPage page,
         string startUrl,
         SiteSelectors selectors,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Dictionary<string, List<string>>? secondarySelectors = null)
     {
         var products = new List<ScrapedProduct>();
         var seenProducts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -2233,7 +2321,7 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
         });
         await AcceptCookiesAsync(page, cancellationToken);
 
-        var rootProduct = await ExtractProductFromDetailPageAsync(page, selectors, new List<string>());
+        var rootProduct = await ExtractProductFromDetailPageAsync(page, selectors, new List<string>(), secondarySelectors);
         if (rootProduct != null && seenProducts.Add(GetProductKey(rootProduct)))
         {
             products.Add(rootProduct);
@@ -2254,7 +2342,7 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
                 Timeout = 90000
             });
             await AcceptCookiesAsync(page, cancellationToken);
-            var variationProduct = await ExtractProductFromDetailPageAsync(page, selectors, new List<string>());
+            var variationProduct = await ExtractProductFromDetailPageAsync(page, selectors, new List<string>(), secondarySelectors);
             if (variationProduct != null && seenProducts.Add(GetProductKey(variationProduct)))
             {
                 products.Add(variationProduct);
@@ -3291,7 +3379,7 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
                     {
                         // Use existing method for details + variations
                         // Signature: TryScrapeProductDetailWithVariationsAsync(IPage page, string startUrl, SiteSelectors selectors, CancellationToken cancellationToken)
-                        var extractedProducts = await TryScrapeProductDetailWithVariationsAsync(page, detailHref, selectors, cancellationToken);
+                        var extractedProducts = await TryScrapeProductDetailWithVariationsAsync(page, detailHref, selectors, cancellationToken, null);
                         
                         foreach(var p in extractedProducts)
                         {
@@ -3984,7 +4072,8 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
     private async Task<ScrapedProduct?> ExtractProductFromDetailPageAsync(
         IPage page,
         SiteSelectors selectors,
-        List<string> categoryPath)
+        List<string> categoryPath,
+        Dictionary<string, List<string>>? secondarySelectors = null)
     {
         try
         {
@@ -4053,6 +4142,39 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
             if (descriptionParts.Count > 0)
             {
                 product.Description = string.Join(" | ", descriptionParts);
+            }
+
+            if (!string.IsNullOrWhiteSpace(selectors.DescriptionSelector))
+            {
+                var descEl = await page.QuerySelectorAsync(selectors.DescriptionSelector);
+                if (descEl != null)
+                {
+                    var extendedDesc = (await descEl.InnerTextAsync())?.Trim();
+                    if (!string.IsNullOrWhiteSpace(extendedDesc))
+                    {
+                        product.Description = string.IsNullOrWhiteSpace(product.Description) 
+                            ? extendedDesc 
+                            : $"{product.Description}\n\n{extendedDesc}";
+                    }
+                }
+            }
+
+            if (secondarySelectors != null && secondarySelectors.TryGetValue("description", out var secDescSelectors))
+            {
+                foreach (var sel in secDescSelectors.Where(s => !string.IsNullOrWhiteSpace(s)))
+                {
+                    var secDescEl = await page.QuerySelectorAsync(sel);
+                    if (secDescEl != null)
+                    {
+                        var text = (await secDescEl.InnerTextAsync())?.Trim();
+                        if (!string.IsNullOrWhiteSpace(text))
+                        {
+                            product.Description = string.IsNullOrWhiteSpace(product.Description) 
+                                ? text 
+                                : $"{product.Description}\n\n{text}";
+                        }
+                    }
+                }
             }
 
             var barcode = await TryExtractBarcodeAsync(page);
@@ -4992,6 +5114,13 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
                     break;
                 }
 
+                if (site.MaxProductsPerScrape > 0 && products.Count >= site.MaxProductsPerScrape)
+                {
+                    _logger.LogInformation("Límite de MaxProductsPerScrape ({Max}) alcanzado en scraping directo.", site.MaxProductsPerScrape);
+                    await LogStepAsync(siteId, "info", $"Límite de {site.MaxProductsPerScrape} producto(s) alcanzado.", null);
+                    break;
+                }
+
                 try
                 {
                     await SimulateHumanBehaviorAsync(page, cancellationToken);
@@ -5031,7 +5160,8 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
                             selectors,
                             siteId,
                             familyTitle: null,
-                            cancellationToken);
+                            cancellationToken,
+                            site.SecondarySelectors);
                         extractedProducts = singleProduct != null
                             ? new List<ScrapedProduct> { singleProduct }
                             : new List<ScrapedProduct>();
@@ -5441,7 +5571,7 @@ private async Task<List<ScrapedProduct>> ExtractProductsFromFamilyPageAsync(
                 await AcceptCookiesAsync(page, cancellationToken);
                 
                 // Extraer todos los datos desde la página de detalle
-                var product = await ExtractProductFromDetailPageDeepAsync(page, selectors, siteId, familyTitle, cancellationToken);
+                var product = await ExtractProductFromDetailPageDeepAsync(page, selectors, siteId, familyTitle, cancellationToken, null);
                 
                 if (product != null && !string.IsNullOrEmpty(product.SkuSource))
                 {
@@ -5489,7 +5619,8 @@ private async Task<ScrapedProduct?> ExtractProductFromDetailPageDeepAsync(
     SiteSelectors selectors,
     Guid siteId,
     string? familyTitle,
-    CancellationToken cancellationToken)
+    CancellationToken cancellationToken,
+    Dictionary<string, List<string>>? secondarySelectors = null)
 {
     try
     {
@@ -5634,12 +5765,31 @@ private async Task<ScrapedProduct?> ExtractProductFromDetailPageDeepAsync(
         }
         
         // 4. Extraer Descripción
-        var descSelector = selectors.DetailDescriptionSelector ?? selectors.DescriptionSelector ?? 
-            ".product-description, [class*='description--'], .description";
-        var descElem = page.Locator(descSelector).First;
-        if (await descElem.CountAsync() > 0)
+        var descSelectorsToTry = new List<string>();
+        if (!string.IsNullOrWhiteSpace(selectors.DetailDescriptionSelector)) descSelectorsToTry.Add(selectors.DetailDescriptionSelector);
+        if (!string.IsNullOrWhiteSpace(selectors.DescriptionSelector)) descSelectorsToTry.Add(selectors.DescriptionSelector);
+        
+        if (secondarySelectors != null && secondarySelectors.TryGetValue("description", out var secDesc) && secDesc != null)
         {
-            product.Description = (await descElem.TextContentAsync())?.Trim();
+            descSelectorsToTry.AddRange(secDesc.Where(s => !string.IsNullOrWhiteSpace(s)));
+        }
+        
+        descSelectorsToTry.Add(".product-description");
+        descSelectorsToTry.Add("[class*='description--']");
+        descSelectorsToTry.Add(".description");
+
+        foreach (var sel in descSelectorsToTry)
+        {
+            var descElem = page.Locator(sel).First;
+            if (await descElem.CountAsync() > 0)
+            {
+                var text = (await descElem.TextContentAsync())?.Trim();
+                if (!string.IsNullOrWhiteSpace(text))
+                {
+                    product.Description = text;
+                    break;
+                }
+            }
         }
         
         // 5. Extraer Imagen Principal
@@ -6322,7 +6472,9 @@ private async Task HumanClickAsync(ILocator locator)
                     page, 
                     selectors, 
                     site.Id, 
-                    null);
+                    null,
+                    CancellationToken.None,
+                    site.SecondarySelectors);
 
                 
                 if (product != null)

@@ -161,6 +161,11 @@ public class Worker : BackgroundService
         var validatedForSite = (await _stagingService.GetProductsByStatusAsync("validated"))
             .Where(p => p.SiteId == site.Id)
             .ToList();
+            
+        foreach (var p in validatedForSite)
+        {
+            p.Site = site;
+        }
 
         if (validatedForSite.Count == 0)
         {

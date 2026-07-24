@@ -86,6 +86,15 @@ public interface IScrapingService
         Guid siteId,
         DirectUrlScrapeOptions? options = null,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Descubre URLs de producto/catálogo mediante la lógica del Wizard de descubrimiento.
+    /// El resultado es aditivo: se combinan con las URLs existentes del sitio para enriquecer el proceso de scraping.
+    /// Returns an empty list if discovery is not applicable or the site already has start URLs configured.
+    /// </summary>
+    Task<List<string>> DiscoverProductUrlsAsync(
+        SiteProfile site,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -302,8 +311,9 @@ public interface IPageAnalysisService
     /// la estructura del catálogo de productos (selectores, campos, estrategias).
     /// El proceso completo tiene un timeout de 30 segundos.
     /// </summary>
-    /// <param name="url">URL de la página a analizar</param>
+    /// <param name="catalogUrl">URL de la página a analizar</param>
+    /// <param name="productDetailUrl">URL opcional de un producto para análisis profundo</param>
     /// <param name="cancellationToken">Token de cancelación</param>
     /// <returns>Resultado del análisis con selectores y estrategias sugeridas</returns>
-    Task<ScrapSAE.Core.DTOs.PageAnalysisResult> AnalyzeAsync(string url, CancellationToken cancellationToken = default);
+    Task<ScrapSAE.Core.DTOs.PageAnalysisResult> AnalyzeAsync(string catalogUrl, string? productDetailUrl = null, CancellationToken cancellationToken = default);
 }

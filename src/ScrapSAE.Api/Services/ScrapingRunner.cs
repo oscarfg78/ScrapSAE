@@ -96,6 +96,10 @@ public sealed class ScrapingRunner
                     
                     if (learnedUrls.Count > 0)
                     {
+                        if (site.MaxProductsPerScrape > 0 && learnedUrls.Count > site.MaxProductsPerScrape)
+                        {
+                            learnedUrls = learnedUrls.Take(site.MaxProductsPerScrape).ToList();
+                        }
                         previousLearnedUrls = Environment.GetEnvironmentVariable("SCRAPSAE_LEARNED_URLS");
                         var urlsJson = JsonSerializer.Serialize(learnedUrls);
                         Environment.SetEnvironmentVariable("SCRAPSAE_LEARNED_URLS", urlsJson);
@@ -123,20 +127,80 @@ public sealed class ScrapingRunner
         {
             _logger.LogWarning("LearningService no está disponible en ScrapingRunner");
         }
-        
+
+        // ── FASE DE DESCUBRIMIENTO ADITIVA ──────────────────────────────────────
+        // Invoca el mismo motor de descubrimiento que usa el Wizard para encontrar
+        // URLs de productos dinámicamente. Los resultados se SUMAN al pool de URLs
+        // existentes (learned/direct). Si ya existen URLs configuradas manualmente o
+        // aprendidas, las descubiertas se añaden al mismo conjunto de forma deduplicada.
+        // Si hay un error, se ignora y el scraping continúa normalmente.
+        var existingDirectUrls = Environment.GetEnvironmentVariable("SCRAPSAE_DIRECT_URLS");
+        var existingLearnedUrls = Environment.GetEnvironmentVariable("SCRAPSAE_LEARNED_URLS");
+        // Only run discovery if the site doesn't have a forced direct URL override set
+        if (string.IsNullOrEmpty(existingDirectUrls))
+        {
+            try
+            {
+                await LogAsync(site, "scrape", "info", "🔍 Fase 1: Descubrimiento de catálogo en progreso...");
+                var discoveredUrls = await _scrapingService.DiscoverProductUrlsAsync(site, linkedCts.Token);
+                if (discoveredUrls.Count > 0)
+                {
+                    // Merge with any existing learned URLs
+                    var mergedUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    if (!string.IsNullOrEmpty(existingLearnedUrls))
+                    {
+                        var existing = JsonSerializer.Deserialize<List<string>>(existingLearnedUrls) ?? new List<string>();
+                        foreach (var u in existing) mergedUrls.Add(u);
+                    }
+                    foreach (var u in discoveredUrls) mergedUrls.Add(u);
+
+                    var poolList = mergedUrls.ToList();
+                    if (site.MaxProductsPerScrape > 0 && poolList.Count > site.MaxProductsPerScrape)
+                    {
+                        poolList = poolList.Take(site.MaxProductsPerScrape).ToList();
+                    }
+
+                    Environment.SetEnvironmentVariable("SCRAPSAE_LEARNED_URLS", JsonSerializer.Serialize(poolList));
+                    await LogAsync(site, "scrape", "success",
+                        $"🔍 Descubrimiento completado: {discoveredUrls.Count} URL(s) nuevas encontradas. Total en pool: {poolList.Count}.");
+                    _logger.LogInformation("[Discovery] {Count} URLs discovered and merged for site {SiteId}", discoveredUrls.Count, siteId);
+                }
+                else
+                {
+                    await LogAsync(site, "scrape", "info", "🔍 Descubrimiento no encontró URLs adicionales. Continuando con flujo estándar.");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[Discovery] Error en fase de descubrimiento para {SiteId}; continuando con scraping normal.", siteId);
+                await LogAsync(site, "scrape", "warn", $"[Discovery] Error ignorado: {ex.Message}. Continuando.");
+            }
+        }
+        // ── FIN FASE DE DESCUBRIMIENTO ───────────────────────────────────────────
+
         List<ScrapedProduct> scraped;
         try
         {
-            var strategyKey = site.StrategyType.ToString();
-            var strategy = _serviceProvider.GetKeyedService<IProviderScraperStrategy>(strategyKey)
-                           ?? _serviceProvider.GetKeyedService<IProviderScraperStrategy>("Generic");
-            
-            if (strategy == null)
+            IProviderScraperStrategy? strategy = null;
+            try
             {
-                throw new InvalidOperationException($"No scraper strategy found for {strategyKey} or Generic fallback.");
+                var strategyKey = string.IsNullOrWhiteSpace(site.StrategyType) ? "Generic" : site.StrategyType;
+                strategy = _serviceProvider.GetKeyedService<IProviderScraperStrategy>(strategyKey)
+                           ?? _serviceProvider.GetKeyedService<IProviderScraperStrategy>("Generic");
+            }
+            catch (InvalidOperationException)
+            {
+                // ServiceProvider does not support keyed services (e.g. in unit tests or custom containers)
             }
 
-            scraped = (await strategy.ScrapeAsync(site, linkedCts.Token)).ToList();
+            if (strategy != null)
+            {
+                scraped = (await strategy.ScrapeAsync(site, linkedCts.Token)).ToList();
+            }
+            else
+            {
+                scraped = (await _scrapingService.ScrapeAsync(site, linkedCts.Token)).ToList();
+            }
         }
 
         catch (Exception ex)
@@ -210,6 +274,8 @@ public sealed class ScrapingRunner
         var updated = 0;
         var skipped = 0;
 
+        var isTempSite = site.Name.StartsWith("[TEMP]", StringComparison.OrdinalIgnoreCase);
+
         foreach (var item in scraped)
         {
             ApplyProviderBrandAndCategory(item, site.Name);
@@ -221,8 +287,8 @@ public sealed class ScrapingRunner
                 continue;
             }
 
-            // Auto-aprendizaje: si extraemos con éxito un producto, la URL es válida
-            if (_learningService != null && !string.IsNullOrEmpty(item.SourceUrl))
+            // Auto-aprendizaje: si extraemos con éxito un producto, la URL es válida (omitir en pruebas [TEMP])
+            if (!isTempSite && _learningService != null && !string.IsNullOrEmpty(item.SourceUrl))
             {
                 try
                 {
@@ -240,9 +306,9 @@ public sealed class ScrapingRunner
                 : await EnrichScrapedProductAsync(siteId, item, existing, cancellationToken);
             ApplyProviderBrandAndCategory(effectiveProduct, site.Name);
             var rawSnapshotJson = SerializeScrapedSnapshot(effectiveProduct);
-            var incomingAiJson = await BuildAiJsonAsync(effectiveProduct, cancellationToken) ?? "{}";
-            var pdfSpecs = await ExtractPdfSpecificationsAsync(effectiveProduct, cancellationToken);
-            var finalAiJson = MergeConservative(existing?.AIProcessedJson, incomingAiJson, pdfSpecs);
+            var incomingAiJson = await BuildAiJsonAsync(effectiveProduct, isTempSite, cancellationToken) ?? "{}";
+            var pdfSpecs = isTempSite ? null : await ExtractPdfSpecificationsAsync(effectiveProduct, cancellationToken);
+            var finalAiJson = MergeConservative(existing?.AIProcessedJson, incomingAiJson, pdfSpecs ?? new Dictionary<string, string>());
             var sourceUrl = ResolvePreferredSourceUrl(effectiveProduct, existing?.SourceUrl);
 
             if (existing == null)
@@ -325,9 +391,15 @@ public sealed class ScrapingRunner
         }
     }
 
-    private async Task<string?> BuildAiJsonAsync(ScrapedProduct scrapedProduct, CancellationToken cancellationToken)
+    private async Task<string?> BuildAiJsonAsync(ScrapedProduct scrapedProduct, bool skipAi, CancellationToken cancellationToken)
     {
         var rawData = SerializeScrapedSnapshot(scrapedProduct);
+
+        if (skipAi)
+        {
+            var fallback = BuildFallbackProcessedProduct(scrapedProduct, rawData);
+            return JsonSerializer.Serialize(fallback);
+        }
 
         try
         {
@@ -358,7 +430,7 @@ public sealed class ScrapingRunner
 
     public Task<string?> BuildAiJsonFromScrapedAsync(ScrapedProduct scrapedProduct, CancellationToken cancellationToken)
     {
-        return BuildAiJsonAsync(scrapedProduct, cancellationToken);
+        return BuildAiJsonAsync(scrapedProduct, skipAi: false, cancellationToken);
     }
 
     private static string SerializeScrapedSnapshot(ScrapedProduct scrapedProduct)

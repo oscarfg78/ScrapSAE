@@ -189,6 +189,7 @@ public sealed class OpenAIProcessorService : IAIProcessorService
             7. STOCK/INVENTARIO: Busca indicadores de stock, cantidad disponible, o estado de disponibilidad. Extrae el valor numérico si está presente.
             8. ARCHIVOS ADJUNTOS: Identifica enlaces a documentos PDF, fichas técnicas, manuales de usuario, catálogos. Extrae la URL y el nombre del archivo.
             9. ESPECIFICACIONES: Extrae todas las especificaciones técnicas en formato clave-valor (dimensiones, peso, material, certificaciones, etc.).
+            10. DESCRIPCIÓN: Extrae la descripción extendida del producto. Si los datos crudos incluyen información en la propiedad "Description", asegúrate de mantenerla o enriquecerla.
             
             Devuelve SOLO JSON válido que cumpla el esquema. No incluyas explicaciones fuera del JSON.
             Si un campo no se encuentra, usa null o un array vacío según corresponda, pero prioriza la búsqueda exhaustiva en el HTML.

@@ -219,6 +219,23 @@
                         Ej: https://proveedor.com/productos
                     </TextBlock>
 
+                    <!-- Product Detail URL (Optional) -->
+                    <TextBlock Style="{StaticResource FieldLabel}" Text="URL de Detalle de Producto" Margin="0,16,0,4"/>
+                    <TextBox Text="{Binding ProductDetailUrl, UpdateSourceTrigger=PropertyChanged}"
+                             Style="{StaticResource Input}" FontSize="14" Padding="10,8"/>
+                    <TextBlock Margin="0,6,0,0" FontSize="12" Foreground="#9CA3AF">
+                        Opcional. Usar si el primer producto del catálogo no sirve para extraer la descripción y detalles completos.
+                    </TextBlock>
+
+                    <!-- Brand name capture -->
+                    <TextBlock Style="{StaticResource FieldLabel}" Text="Nombre de la marca (Brand)" Margin="0,16,0,4"/>
+                    <TextBox Text="{Binding BrandOverride, UpdateSourceTrigger=PropertyChanged}"
+                             Style="{StaticResource Input}" FontSize="14" Padding="10,8"
+                             x:Name="BrandOverrideInput"/>
+                    <TextBlock Margin="0,6,0,0" FontSize="12" Foreground="#9CA3AF">
+                        Opcional. Ej: Festo, Autonics, Siemens. Se asignará a todos los productos de este proveedor.
+                    </TextBlock>
+
                     <Border Background="#FEF2F2" BorderBrush="#DC2626" BorderThickness="1"
                             CornerRadius="6" Padding="12,8" Margin="0,16,0,0"
                             Visibility="{Binding HasError, Converter={StaticResource BoolToVisibility}}">

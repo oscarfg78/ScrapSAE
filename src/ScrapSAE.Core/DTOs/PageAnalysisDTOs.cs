@@ -7,6 +7,9 @@ public class PageAnalysisRequest
 {
     /// <summary>URL de la página a analizar (debe ser http o https)</summary>
     public string Url { get; set; } = string.Empty;
+
+    /// <summary>URL opcional de un detalle de producto para forzar el análisis de campos de detalle en esta URL</summary>
+    public string? ProductDetailUrl { get; set; }
 }
 
 /// <summary>

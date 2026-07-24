@@ -41,4 +41,12 @@ public sealed class StubScrapingService : IScrapingService
 
         return Task.FromResult(products);
     }
+
+    public Task<List<string>> DiscoverProductUrlsAsync(
+        SiteProfile site,
+        CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(new List<string>());
+    }
 }
+

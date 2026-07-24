@@ -60,6 +60,7 @@ public class ApiUnitTests
         var logger = new Mock<ILogger<ScrapingRunner>>();
 
         var runner = new ScrapingRunner(
+            new Mock<IServiceProvider>().Object,
             new StubScrapingService(),
             client,
             aiProcessor.Object,
@@ -123,6 +124,7 @@ public class ApiUnitTests
         var logger = new Mock<ILogger<ScrapingRunner>>();
 
         var runner = new ScrapingRunner(
+            new Mock<IServiceProvider>().Object,
             scrapingService.Object,
             client,
             aiProcessor.Object,
@@ -193,6 +195,7 @@ public class ApiUnitTests
         var logger = new Mock<ILogger<ScrapingRunner>>();
 
         var runner = new ScrapingRunner(
+            new Mock<IServiceProvider>().Object,
             scrapingService.Object,
             client,
             aiProcessor.Object,

@@ -30,12 +30,9 @@ public class ShopifyApiStrategy : IProviderScraperStrategy
     {
         _logger.LogInformation("[Shopify] Iniciando scraping vía API para {SiteName} ({BaseUrl})", site.Name, site.BaseUrl);
         var client = _httpClientFactory.CreateClient("ShopifyClient");
-        var baseUrl = site.BaseUrl;
-        if (!baseUrl.EndsWith("/"))
-        {
-            baseUrl += "/";
-        }
-        client.BaseAddress = new Uri(baseUrl);
+        var uri = new Uri(site.BaseUrl);
+        var rootOrigin = uri.GetLeftPart(UriPartial.Authority) + "/";
+        client.BaseAddress = new Uri(rootOrigin);
         client.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
 
         var allProducts = new List<ScrapedProduct>();

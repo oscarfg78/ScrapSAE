@@ -142,6 +142,7 @@ public static class SiteProfileSchemaCompatibility
             CredentialsEncrypted = site.CredentialsEncrypted,
             IsActive = site.IsActive,
             MaxProductsPerScrape = site.MaxProductsPerScrape,
+            BrandOverride = site.BrandOverride,
             CreatedAt = site.CreatedAt,
             UpdatedAt = site.UpdatedAt
         };
@@ -324,6 +325,7 @@ public sealed class SiteProfileLegacyPayload
     public string? CredentialsEncrypted { get; set; }
     public bool IsActive { get; set; } = true;
     public int MaxProductsPerScrape { get; set; }
+    public string? BrandOverride { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 }

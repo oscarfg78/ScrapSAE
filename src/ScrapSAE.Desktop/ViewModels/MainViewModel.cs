@@ -62,14 +62,19 @@ public sealed class MainViewModel : ViewModelBase
     private string _selectorAnalysisResult = string.Empty;
     private string _scrapingMode = "Tradicional";
     private bool _isFamiliesMode;
-    
+
     // Nuevas propiedades para consola en tiempo real y opciones avanzadas
     private bool _keepBrowserOpen;
     private bool _useScreenshotFallback;
     private string _learnedUrlsText = string.Empty;
     private readonly DispatcherTimer _liveLogTimer;
     private DateTime _lastLogTimestamp = DateTime.UtcNow.AddDays(-1);
-    
+
+    // Granular phase tracking
+    private string _scrapingPhaseText = "Inactivo";
+    private string _scrapingPhaseColor = "#6B7280";  // gray
+    private bool _logFilterErrorsOnly;
+
     private string _searchText = string.Empty;
     private bool _isSendProgressVisible;
     private bool _isSendProgressCompleted;
@@ -828,6 +833,40 @@ public sealed class MainViewModel : ViewModelBase
         set => SetField(ref _scrapeStatusText, value);
     }
 
+    /// <summary>Descripción de la fase granular de scraping (Descubrimiento, Paginación, Extracción, etc.)</summary>
+    public string ScrapingPhaseText
+    {
+        get => _scrapingPhaseText;
+        set => SetField(ref _scrapingPhaseText, value);
+    }
+
+    /// <summary>Color hex para el badge de fase (#10B981 verde, #2563EB azul, #D97706 amarillo, #6B7280 gris)</summary>
+    public string ScrapingPhaseColor
+    {
+        get => _scrapingPhaseColor;
+        set => SetField(ref _scrapingPhaseColor, value);
+    }
+
+    /// <summary>Cuando es true, solo se muestran logs de nivel error/warn en la consola en tiempo real.</summary>
+    public bool LogFilterErrorsOnly
+    {
+        get => _logFilterErrorsOnly;
+        set
+        {
+            SetField(ref _logFilterErrorsOnly, value);
+            // Trigger re-filter
+            OnPropertyChanged(nameof(FilteredLiveLogs));
+        }
+    }
+
+    /// <summary>Vista filtrada de LiveLogs: solo errores si LogFilterErrorsOnly está activo.</summary>
+    public IEnumerable<string> FilteredLiveLogs =>
+        LogFilterErrorsOnly
+            ? LiveLogs.Where(l => l.Contains("[ERROR]", StringComparison.OrdinalIgnoreCase)
+                               || l.Contains("[WARN]", StringComparison.OrdinalIgnoreCase)
+                               || l.Contains("error", StringComparison.OrdinalIgnoreCase))
+            : LiveLogs;
+
     public string SelectorAnalysisResult
     {
         get => _selectorAnalysisResult;
@@ -952,7 +991,12 @@ public sealed class MainViewModel : ViewModelBase
             StatusMessage = "Cargando datos...";
             var selectedSiteId = SelectedSite?.Id;
             Sites.Clear();
-            foreach (var site in await _apiClient.GetSitesAsync())
+            var rawSites = await _apiClient.GetSitesAsync();
+            var uniqueSites = rawSites
+                .Where(s => !s.Name.StartsWith("[TEMP]", StringComparison.OrdinalIgnoreCase))
+                .DistinctBy(s => (s.Name ?? string.Empty).Trim().ToLowerInvariant());
+
+            foreach (var site in uniqueSites)
             {
                 Sites.Add(site);
             }
@@ -1133,7 +1177,12 @@ public sealed class MainViewModel : ViewModelBase
 
     private void ReplaceSiteInCollection(SiteProfile site)
     {
-        var index = Sites.ToList().FindIndex(s => s.Id == site.Id);
+        if (site == null || site.Name.StartsWith("[TEMP]", StringComparison.OrdinalIgnoreCase)) return;
+
+        var index = Sites.ToList().FindIndex(s => s.Id == site.Id || 
+            (!string.IsNullOrEmpty(s.BaseUrl) && s.BaseUrl.Equals(site.BaseUrl, StringComparison.OrdinalIgnoreCase)) ||
+            s.Name.Equals(site.Name, StringComparison.OrdinalIgnoreCase));
+        
         if (index >= 0)
         {
             Sites[index] = site;
@@ -2674,6 +2723,8 @@ public sealed class MainViewModel : ViewModelBase
             if (SelectedSite == null)
             {
                 ScrapeStatusText = "Idle";
+                ScrapingPhaseText = "Inactivo";
+                ScrapingPhaseColor = "#6B7280";
                 IsScraping = false;
                 return;
             }
@@ -2682,6 +2733,8 @@ public sealed class MainViewModel : ViewModelBase
             if (status == null)
             {
                 ScrapeStatusText = "Idle";
+                ScrapingPhaseText = "Inactivo";
+                ScrapingPhaseColor = "#6B7280";
                 IsScraping = false;
                 return;
             }
@@ -2689,6 +2742,42 @@ public sealed class MainViewModel : ViewModelBase
             ScrapeStatusText = $"{status.State} - {status.Message}";
             IsScraping = status.State == ScrapSAE.Core.Interfaces.ScrapeRunState.Running ||
                          status.State == ScrapSAE.Core.Interfaces.ScrapeRunState.Paused;
+
+            // Update granular phase indicator based on message keywords
+            if (!IsScraping)
+            {
+                ScrapingPhaseText = "Completado / En espera";
+                ScrapingPhaseColor = "#6B7280";
+            }
+            else
+            {
+                var msg = (status.Message ?? string.Empty).ToLowerInvariant();
+                if (msg.Contains("descubr") || msg.Contains("discovery") || msg.Contains("catálogo"))
+                {
+                    ScrapingPhaseText = "🔍 Fase 1: Descubrimiento de catálogo";
+                    ScrapingPhaseColor = "#10B981"; // green
+                }
+                else if (msg.Contains("paginac") || msg.Contains("página") || msg.Contains("navegan"))
+                {
+                    ScrapingPhaseText = "📄 Fase 2: Resolución de paginación";
+                    ScrapingPhaseColor = "#D97706"; // amber
+                }
+                else if (msg.Contains("extray") || msg.Contains("extracc") || msg.Contains("producto"))
+                {
+                    ScrapingPhaseText = "📦 Fase 3: Extracción de productos";
+                    ScrapingPhaseColor = "#2563EB"; // blue
+                }
+                else if (msg.Contains("error") || msg.Contains("fallback"))
+                {
+                    ScrapingPhaseText = "⚠️ Intentando modo alternativo";
+                    ScrapingPhaseColor = "#DC2626"; // red
+                }
+                else
+                {
+                    ScrapingPhaseText = "⚙️ Procesando...";
+                    ScrapingPhaseColor = "#7C3AED"; // purple
+                }
+            }
         }
         catch
         {

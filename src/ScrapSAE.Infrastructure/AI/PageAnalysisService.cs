@@ -55,7 +55,7 @@ public sealed class PageAnalysisService : IPageAnalysisService, IAsyncDisposable
     // Public API
     // ─────────────────────────────────────────────────────────────────────────
 
-    public async Task<PageAnalysisResult> AnalyzeAsync(string url, CancellationToken cancellationToken = default)
+    public async Task<PageAnalysisResult> AnalyzeAsync(string catalogUrl, string? productDetailUrl = null, CancellationToken cancellationToken = default)
     {
         if (!_enabled || string.IsNullOrWhiteSpace(_apiKey))
         {
@@ -67,10 +67,10 @@ public sealed class PageAnalysisService : IPageAnalysisService, IAsyncDisposable
 
         try
         {
-            _logger.LogInformation("[PageAnalysis] Iniciando análisis de: {Url}", url);
+            _logger.LogInformation("[PageAnalysis] Iniciando análisis de: {Url}", catalogUrl);
 
             // 1. Download HTML via Playwright
-            var (html, pageTitle) = await FetchRenderedHtmlAsync(url, cts.Token);
+            var (html, pageTitle) = await FetchRenderedHtmlAsync(catalogUrl, cts.Token);
 
             var isShopify = html.Contains("window.Shopify", StringComparison.OrdinalIgnoreCase) || 
                             html.Contains("cdn.shopify.com", StringComparison.OrdinalIgnoreCase);
@@ -78,8 +78,16 @@ public sealed class PageAnalysisService : IPageAnalysisService, IAsyncDisposable
             // 2. Truncate and clean the HTML
             var truncatedHtml = TruncateHtml(html);
 
+            string? truncatedProductDetailHtml = null;
+            if (!string.IsNullOrWhiteSpace(productDetailUrl))
+            {
+                _logger.LogInformation("[PageAnalysis] Descargando HTML de detalle de producto: {Url}", productDetailUrl);
+                var (detailHtml, _) = await FetchRenderedHtmlAsync(productDetailUrl, cts.Token);
+                truncatedProductDetailHtml = TruncateHtml(detailHtml);
+            }
+
             // 3. Send to GPT for analysis
-            var result = await AnalyzeWithGptAsync(url, truncatedHtml, pageTitle, cts.Token);
+            var result = await AnalyzeWithGptAsync(catalogUrl, productDetailUrl, truncatedHtml, truncatedProductDetailHtml, pageTitle, cts.Token);
             
             if (isShopify)
             {
@@ -94,8 +102,8 @@ public sealed class PageAnalysisService : IPageAnalysisService, IAsyncDisposable
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            _logger.LogWarning("[PageAnalysis] Timeout alcanzado al analizar {Url}", url);
-            throw new TimeoutException($"El análisis de '{url}' superó el tiempo límite de {AnalysisTimeoutSeconds} segundos.");
+            _logger.LogWarning("[PageAnalysis] Timeout alcanzado al analizar {Url}", catalogUrl);
+            throw new TimeoutException($"El análisis de '{catalogUrl}' superó el tiempo límite de {AnalysisTimeoutSeconds} segundos.");
         }
     }
 
@@ -216,9 +224,9 @@ public sealed class PageAnalysisService : IPageAnalysisService, IAsyncDisposable
     // ─────────────────────────────────────────────────────────────────────────
 
     private async Task<PageAnalysisResult> AnalyzeWithGptAsync(
-        string url, string html, string? pageTitle, CancellationToken cancellationToken)
+        string url, string? productDetailUrl, string html, string? productDetailHtml, string? pageTitle, CancellationToken cancellationToken)
     {
-        var request = BuildAnalysisRequest(url, html, pageTitle);
+        var request = BuildAnalysisRequest(url, productDetailUrl, html, productDetailHtml, pageTitle);
         using var responseDoc = await SendRequestAsync(request, cancellationToken);
         var outputText = ExtractOutputText(responseDoc);
 
@@ -269,7 +277,7 @@ public sealed class PageAnalysisService : IPageAnalysisService, IAsyncDisposable
         return result;
     }
 
-    private object BuildAnalysisRequest(string url, string html, string? pageTitle)
+    private object BuildAnalysisRequest(string url, string? productDetailUrl, string html, string? productDetailHtml, string? pageTitle)
     {
         var systemPrompt = """
             Eres un experto en análisis de sitios web de comercio electrónico (e-commerce) y scraping web.
@@ -305,6 +313,11 @@ public sealed class PageAnalysisService : IPageAnalysisService, IAsyncDisposable
             HTML de la página (puede estar truncado):
             {html}
             """;
+
+        if (!string.IsNullOrWhiteSpace(productDetailHtml))
+        {
+            userPrompt += $"\n\nHTML de Detalle de Producto ({productDetailUrl}) (usar para extraer selectores de detalle):\n{productDetailHtml}";
+        }
 
         return new
         {

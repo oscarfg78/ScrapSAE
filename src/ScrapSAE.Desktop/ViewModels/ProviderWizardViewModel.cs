@@ -55,6 +55,8 @@ public sealed class ProviderWizardViewModel : ViewModelBase
 
     // ─── Step 1 ────────────────────────────────────────────────────────────────
     private string _url = string.Empty;
+    private string _productDetailUrl = string.Empty;
+    private string _brandOverride = string.Empty;
 
     // ─── Step 2 ────────────────────────────────────────────────────────────────
     private PageAnalysisResult? _analysisResult;
@@ -73,11 +75,22 @@ public sealed class ProviderWizardViewModel : ViewModelBase
     private int _nameCoverage;
     private int _imageCoverage;
     private int _priceCoverage;
+    private bool _wasSuccessful;
 
     // ─── Result ────────────────────────────────────────────────────────────────
     /// <summary>Site creado al final del wizard (null si se canceló).</summary>
     public SiteProfile? CreatedSite { get; private set; }
-    public bool WasSuccessful { get; private set; }
+    public bool WasSuccessful
+    {
+        get => _wasSuccessful;
+        private set
+        {
+            if (SetField(ref _wasSuccessful, value))
+            {
+                (SaveProviderCommand as AsyncCommand)?.RaiseCanExecuteChanged();
+            }
+        }
+    }
 
     // ──────────────────────────────────────────────────────────────────────────
     // Constructor
@@ -169,8 +182,20 @@ public sealed class ProviderWizardViewModel : ViewModelBase
         set
         {
             SetField(ref _url, value);
-            (AnalyzeCommand as AsyncCommand)?.RaiseCanExecuteChanged();
+            ((AsyncCommand)AnalyzeCommand).RaiseCanExecuteChanged();
         }
+    }
+
+    public string ProductDetailUrl
+    {
+        get => _productDetailUrl;
+        set => SetField(ref _productDetailUrl, value);
+    }
+
+    public string BrandOverride
+    {
+        get => _brandOverride;
+        set => SetField(ref _brandOverride, value);
     }
 
     // Step 2
@@ -258,7 +283,7 @@ public sealed class ProviderWizardViewModel : ViewModelBase
 
         try
         {
-            var result = await _apiClient.AnalyzePageAsync(Url);
+            var result = await _apiClient.AnalyzePageAsync(Url, string.IsNullOrWhiteSpace(ProductDetailUrl) ? null : ProductDetailUrl.Trim());
             if (result == null)
             {
                 ErrorMessage = "No se pudo analizar la página. Verifica la URL e intenta de nuevo.";
@@ -346,6 +371,15 @@ public sealed class ProviderWizardViewModel : ViewModelBase
             ConfigValidationMessage = "El nombre del proveedor es obligatorio.";
             return;
         }
+
+        if (!string.IsNullOrWhiteSpace(WizardConfig.StrategyType) &&
+            (WizardConfig.StrategyType.Equals("Shopify", StringComparison.OrdinalIgnoreCase) ||
+             WizardConfig.StrategyType.Equals("ShopifyApi", StringComparison.OrdinalIgnoreCase)))
+        {
+            ConfigValidationMessage = string.Empty;
+            return;
+        }
+
         if (string.IsNullOrWhiteSpace(WizardConfig.ProductCardSelector)
             && string.IsNullOrWhiteSpace(WizardConfig.ProductContainerSelector)
             && string.IsNullOrWhiteSpace(WizardConfig.NameSelector))
@@ -403,7 +437,16 @@ public sealed class ProviderWizardViewModel : ViewModelBase
 
             _tempSiteId = created.Id;
 
-            // Run the scrape (max 120 products as per spec)
+            // For the test run, override MaxProductsPerScrape to 2 so the scrape
+            // is fast and avoids unnecessary AI/processing credits. The final saved site uses 120.
+            var testSiteOverride = new SiteProfile();
+            testSiteOverride.Id = created.Id;
+            testSiteOverride.MaxProductsPerScrape = 2;
+            // Apply override so the API scrape respects the 2-product limit
+            var patchedForTest = BuildSiteProfile($"[TEMP] {WizardConfig.Name}");
+            patchedForTest.Id = created.Id;
+            patchedForTest.MaxProductsPerScrape = 2;
+            await _apiClient.UpdateSiteAsync(created.Id, patchedForTest);
             ScrapeRunResult? scrapeResult = null;
             try
             {
@@ -423,7 +466,7 @@ public sealed class ProviderWizardViewModel : ViewModelBase
             var stagingProducts = await _apiClient.GetStagingProductsAsync();
             var products = stagingProducts
                 .Where(p => p.SiteId == created.Id)
-                .Take(120)
+                .Take(10)  // test preview capped at 10
                 .ToList();
 
             TotalProductsFound = scrapeResult?.ProductsFound ?? products.Count;
@@ -609,6 +652,12 @@ public sealed class ProviderWizardViewModel : ViewModelBase
         if (WizardConfig.UseFamiliesStrategy)
             strategies.Add(new ScrapingStrategyDefinition { StrategyName = "Families", Priority = 3, IsEnabled = true });
 
+        if (WizardConfig.StrategyType.Equals("Shopify", StringComparison.OrdinalIgnoreCase)
+            && !strategies.Any(s => s.StrategyName.Equals("Shopify", StringComparison.OrdinalIgnoreCase)))
+        {
+            strategies.Insert(0, new ScrapingStrategyDefinition { StrategyName = "Shopify", Priority = 1, IsEnabled = true });
+        }
+
         return new SiteProfile
         {
             Id = Guid.NewGuid(),
@@ -618,6 +667,7 @@ public sealed class ProviderWizardViewModel : ViewModelBase
             IsActive = true,
             RequiresLogin = false,
             MaxProductsPerScrape = 120,
+            BrandOverride = string.IsNullOrWhiteSpace(BrandOverride) ? null : BrandOverride.Trim(),
             Selectors = selectors.Count > 0 ? selectors : null,
             SecondarySelectors = AnalysisResult?.SecondarySelectors ?? new Dictionary<string, List<string>>(),
             Strategies = strategies,

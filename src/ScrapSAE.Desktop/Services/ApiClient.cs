@@ -35,9 +35,9 @@ public sealed class ApiClient
     /// Analiza la URL de un proveedor con IA para detectar la estructura del catálogo de productos.
     /// Puede tomar hasta 30 segundos (descarga HTML con Playwright + análisis GPT).
     /// </summary>
-    public async Task<PageAnalysisResult?> AnalyzePageAsync(string url)
+    public async Task<PageAnalysisResult?> AnalyzePageAsync(string url, string? productDetailUrl = null)
     {
-        var body = new { url };
+        var body = new PageAnalysisRequest { Url = url, ProductDetailUrl = productDetailUrl };
         try
         {
             var response = await _httpClient.PostAsJsonAsync("api/sites/analyze", body);
