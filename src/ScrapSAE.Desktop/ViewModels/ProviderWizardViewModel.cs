@@ -291,6 +291,11 @@ public sealed class ProviderWizardViewModel : ViewModelBase
                 return;
             }
 
+            if (!string.IsNullOrWhiteSpace(result.CandidateDetailUrl) && string.IsNullOrWhiteSpace(ProductDetailUrl))
+            {
+                ProductDetailUrl = result.CandidateDetailUrl;
+            }
+
             AnalysisResult = result;
             StatusMessage = result.IsProductCatalog
                 ? $"✓ Catálogo detectado: {result.DetectedFields.Count} campos analizados"
@@ -335,13 +340,13 @@ public sealed class ProviderWizardViewModel : ViewModelBase
             Name = name,
             BaseUrl = Url,
             StrategyType = result.StrategyType,
-            ProductContainerSelector = result.ProductContainerSelector ?? string.Empty,
-            ProductCardSelector = result.ProductCardSelector ?? string.Empty,
-            SkuSelector = result.SkuSelector ?? string.Empty,
-            NameSelector = result.NameSelector ?? string.Empty,
-            ImageSelector = result.ImageSelector ?? string.Empty,
-            PriceSelector = result.PriceSelector ?? string.Empty,
-            CharacteristicsSelector = result.CharacteristicsSelector ?? string.Empty,
+            ProductContainerSelector = result.ProductContainerSelector?.ToString() ?? string.Empty,
+            ProductCardSelector = result.ProductCardSelector?.ToString() ?? string.Empty,
+            SkuSelector = result.SkuSelector?.ToString() ?? string.Empty,
+            NameSelector = result.NameSelector?.ToString() ?? string.Empty,
+            ImageSelector = result.ImageSelector?.ToString() ?? string.Empty,
+            PriceSelector = result.PriceSelector?.ToString() ?? string.Empty,
+            CharacteristicsSelector = result.CharacteristicsSelector?.ToString() ?? string.Empty,
         };
 
         // Configure strategies from recommendations
@@ -437,15 +442,15 @@ public sealed class ProviderWizardViewModel : ViewModelBase
 
             _tempSiteId = created.Id;
 
-            // For the test run, override MaxProductsPerScrape to 2 so the scrape
+            // For the test run, override MaxProductsPerScrape to 5 so the scrape
             // is fast and avoids unnecessary AI/processing credits. The final saved site uses 120.
             var testSiteOverride = new SiteProfile();
             testSiteOverride.Id = created.Id;
-            testSiteOverride.MaxProductsPerScrape = 2;
-            // Apply override so the API scrape respects the 2-product limit
+            testSiteOverride.MaxProductsPerScrape = 5;
+            // Apply override so the API scrape respects the 5-product limit
             var patchedForTest = BuildSiteProfile($"[TEMP] {WizardConfig.Name}");
             patchedForTest.Id = created.Id;
-            patchedForTest.MaxProductsPerScrape = 2;
+            patchedForTest.MaxProductsPerScrape = 5;
             await _apiClient.UpdateSiteAsync(created.Id, patchedForTest);
             ScrapeRunResult? scrapeResult = null;
             try

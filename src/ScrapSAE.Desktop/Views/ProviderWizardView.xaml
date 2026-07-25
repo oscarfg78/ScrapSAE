@@ -426,6 +426,12 @@
                     <StackPanel Visibility="{Binding IsBusy, Converter={StaticResource InverseBoolToVisibility}}">
                         <TextBlock Text="Resultados del scrape de prueba" Style="{StaticResource SectionHeader}" FontSize="18"/>
 
+                        <!-- Demo Mode badge -->
+                        <Border Background="#F3E8FF" BorderBrush="#9333EA" BorderThickness="1"
+                                CornerRadius="4" Padding="8,4" Margin="0,0,0,12" HorizontalAlignment="Left">
+                            <TextBlock Text="Demo Mode: Información Simulada (5 productos máx)" Foreground="#7E22CE" FontSize="12" FontWeight="SemiBold"/>
+                        </Border>
+
                         <!-- Product count banner -->
                         <Border Background="#EFF6FF" BorderBrush="#2563EB" BorderThickness="1"
                                 CornerRadius="6" Padding="12,8" Margin="0,0,0,12"

@@ -11,7 +11,7 @@ public sealed class StubScrapingService : IScrapingService
         // No-op for tests.
     }
 
-    public Task<IEnumerable<ScrapedProduct>> ScrapeAsync(SiteProfile site, CancellationToken cancellationToken = default)
+    public Task<IEnumerable<ScrapedProduct>> ScrapeAsync(SiteProfile site, ScrapeExecutionContext? context = null, CancellationToken cancellationToken = default)
     {
         var products = new[]
         {

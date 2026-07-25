@@ -188,7 +188,7 @@ public sealed class OpenAIProcessorService : IAIProcessorService
             6. GALERÍA DE IMÁGENES: Extrae TODAS las URLs de las imágenes del producto, no solo la principal. Busca elementos como galerías, thumbnails, imágenes alternativas.
             7. STOCK/INVENTARIO: Busca indicadores de stock, cantidad disponible, o estado de disponibilidad. Extrae el valor numérico si está presente.
             8. ARCHIVOS ADJUNTOS: Identifica enlaces a documentos PDF, fichas técnicas, manuales de usuario, catálogos. Extrae la URL y el nombre del archivo.
-            9. ESPECIFICACIONES: Extrae todas las especificaciones técnicas en formato clave-valor (dimensiones, peso, material, certificaciones, etc.).
+            9. ESPECIFICACIONES: Extrae todas las especificaciones técnicas en formato clave-valor (dimensiones, peso, material, certificaciones, etc.). Si los datos crudos incluyen un campo 'CharacteristicsHtml', utilízalo como la fuente principal para extraer las especificaciones y características, mapeando tablas o listas complejas a la lista de 'Features' o al diccionario de 'Specifications'.
             10. DESCRIPCIÓN: Extrae la descripción extendida del producto. Si los datos crudos incluyen información en la propiedad "Description", asegúrate de mantenerla o enriquecerla.
             
             Devuelve SOLO JSON válido que cumpla el esquema. No incluyas explicaciones fuera del JSON.
@@ -514,15 +514,21 @@ public sealed class OpenAIProcessorService : IAIProcessorService
     private object BuildSelectorAnalysisRequest(SelectorAnalysisRequest request)
     {
         var systemPrompt = """
-            Eres un experto en web scraping y análisis de HTML. Tu tarea es analizar el HTML de una página de e-commerce y sugerir selectores CSS óptimos para extraer información de productos.
+            Eres un experto en web scraping y análisis de HTML. Tu tarea es analizar el HTML de una página de e-commerce y sugerir selectores óptimos para extraer información de productos.
+            
+            Debes sugerir TANTO selectores CSS como expresiones XPath para cada campo, devolviendo un objeto `{ "css": "...", "xpath": "..." }`:
+            - Usa selectores CSS (ej. `.product-card`, `#price`) si los elementos tienen clases o IDs claros.
+            - Usa XPath (ej. `//div[@id="tab-content"]/p[1]`, o `//td[contains(text(), "Price")]/following-sibling::td`) si es más fácil acceder a elementos sin clases consistentes o que dependan de texto y relaciones familiares.
+            
+            IMPORTANTE: Si el selector que sugieres es un XPath, ASEGÚRATE de que inicie con `//` o `xpath=` para que el sistema lo procese correctamente. Si es CSS, asegúrate de que use los prefijos correctos (`.`, `#`). Ambos son obligatorios (si uno no aplica, ponlo null, pero intenta llenar ambos).
             
             Busca patrones comunes como:
-            - Clases CSS con prefijos consistentes para listas y tarjetas de productos
+            - Clases o XPaths consistentes para listas y tarjetas de productos
             - Selectores para botones de detalle
             - Selectores para información del producto (título, precio, SKU, imagen)
             - Selectores para paginación
             
-            Devuelve SOLO JSON válido con los selectores sugeridos y un nivel de confianza.
+            Devuelve SOLO JSON válido con los objetos de selectores sugeridos y un nivel de confianza.
             """;
 
         var userPrompt = $"URL: {request.Url}\n\nHTML snippet:\n{request.HtmlSnippet}\n\nNotas: {request.Notes}";
@@ -573,15 +579,15 @@ public sealed class OpenAIProcessorService : IAIProcessorService
                         required = new[] { "confidenceScore" },
                         properties = new
                         {
-                            productListClassPrefix = new { type = new[] { "string", "null" } },
-                            productCardClassPrefix = new { type = new[] { "string", "null" } },
-                            detailButtonText = new { type = new[] { "string", "null" } },
-                            detailButtonClassPrefix = new { type = new[] { "string", "null" } },
-                            titleSelector = new { type = new[] { "string", "null" } },
-                            priceSelector = new { type = new[] { "string", "null" } },
-                            skuSelector = new { type = new[] { "string", "null" } },
-                            imageSelector = new { type = new[] { "string", "null" } },
-                            nextPageSelector = new { type = new[] { "string", "null" } },
+                            productListClassPrefix = new { type = new[] { "object", "null" }, properties = new { css = new { type = new[] { "string", "null" } }, xpath = new { type = new[] { "string", "null" } } } },
+                            productCardClassPrefix = new { type = new[] { "object", "null" }, properties = new { css = new { type = new[] { "string", "null" } }, xpath = new { type = new[] { "string", "null" } } } },
+                            detailButtonText = new { type = new[] { "object", "null" }, properties = new { css = new { type = new[] { "string", "null" } }, xpath = new { type = new[] { "string", "null" } } } },
+                            detailButtonClassPrefix = new { type = new[] { "object", "null" }, properties = new { css = new { type = new[] { "string", "null" } }, xpath = new { type = new[] { "string", "null" } } } },
+                            titleSelector = new { type = new[] { "object", "null" }, properties = new { css = new { type = new[] { "string", "null" } }, xpath = new { type = new[] { "string", "null" } } } },
+                            priceSelector = new { type = new[] { "object", "null" }, properties = new { css = new { type = new[] { "string", "null" } }, xpath = new { type = new[] { "string", "null" } } } },
+                            skuSelector = new { type = new[] { "object", "null" }, properties = new { css = new { type = new[] { "string", "null" } }, xpath = new { type = new[] { "string", "null" } } } },
+                            imageSelector = new { type = new[] { "object", "null" }, properties = new { css = new { type = new[] { "string", "null" } }, xpath = new { type = new[] { "string", "null" } } } },
+                            nextPageSelector = new { type = new[] { "object", "null" }, properties = new { css = new { type = new[] { "string", "null" } }, xpath = new { type = new[] { "string", "null" } } } },
                             confidenceScore = new { type = "number", minimum = 0, maximum = 1 },
                             reasoning = new { type = new[] { "string", "null" } }
                         }

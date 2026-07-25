@@ -67,9 +67,9 @@ public class DirectExtractionStrategy : IScrapingStrategy
         try
         {
             // Extraer datos básicos del producto
-            var sku = await ExtractTextAsync(page, "productSku", site);
-            var title = await ExtractTextAsync(page, "productName", site);
-            var price = await ExtractTextAsync(page, "productPrice", site);
+            var sku = await ExtractTextAsync(page, "sku", site);
+            var title = await ExtractTextAsync(page, "name", site);
+            var price = await ExtractTextAsync(page, "price", site);
             
             // Validar que al menos tengamos SKU y título
             if (string.IsNullOrEmpty(sku) || string.IsNullOrEmpty(title))
@@ -87,8 +87,8 @@ public class DirectExtractionStrategy : IScrapingStrategy
             };
             
             // Intentar extraer campos opcionales
-            product.Description = await ExtractTextAsync(page, "productDescription", site);
-            product.ImageUrl = await ExtractAttributeAsync(page, "productImage", "src", site);
+            product.Description = await ExtractTextAsync(page, "characteristics", site);
+            product.ImageUrl = await ExtractAttributeAsync(page, "image", "src", site);
             
             return product;
         }
@@ -103,17 +103,13 @@ public class DirectExtractionStrategy : IScrapingStrategy
     {
         try
         {
-            if (site.Selectors is Dictionary<string, object> selectors &&
-                selectors.ContainsKey(selectorKey))
+            var selector = GetDualSelector(site, selectorKey);
+            if (selector != null)
             {
-                var selector = selectors[selectorKey]?.ToString();
-                if (!string.IsNullOrEmpty(selector))
+                var element = await QuerySelectorResilientAsync(page, selector);
+                if (element != null)
                 {
-                    var element = await page.QuerySelectorAsync(selector);
-                    if (element != null)
-                    {
-                        return await element.TextContentAsync();
-                    }
+                    return await element.TextContentAsync();
                 }
             }
         }
@@ -129,17 +125,13 @@ public class DirectExtractionStrategy : IScrapingStrategy
     {
         try
         {
-            if (site.Selectors is Dictionary<string, object> selectors &&
-                selectors.ContainsKey(selectorKey))
+            var selector = GetDualSelector(site, selectorKey);
+            if (selector != null)
             {
-                var selector = selectors[selectorKey]?.ToString();
-                if (!string.IsNullOrEmpty(selector))
+                var element = await QuerySelectorResilientAsync(page, selector);
+                if (element != null)
                 {
-                    var element = await page.QuerySelectorAsync(selector);
-                    if (element != null)
-                    {
-                        return await element.GetAttributeAsync(attribute);
-                    }
+                    return await element.GetAttributeAsync(attribute);
                 }
             }
         }
@@ -149,6 +141,55 @@ public class DirectExtractionStrategy : IScrapingStrategy
         }
         
         return null;
+    }
+
+    private DualSelector? GetDualSelector(SiteProfile site, string key)
+    {
+        if (site.Selectors == null) return null;
+        
+        try
+        {
+            var json = System.Text.Json.JsonSerializer.Serialize(site.Selectors);
+            var dict = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, System.Text.Json.JsonElement>>(json);
+            if (dict != null && dict.TryGetValue(key, out var element))
+            {
+                if (element.ValueKind == System.Text.Json.JsonValueKind.Object)
+                {
+                    return System.Text.Json.JsonSerializer.Deserialize<DualSelector>(element.GetRawText(), new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                }
+                else if (element.ValueKind == System.Text.Json.JsonValueKind.String)
+                {
+                    var strVal = element.GetString();
+                    if (!string.IsNullOrWhiteSpace(strVal) && strVal.TrimStart().StartsWith("{"))
+                    {
+                        try 
+                        {
+                            var parsed = System.Text.Json.JsonSerializer.Deserialize<DualSelector>(strVal, new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                            if (parsed != null) return parsed;
+                        }
+                        catch { }
+                    }
+                    return new DualSelector { Css = strVal };
+                }
+            }
+        }
+        catch { }
+        return null;
+    }
+
+    private async Task<IElementHandle?> QuerySelectorResilientAsync(IPage page, DualSelector selector)
+    {
+        IElementHandle? element = null;
+        if (!string.IsNullOrWhiteSpace(selector.Css))
+        {
+            try { element = await page.QuerySelectorAsync(selector.Css); } catch { }
+        }
+        if (element == null && !string.IsNullOrWhiteSpace(selector.XPath))
+        {
+            var xpath = selector.XPath.StartsWith("xpath=") ? selector.XPath : $"xpath={selector.XPath}";
+            try { element = await page.QuerySelectorAsync(xpath); } catch { }
+        }
+        return element;
     }
 
     private decimal? ParsePrice(string? priceText)

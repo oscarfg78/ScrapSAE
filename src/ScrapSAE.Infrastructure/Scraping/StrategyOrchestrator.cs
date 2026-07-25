@@ -106,10 +106,32 @@ public class StrategyOrchestrator : IStrategyOrchestrator
         // Si el sitio tiene estrategias configuradas, usarlas
         if (site.Strategies != null && site.Strategies.Any())
         {
-            return site.Strategies
+            var strategies = site.Strategies
                 .Where(s => s.IsEnabled)
                 .OrderBy(s => s.Priority)
                 .ToList();
+
+            // Auto-inject List strategy si no está pero tenemos selectores de lista en el diccionario
+            var hasListStrategy = strategies.Any(s => s.StrategyName.Equals("List", StringComparison.OrdinalIgnoreCase));
+            bool hasListSelectors = false;
+            if (site.Selectors != null)
+            {
+                try
+                {
+                    var selectorsJson = System.Text.Json.JsonSerializer.Serialize(site.Selectors);
+                    var dict = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(selectorsJson);
+                    hasListSelectors = dict != null && dict.ContainsKey("productContainer") && !string.IsNullOrWhiteSpace(dict["productContainer"]);
+                }
+                catch { /* Ignore */ }
+            }
+            if (!hasListStrategy && hasListSelectors)
+            {
+                _logger.LogInformation("[Orchestrator] Inyectando ListStrategy automáticamente porque existen selectores de lista pero no estaba habilitada explícitamente.");
+                strategies.Add(new ScrapingStrategyDefinition { StrategyName = "List", Priority = 2, IsEnabled = true });
+                strategies = strategies.OrderBy(s => s.Priority).ToList();
+            }
+
+            return strategies;
         }
 
         // Si no hay estrategias configuradas, usar un orden por defecto

@@ -17,6 +17,15 @@ namespace ScrapSAE.Infrastructure.Scraping;
 /// <summary>
 /// Servicio de web scraping usando Playwright
 /// </summary>
+/* 
+ * ARQUITECTURA DE EJECUCIÓN (Alineación con Wizard):
+ * 1. Wizard (Desktop) -> Construye SiteProfile con StrategyType, Strategies[] (Habilitadas) y Selectors
+ * 2. API Endpoint -> Construye ScrapeExecutionContext (estado transitorio thread-safe) desde query params
+ * 3. ScrapingRunner -> Enruta por StrategyType (ShopifyApiStrategy vs IScrapingService)
+ * 4. PlaywrightScrapingService -> Inicializa browser/context/page (maneja anti-bot y login fallback)
+ * 5. StrategyOrchestrator -> (NUEVO) Ejecuta iterativamente las estrategias activas (Direct -> List -> Families)
+ *                            usando las interfaces unificadas y los selectores validados por el Wizard.
+ */
 public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposable
 {
     private const string ScreenshotDirectoryName = "scrapsae-screens";
@@ -33,6 +42,7 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
     private readonly ISyncLogService _syncLogService;
     private readonly ITelemetryService _telemetryService;
     private readonly ScrapingProcessManager _processManager;
+    private readonly IStrategyOrchestrator _strategyOrchestrator;
     private readonly EnhancedDataExtractor _enhancedDataExtractor;
     private readonly List<SiteProfile> _sites; // Cache simple for testing
     private IPlaywright? _playwright; // Only for persistent context overrides
@@ -52,7 +62,8 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
         IAIProcessorService aiProcessor,
         ISyncLogService syncLogService,
         ITelemetryService telemetryService,
-        ScrapingProcessManager processManager)
+        ScrapingProcessManager processManager,
+        IStrategyOrchestrator strategyOrchestrator)
     {
         _logger = logger;
         _browserSharing = browserSharing;
@@ -63,6 +74,7 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
         _syncLogService = syncLogService;
         _telemetryService = telemetryService;
         _processManager = processManager;
+        _strategyOrchestrator = strategyOrchestrator;
         _enhancedDataExtractor = new EnhancedDataExtractor(logger);
         _sites = new List<SiteProfile>(); // Initialize empty
     }
@@ -89,30 +101,35 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
     }
 
 
-    private async Task<IBrowserContext> GetContextAsync(BrowserNewContextOptions? options = null)
+    private async Task<IBrowserContext> GetContextAsync(
+        BrowserNewContextOptions? options = null, 
+        ScrapeExecutionContext? executionContext = null)
     {
-        var manualLoginEnv = Environment.GetEnvironmentVariable("SCRAPSAE_MANUAL_LOGIN");
-        var forceManualLoginEnv = Environment.GetEnvironmentVariable("SCRAPSAE_FORCE_MANUAL_LOGIN");
-        var festoManualLoginEnv = Environment.GetEnvironmentVariable("SCRAPSAE_MANUAL_LOGIN_FESTO");
-        var manualEnv = Environment.GetEnvironmentVariable("SCRAPSAE_MANUAL_LOGIN_ACTIVE");
-        var headlessEnv = Environment.GetEnvironmentVariable("SCRAPSAE_HEADLESS");
+        executionContext ??= ScrapeExecutionContext.Default;
+        var shouldBeHeadless = executionContext.IsHeadless;
         
-        var shouldBeHeadless = true;
-        if (!string.IsNullOrWhiteSpace(headlessEnv) && bool.TryParse(headlessEnv, out var parsedHeadless))
+        // Mantener compatibilidad fallback con env vars solo si alguien no pasa el contexto.
+        // Pero preferir fuertemente el executionContext estructurado.
+        if (executionContext == ScrapeExecutionContext.Default)
         {
-            shouldBeHeadless = parsedHeadless;
+            var manualEnv = Environment.GetEnvironmentVariable("SCRAPSAE_MANUAL_LOGIN_ACTIVE");
+            var headlessEnv = Environment.GetEnvironmentVariable("SCRAPSAE_HEADLESS");
+            if (!string.IsNullOrWhiteSpace(headlessEnv) && bool.TryParse(headlessEnv, out var parsedHeadless))
+            {
+                shouldBeHeadless = parsedHeadless;
+            }
+            if (!string.IsNullOrWhiteSpace(manualEnv) && manualEnv == "true")
+            {
+                shouldBeHeadless = false;
+            }
+        }
+        else if (executionContext.ManualLogin)
+        {
+            shouldBeHeadless = false; // Manual login always requires visible browser
         }
 
-        if ((!string.IsNullOrWhiteSpace(manualEnv) && manualEnv == "true") ||
-            (!string.IsNullOrWhiteSpace(manualLoginEnv) && bool.TryParse(manualLoginEnv, out var manualLogin) && manualLogin) ||
-            (!string.IsNullOrWhiteSpace(forceManualLoginEnv) && bool.TryParse(forceManualLoginEnv, out var forceManual) && forceManual) ||
-            (!string.IsNullOrWhiteSpace(festoManualLoginEnv) && bool.TryParse(festoManualLoginEnv, out var forceFesto) && forceFesto))
-        {
-            shouldBeHeadless = false;
-        }
-
-        _logger.LogInformation("[DEBUG] GetContextAsync: manualLoginEnv={Manual}, forceManual={Force}, headlessEnv={Headless}", manualLoginEnv, forceManualLoginEnv, headlessEnv);
-        _logger.LogInformation("[DEBUG] GetContextAsync: shouldBeHeadless calculated as {ShouldBeHeadless}", shouldBeHeadless);
+        _logger.LogInformation("[DEBUG] GetContextAsync: ExecutionContext={Context}, shouldBeHeadless={ShouldBeHeadless}", 
+            executionContext, shouldBeHeadless);
 
         if (_context != null)
         {
@@ -330,7 +347,10 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
         return discovered;
     }
 
-    public async Task<IEnumerable<ScrapedProduct>> ScrapeAsync(SiteProfile site, CancellationToken cancellationToken = default)
+    public async Task<IEnumerable<ScrapedProduct>> ScrapeAsync(
+        SiteProfile site, 
+        ScrapeExecutionContext? executionContext = null,
+        CancellationToken cancellationToken = default)
     {
         RegisterSite(site);
         var products = new List<ScrapedProduct>();
@@ -409,23 +429,28 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
                 }
                 else
                 {
-                    _logger.LogError("Missing ProductListSelector for site {SiteName} in traditional mode. SelectorsJson: {SelectorsJson}", site.Name, selectorsJson);
-                    return products;
+                    if (site.StrategyType == "Generic" || (site.Strategies != null && site.Strategies.Any()))
+                    {
+                        _logger.LogInformation("Missing ProductListSelector, but relying on StrategyOrchestrator since StrategyType is Generic or Strategies are defined.");
+                    }
+                    else
+                    {
+                        _logger.LogError("Missing ProductListSelector for site {SiteName} in traditional mode. SelectorsJson: {SelectorsJson}", site.Name, selectorsJson);
+                        return products;
+                    }
                 }
             }
 
             var storageStatePath = GetStorageStatePath(site.Name);
             var contextOptions = new BrowserNewContextOptions();
             
-            // Si sabemos de antemano que vamos a forzar manual login, 
-            // establecemos la variable de entorno para que GetContextAsync abra headful inmediatamente
-            var forceManualLoginEnv = Environment.GetEnvironmentVariable("SCRAPSAE_FORCE_MANUAL_LOGIN");
-            var isForcedManual = !string.IsNullOrWhiteSpace(forceManualLoginEnv) &&
-                                 bool.TryParse(forceManualLoginEnv, out var forceManual) &&
-                                 forceManual;
+            // Si sabemos de antemano que vamos a forzar manual login desde el contexto,
+            // abrimos headful inmediatamente. (Ignoramos variables de entorno si tenemos contexto)
+            var isForcedManual = executionContext?.ManualLogin ?? false;
                                  
             if (isForcedManual)
             {
+                // Todavía establecemos esto para fallbacks, pero ya no dependemos de él
                 Environment.SetEnvironmentVariable("SCRAPSAE_MANUAL_LOGIN_ACTIVE", "true");
             }
 
@@ -435,7 +460,7 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
                 contextOptions.StorageStatePath = storageStatePath;
             }
 
-            var context = await GetContextAsync(contextOptions);
+            var context = await GetContextAsync(contextOptions, executionContext);
             IPage page;
             try
             {
@@ -445,7 +470,7 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
             {
                 _logger.LogWarning("Browser context closed unexpectedly. Re-initializing context...");
                 _context = null; 
-                context = await GetContextAsync(contextOptions);
+                context = await GetContextAsync(contextOptions, executionContext);
                 page = await context.NewPageAsync();
             }
 
@@ -564,6 +589,37 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
                 }
             }
 
+            // --- 2.3 StrategyOrchestrator (NEW ALIGNED EXECUTION PATH) ---
+            // Intenta ejecutar las estrategias configuradas en SiteProfile.Strategies
+            try
+            {
+                var orchestratedProducts = await _strategyOrchestrator.ExecuteStrategiesAsync(page, site, site.Id, cancellationToken);
+                if (orchestratedProducts != null && orchestratedProducts.Any())
+                {
+                    await LogStepAsync(site.Id, "success", $"Scraping orquestado completado. Total: {orchestratedProducts.Count}", new { count = orchestratedProducts.Count });
+                    return orchestratedProducts;
+                }
+                else
+                {
+                    await LogStepAsync(site.Id, "info", "Scraping orquestado no encontró productos o no había estrategias. Cayendo a lógica legacy.", null);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error ejecutando StrategyOrchestrator. Cayendo a lógica legacy (si aplica).");
+                await LogStepAsync(site.Id, "warn", "Error orquestador.", new { error = ex.Message });
+            }
+
+            if (site.StrategyType == "Generic")
+            {
+                _logger.LogWarning("StrategyType es Generic, omitiendo fallback legacy.");
+                return new List<ScrapedProduct>();
+            }
+
+            // --- 3.3 LEGACY FALLBACK PATH ---
+            // Todo lo de abajo es la lógica hardcodeada anterior. 
+            // 3.2: Los bloques `isFestoName` y `shouldUseFestoHybrid` se mantienen solo como fallback temporal.
+            
             var isFestoName = site.Name.Contains("Festo", StringComparison.OrdinalIgnoreCase);
             var isSearchaniseListing =
                 (!string.IsNullOrWhiteSpace(selectors.ProductListSelector) &&
@@ -837,6 +893,19 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
                                     product.Title = fallbackTitle.Trim();
                                 }
                             }
+
+                            if (!string.IsNullOrWhiteSpace(selectors.CharacteristicsSelector) && !string.IsNullOrWhiteSpace(product.SourceUrl))
+                            {
+                                try
+                                {
+                                    await EnrichProductFromDetailPageAsync(page.Context, product, selectors, cancellationToken);
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogWarning(ex, "Failed to enrich product details for {Url}", product.SourceUrl);
+                                }
+                            }
+
                             products.Add(product);
                         }
                     }
@@ -4755,6 +4824,7 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
             selectors.SkuSelector ??= GetSelector(root, "SkuSelector", "skuSelector", "sku_selector");
             selectors.ImageSelector ??= GetSelector(root, "ImageSelector", "imageSelector", "image_selector");
             selectors.DescriptionSelector ??= GetSelector(root, "DescriptionSelector", "descriptionSelector", "description_selector");
+            selectors.CharacteristicsSelector ??= GetSelector(root, "CharacteristicsSelector", "characteristicsSelector", "characteristics");
             selectors.NextPageSelector ??= GetSelector(root, "NextPageSelector", "nextPageSelector", "next_page_selector");
             selectors.CategorySelector ??= GetSelector(root, "CategorySelector", "categorySelector", "category_selector");
             selectors.BrandSelector ??= GetSelector(root, "BrandSelector", "brandSelector", "brand_selector");
@@ -6735,6 +6805,45 @@ private async Task HumanClickAsync(ILocator locator)
             product.ImageUrl = product.ImageUrls.FirstOrDefault();
         }
     }
+
+    private async Task EnrichProductFromDetailPageAsync(IBrowserContext context, ScrapedProduct product, SiteSelectors selectors, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(product.SourceUrl) || string.IsNullOrWhiteSpace(selectors.CharacteristicsSelector))
+        {
+            return;
+        }
+
+        _logger.LogInformation("Enriching product details from: {Url}", product.SourceUrl);
+        var detailPage = await context.NewPageAsync();
+        try
+        {
+            await detailPage.GotoAsync(product.SourceUrl, new PageGotoOptions
+            {
+                WaitUntil = WaitUntilState.DOMContentLoaded,
+                Timeout = 90000
+            });
+            
+            await AcceptCookiesAsync(detailPage, cancellationToken);
+            await Task.Delay(1000, cancellationToken); // Grace delay for JS rendering
+
+            var characteristicsEl = await detailPage.QuerySelectorAsync(selectors.CharacteristicsSelector);
+            if (characteristicsEl != null)
+            {
+                product.CharacteristicsHtml = await characteristicsEl.InnerHTMLAsync();
+                
+                // Fallback: Also try to get plain text if description is empty
+                if (string.IsNullOrWhiteSpace(product.Description))
+                {
+                    product.Description = (await characteristicsEl.InnerTextAsync())?.Trim();
+                }
+            }
+        }
+        finally
+        {
+            await detailPage.CloseAsync();
+        }
+    }
+
 
     private async Task SearchAndEnrichFromFestoAsync(IPage page, ScrapedProduct product, CancellationToken cancellationToken)
     {

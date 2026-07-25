@@ -76,18 +76,31 @@ public sealed class PageAnalysisService : IPageAnalysisService, IAsyncDisposable
                             html.Contains("cdn.shopify.com", StringComparison.OrdinalIgnoreCase);
 
             // 2. Truncate and clean the HTML
-            var truncatedHtml = TruncateHtml(html);
+            var truncatedHtml = ExtractDomSkeleton(html);
 
             string? truncatedProductDetailHtml = null;
             if (!string.IsNullOrWhiteSpace(productDetailUrl))
             {
                 _logger.LogInformation("[PageAnalysis] Descargando HTML de detalle de producto: {Url}", productDetailUrl);
                 var (detailHtml, _) = await FetchRenderedHtmlAsync(productDetailUrl, cts.Token);
-                truncatedProductDetailHtml = TruncateHtml(detailHtml);
+                truncatedProductDetailHtml = ExtractDomSkeleton(detailHtml);
+            }
+            else
+            {
+                // Attempt to discover a candidate link
+                var candidateLink = FindCandidateProductLink(html, catalogUrl);
+                if (candidateLink != null)
+                {
+                    _logger.LogInformation("[PageAnalysis] Descubierto enlace candidato: {Url}", candidateLink);
+                    var (detailHtml, _) = await FetchRenderedHtmlAsync(candidateLink, cts.Token);
+                    truncatedProductDetailHtml = ExtractDomSkeleton(detailHtml);
+                    productDetailUrl = candidateLink; // Use it for the result
+                }
             }
 
             // 3. Send to GPT for analysis
             var result = await AnalyzeWithGptAsync(catalogUrl, productDetailUrl, truncatedHtml, truncatedProductDetailHtml, pageTitle, cts.Token);
+            result.CandidateDetailUrl = productDetailUrl;
             
             if (isShopify)
             {
@@ -159,26 +172,42 @@ public sealed class PageAnalysisService : IPageAnalysisService, IAsyncDisposable
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // HTML Truncation
+    // HTML Truncation and DOM Skeleton Extraction
     // ─────────────────────────────────────────────────────────────────────────
 
-    private static string TruncateHtml(string fullHtml)
+    private static string ExtractDomSkeleton(string fullHtml)
     {
         var parser = new AngleSharp.Html.Parser.HtmlParser();
         var document = parser.ParseDocument(fullHtml);
 
-        // Remove unnecessary tags
-        var elementsToRemove = document.QuerySelectorAll("script, style, link, svg, noscript, iframe");
+        // 1. Remove unnecessary tags completely
+        var elementsToRemove = document.QuerySelectorAll("script, style, link, svg, noscript, iframe, meta, head, footer, header, nav, path");
         foreach (var el in elementsToRemove)
         {
             el.Remove();
         }
 
-        // Remove hidden elements
+        // 2. Remove hidden elements
         var hiddenElements = document.QuerySelectorAll("[style*='display: none'], [style*='display:none']");
         foreach (var el in hiddenElements)
         {
             el.Remove();
+        }
+
+        // 3. Clean attributes to reduce noise, keep only semantic ones
+        var allElements = document.QuerySelectorAll("*");
+        var allowedAttributes = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "class", "id", "href", "src", "alt", "itemprop" };
+        foreach (var el in allElements)
+        {
+            var attributesToRemove = el.Attributes
+                .Select(a => a.Name)
+                .Where(name => !allowedAttributes.Contains(name) && !name.StartsWith("data-"))
+                .ToList();
+            
+            foreach (var attr in attributesToRemove)
+            {
+                el.RemoveAttribute(attr);
+            }
         }
 
         var bodyHtml = document.Body?.OuterHtml ?? document.DocumentElement.OuterHtml;
@@ -191,8 +220,8 @@ public sealed class PageAnalysisService : IPageAnalysisService, IAsyncDisposable
             return bodyHtml;
         }
 
-        // Try to find the region with highest density of list/grid structures
-        var listMatches = Regex.Matches(bodyHtml, @"<(ul|ol|div)[^>]*>", RegexOptions.IgnoreCase);
+        // Try to find the region with highest density of lists or semantic containers
+        var listMatches = Regex.Matches(bodyHtml, @"<(ul|ol|div|table)[^>]*>", RegexOptions.IgnoreCase);
         if (listMatches.Count > 0)
         {
             var bestStart = 0;
@@ -204,7 +233,7 @@ public sealed class PageAnalysisService : IPageAnalysisService, IAsyncDisposable
                 var start = Math.Max(0, listMatches[i].Index - 500);
                 var end = Math.Min(bodyHtml.Length, start + windowSize);
                 var window = bodyHtml.Substring(start, end - start);
-                var density = Regex.Matches(window, @"<(li|div class|article|card)", RegexOptions.IgnoreCase).Count;
+                var density = Regex.Matches(window, @"<(li|div class|article|card|tr|td|a href)", RegexOptions.IgnoreCase).Count;
 
                 if (density > bestDensity)
                 {
@@ -217,6 +246,42 @@ public sealed class PageAnalysisService : IPageAnalysisService, IAsyncDisposable
         }
 
         return bodyHtml[..MaxHtmlChars];
+    }
+
+    private static string? FindCandidateProductLink(string catalogHtml, string baseUrl)
+    {
+        var parser = new AngleSharp.Html.Parser.HtmlParser();
+        var document = parser.ParseDocument(catalogHtml);
+        var baseUri = new Uri(baseUrl);
+
+        // Find links that might be product details (e.g., have an image inside, or have long hrefs, or specific paths)
+        var links = document.QuerySelectorAll("a[href]");
+        
+        foreach (var link in links)
+        {
+            var href = link.GetAttribute("href");
+            if (string.IsNullOrWhiteSpace(href) || href.StartsWith("#") || href.StartsWith("javascript:")) continue;
+
+            // Heuristic: A product link usually has an image inside or class indicating product
+            if (link.QuerySelector("img") != null || (link.ClassName != null && link.ClassName.Contains("product", StringComparison.OrdinalIgnoreCase)))
+            {
+                // Ensure it's not a generic category link
+                if (href.Contains("category", StringComparison.OrdinalIgnoreCase) || href.Contains("collection", StringComparison.OrdinalIgnoreCase) && !href.Contains("product", StringComparison.OrdinalIgnoreCase)) 
+                    continue;
+
+                try 
+                {
+                    var absoluteUri = new Uri(baseUri, href);
+                    // Filter out external links
+                    if (absoluteUri.Host == baseUri.Host)
+                    {
+                        return absoluteUri.ToString();
+                    }
+                }
+                catch { }
+            }
+        }
+        return null;
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -280,30 +345,23 @@ public sealed class PageAnalysisService : IPageAnalysisService, IAsyncDisposable
     private object BuildAnalysisRequest(string url, string? productDetailUrl, string html, string? productDetailHtml, string? pageTitle)
     {
         var systemPrompt = """
-            Eres un experto en análisis de sitios web de comercio electrónico (e-commerce) y scraping web.
-            Tu tarea es analizar el HTML proporcionado de una página de catálogo de productos de un proveedor
-            y extraer información estructural para configurar un scraper automatizado.
+            Eres un experto en análisis de sitios web de comercio electrónico y automatización con Playwright.
+            Tu tarea es analizar un "DOM Skeleton" (HTML simplificado con AngleSharp) y extraer los selectores óptimos.
 
             INSTRUCCIONES:
-            1. Determina si la página es un catálogo/listado de productos (isProductCatalog=true) o algo diferente (home, blog, etc.).
-            2. Si es un catálogo, identifica los selectores CSS exactos para cada elemento.
-            3. Proporciona selectores CSS REALES basados en el HTML analizado, no genéricos.
-            4. Evalúa la confianza (high/medium/low) según qué tan claro es el selector en el HTML.
-            5. Recomienda la estrategia de scraping más adecuada:
-               - "Direct": la página lista los productos directamente
-               - "List": hay paginación o listas de categorías que llevan a productos
-               - "Families": hay familias/categorías que llevan a sub-listas de productos
-            6. Para los selectores secundarios, provee alternativas si el selector principal pudiera fallar.
-            7. El campo "analysisSummary" debe ser una descripción breve y clara de lo que encontraste.
+            1. Determina si la página es un catálogo (isProductCatalog=true).
+            2. Genera selectores CSS y XPath robustos, priorizando clases semánticas e IDs.
+            3. CRÍTICO PARA XPATH: Evita rutas absolutas largas. Usa siempre rutas relativas como `//div[@class='precio']` o `.//span`.
+            4. CRÍTICO PARA CSS: Evita selectores anidados profundos. Usa selectores claros como `.product-price` o `[data-sku]`.
+            5. Evalúa la confianza (high/medium/low) según qué tan robustos son los selectores.
+            6. Recomienda estrategia: "Direct", "List", o "Families".
 
-            PRIORIDAD de campos a detectar (en orden de importancia):
-            1. SKU/código de producto (skuSelector) - CRÍTICO
-            2. Nombre del producto (nameSelector) - CRÍTICO
-            3. Imagen del producto (imageSelector) - CRÍTICO
-            4. Precio (priceSelector) - IMPORTANTE
-            5. Características/especificaciones (characteristicsSelector) - IMPORTANTE
-
-            Devuelve SOLO JSON válido con el esquema exacto indicado. Sin markdown, sin explicaciones fuera del JSON.
+            PRIORIDAD de campos a detectar:
+            1. Contenedor de la lista y tarjeta (productContainerSelector, productCardSelector)
+            2. SKU, Nombre, Imagen, Precio, Características.
+            
+            Usa la información del HTML principal y, si se provee, la del Detalle de Producto.
+            Devuelve SOLO JSON válido con el esquema exacto indicado. Sin explicaciones.
             """;
 
         var userPrompt = $"""
@@ -361,13 +419,13 @@ public sealed class PageAnalysisService : IPageAnalysisService, IAsyncDisposable
                             isProductCatalog = new { type = "boolean" },
                             pageTitle = new { type = new[] { "string", "null" } },
                             detectedLanguage = new { type = new[] { "string", "null" } },
-                            productContainerSelector = new { type = new[] { "string", "null" } },
-                            productCardSelector = new { type = new[] { "string", "null" } },
-                            skuSelector = new { type = new[] { "string", "null" } },
-                            nameSelector = new { type = new[] { "string", "null" } },
-                            imageSelector = new { type = new[] { "string", "null" } },
-                            priceSelector = new { type = new[] { "string", "null" } },
-                            characteristicsSelector = new { type = new[] { "string", "null" } },
+                            productContainerSelector = new { type = new[] { "object", "null" }, additionalProperties = false, required = new[] { "css", "xpath" }, properties = new { css = new { type = new[] { "string", "null" } }, xpath = new { type = new[] { "string", "null" } } } },
+                            productCardSelector = new { type = new[] { "object", "null" }, additionalProperties = false, required = new[] { "css", "xpath" }, properties = new { css = new { type = new[] { "string", "null" } }, xpath = new { type = new[] { "string", "null" } } } },
+                            skuSelector = new { type = new[] { "object", "null" }, additionalProperties = false, required = new[] { "css", "xpath" }, properties = new { css = new { type = new[] { "string", "null" } }, xpath = new { type = new[] { "string", "null" } } } },
+                            nameSelector = new { type = new[] { "object", "null" }, additionalProperties = false, required = new[] { "css", "xpath" }, properties = new { css = new { type = new[] { "string", "null" } }, xpath = new { type = new[] { "string", "null" } } } },
+                            imageSelector = new { type = new[] { "object", "null" }, additionalProperties = false, required = new[] { "css", "xpath" }, properties = new { css = new { type = new[] { "string", "null" } }, xpath = new { type = new[] { "string", "null" } } } },
+                            priceSelector = new { type = new[] { "object", "null" }, additionalProperties = false, required = new[] { "css", "xpath" }, properties = new { css = new { type = new[] { "string", "null" } }, xpath = new { type = new[] { "string", "null" } } } },
+                            characteristicsSelector = new { type = new[] { "object", "null" }, additionalProperties = false, required = new[] { "css", "xpath" }, properties = new { css = new { type = new[] { "string", "null" } }, xpath = new { type = new[] { "string", "null" } } } },
                             secondarySelectors = new
                             {
                                 type = "object",

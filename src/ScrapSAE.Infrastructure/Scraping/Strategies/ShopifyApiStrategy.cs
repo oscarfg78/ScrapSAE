@@ -26,7 +26,10 @@ public class ShopifyApiStrategy : IProviderScraperStrategy
         _syncLogService = syncLogService;
     }
 
-    public async Task<IEnumerable<ScrapedProduct>> ScrapeAsync(SiteProfile site, CancellationToken cancellationToken = default)
+    public async Task<IEnumerable<ScrapedProduct>> ScrapeAsync(
+        SiteProfile site, 
+        ScrapeExecutionContext? context = null,
+        CancellationToken cancellationToken = default)
     {
         _logger.LogInformation("[Shopify] Iniciando scraping vía API para {SiteName} ({BaseUrl})", site.Name, site.BaseUrl);
         var client = _httpClientFactory.CreateClient("ShopifyClient");

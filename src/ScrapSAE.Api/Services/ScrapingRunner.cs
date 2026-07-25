@@ -5,6 +5,7 @@ using ScrapSAE.Core.Interfaces;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.DependencyInjection;
+using System.Collections.Generic;
 
 namespace ScrapSAE.Api.Services;
 
@@ -62,8 +63,18 @@ public sealed class ScrapingRunner
 
 
 
-    public async Task<ScrapeRunResult> RunForSiteAsync(Guid siteId, CancellationToken cancellationToken)
+    /// <summary>
+    /// Contrato de fuente de verdad:
+    /// SiteProfile.StrategyType + SiteProfile.Strategies[] determinan CÓMO se ejecuta el scraping.
+    /// El ScrapeExecutionContext determina los parámetros de sesión (headless, login, etc.).
+    /// La selección de estrategia NO depende de environment variables ni del nombre del sitio.
+    /// </summary>
+    public async Task<ScrapeRunResult> RunForSiteAsync(
+        Guid siteId,
+        ScrapeExecutionContext? context = null,
+        CancellationToken cancellationToken = default)
     {
+        context ??= ScrapeExecutionContext.Default;
         var startedAt = DateTime.UtcNow;
         var site = await GetSiteAsync(siteId);
         if (site == null)
@@ -71,12 +82,30 @@ public sealed class ScrapingRunner
             throw new InvalidOperationException($"Site {siteId} not found.");
         }
 
+        // CONTRATO DE ARQUITECTURA:
+        // `site.StrategyType` y `site.Strategies[]` son la ÚNICA fuente de verdad para el enrutamiento.
+        // Ya no se usan env vars (SCRAPSAE_MODE) ni hardcodes por nombre de proveedor.
+
+        // 1. Determinar el tipo de estrategia a usar
+        var strategyType = string.IsNullOrWhiteSpace(site.StrategyType) ? "Generic" : site.StrategyType;
         await LogAsync(site, "scrape", "success", $"🚀 Iniciando scraping para {site.Name}...");
-        var scrapingMode = Environment.GetEnvironmentVariable("SCRAPSAE_MODE") ?? "traditional";
-        await LogAsync(site, "scrape", "success", $"⚙️ Modo detectado: {(scrapingMode == "families" ? "Familias (Festo)" : "Tradicional")}");
+        await LogAsync(site, "scrape", "success", $"⚙️ Estrategia: {strategyType} | Strategies configuradas: {site.Strategies?.Count ?? 0}");
         site = await EnrichSiteSelectorsAsync(site);
         var controlToken = _scrapeControl.Start(siteId);
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, controlToken);
+
+        // Propagar contexto de ejecución via env vars SOLO para la sesión actual del browser
+        // (PlaywrightScrapingService.GetContextAsync los lee; se restauran al final)
+        var previousHeadless = Environment.GetEnvironmentVariable("SCRAPSAE_HEADLESS");
+        var previousManual = Environment.GetEnvironmentVariable("SCRAPSAE_MANUAL_LOGIN");
+        var previousForceManual = Environment.GetEnvironmentVariable("SCRAPSAE_FORCE_MANUAL_LOGIN");
+        var previousKeepBrowser = Environment.GetEnvironmentVariable("SCRAPSAE_KEEP_BROWSER");
+        var previousScreenshotFallback = Environment.GetEnvironmentVariable("SCRAPSAE_SCREENSHOT_FALLBACK");
+        Environment.SetEnvironmentVariable("SCRAPSAE_HEADLESS", context.IsHeadless ? "true" : "false");
+        Environment.SetEnvironmentVariable("SCRAPSAE_MANUAL_LOGIN", context.ManualLogin ? "true" : "false");
+        Environment.SetEnvironmentVariable("SCRAPSAE_FORCE_MANUAL_LOGIN", context.ManualLogin ? "true" : "false");
+        Environment.SetEnvironmentVariable("SCRAPSAE_KEEP_BROWSER", context.KeepBrowser ? "true" : "false");
+        Environment.SetEnvironmentVariable("SCRAPSAE_SCREENSHOT_FALLBACK", context.ScreenshotFallback ? "true" : "false");
         
         // Cargar URLs aprendidas si el servicio está disponible
         string? previousLearnedUrls = null;
@@ -136,7 +165,7 @@ public sealed class ScrapingRunner
         // Si hay un error, se ignora y el scraping continúa normalmente.
         var existingDirectUrls = Environment.GetEnvironmentVariable("SCRAPSAE_DIRECT_URLS");
         var existingLearnedUrls = Environment.GetEnvironmentVariable("SCRAPSAE_LEARNED_URLS");
-        // Only run discovery if the site doesn't have a forced direct URL override set
+        // Solo ejecutar descubrimiento si no hay URLs directas ya configuradas
         if (string.IsNullOrEmpty(existingDirectUrls))
         {
             try
@@ -145,7 +174,7 @@ public sealed class ScrapingRunner
                 var discoveredUrls = await _scrapingService.DiscoverProductUrlsAsync(site, linkedCts.Token);
                 if (discoveredUrls.Count > 0)
                 {
-                    // Merge with any existing learned URLs
+                    // Combinar con URLs aprendidas existentes (deduplicadas)
                     var mergedUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                     if (!string.IsNullOrEmpty(existingLearnedUrls))
                     {
@@ -160,6 +189,7 @@ public sealed class ScrapingRunner
                         poolList = poolList.Take(site.MaxProductsPerScrape).ToList();
                     }
 
+                    // Propagar el pool combinado via env var solo para esta ejecución
                     Environment.SetEnvironmentVariable("SCRAPSAE_LEARNED_URLS", JsonSerializer.Serialize(poolList));
                     await LogAsync(site, "scrape", "success",
                         $"🔍 Descubrimiento completado: {discoveredUrls.Count} URL(s) nuevas encontradas. Total en pool: {poolList.Count}.");
@@ -181,33 +211,50 @@ public sealed class ScrapingRunner
         List<ScrapedProduct> scraped;
         try
         {
+            // Routing por StrategyType (fuente de verdad: configurado por el Wizard).
+            // 1. Si StrategyType es "Shopify" → ShopifyApiStrategy (API nativa, sin Playwright)
+            // 2. Para cualquier otro tipo → IProviderScraperStrategy keyed (Generic=PlaywrightScrapingService)
+            // Fallback: ScrapeAsync genérico si no hay keyed strategy disponible.
             IProviderScraperStrategy? strategy = null;
             try
             {
-                var strategyKey = string.IsNullOrWhiteSpace(site.StrategyType) ? "Generic" : site.StrategyType;
-                strategy = _serviceProvider.GetKeyedService<IProviderScraperStrategy>(strategyKey)
+                // strategyType ya normalizado arriba (no puede ser nulo)
+                strategy = _serviceProvider.GetKeyedService<IProviderScraperStrategy>(strategyType)
                            ?? _serviceProvider.GetKeyedService<IProviderScraperStrategy>("Generic");
             }
             catch (InvalidOperationException)
             {
-                // ServiceProvider does not support keyed services (e.g. in unit tests or custom containers)
+                // Contenedor no soporta keyed services (ej: unit tests)
             }
 
             if (strategy != null)
             {
-                scraped = (await strategy.ScrapeAsync(site, linkedCts.Token)).ToList();
+                _logger.LogInformation("[ScrapingRunner] Usando estrategia: {Strategy} para sitio {SiteName}",
+                    strategyType, site.Name);
+                await LogAsync(site, "scrape", "info", $"Estrategia seleccionada: {strategyType}");
+                scraped = (await strategy.ScrapeAsync(site, context, linkedCts.Token)).ToList();
             }
             else
             {
-                scraped = (await _scrapingService.ScrapeAsync(site, linkedCts.Token)).ToList();
+                _logger.LogInformation("[ScrapingRunner] Sin estrategia keyed disponible; usando ScrapeAsync genérico para {SiteName}",
+                    site.Name);
+                scraped = (await _scrapingService.ScrapeAsync(site, context, linkedCts.Token)).ToList();
             }
         }
-
         catch (Exception ex)
         {
             _scrapeControl.MarkError(siteId, ex.Message);
             await LogAsync(site, "scrape", "error", ex.Message);
             throw;
+        }
+        finally
+        {
+            // Restaurar env vars de sesión del browser (independiente del resultado)
+            Environment.SetEnvironmentVariable("SCRAPSAE_HEADLESS", previousHeadless);
+            Environment.SetEnvironmentVariable("SCRAPSAE_MANUAL_LOGIN", previousManual);
+            Environment.SetEnvironmentVariable("SCRAPSAE_FORCE_MANUAL_LOGIN", previousForceManual);
+            Environment.SetEnvironmentVariable("SCRAPSAE_KEEP_BROWSER", previousKeepBrowser);
+            Environment.SetEnvironmentVariable("SCRAPSAE_SCREENSHOT_FALLBACK", previousScreenshotFallback);
         }
         var (created, updated, skipped) = await ProcessScrapedProductsAsync(siteId, scraped, cancellationToken);
 
@@ -451,7 +498,8 @@ public sealed class ScrapingRunner
             scrapedProduct.SourceUrl,
             scrapedProduct.NavigationUrls,
             scrapedProduct.Attributes,
-            scrapedProduct.ScrapedAt
+            scrapedProduct.ScrapedAt,
+            scrapedProduct.CharacteristicsHtml
         };
 
         return JsonSerializer.Serialize(rawPayload);

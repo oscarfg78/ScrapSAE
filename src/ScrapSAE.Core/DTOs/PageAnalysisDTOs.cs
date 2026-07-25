@@ -13,6 +13,20 @@ public class PageAnalysisRequest
 }
 
 /// <summary>
+/// Representa un selector con su versión CSS y XPath para máxima resiliencia.
+/// </summary>
+public class DualSelector
+{
+    public string? Css { get; set; }
+    public string? XPath { get; set; }
+
+    public override string ToString()
+    {
+        return System.Text.Json.JsonSerializer.Serialize(this);
+    }
+}
+
+/// <summary>
 /// Nivel de confianza del análisis IA para un campo detectado
 /// </summary>
 public enum FieldConfidence
@@ -69,29 +83,32 @@ public class PageAnalysisResult
     /// <summary>Título detectado de la página</summary>
     public string? PageTitle { get; set; }
 
+    /// <summary>URL del detalle de producto descubierta automáticamente (si aplica)</summary>
+    public string? CandidateDetailUrl { get; set; }
+
     /// <summary>Idioma detectado del contenido</summary>
     public string? DetectedLanguage { get; set; }
 
     /// <summary>Selector CSS del contenedor principal de la lista de productos</summary>
-    public string? ProductContainerSelector { get; set; }
+    public DualSelector? ProductContainerSelector { get; set; }
 
     /// <summary>Selector CSS de cada tarjeta/ítem de producto individual</summary>
-    public string? ProductCardSelector { get; set; }
+    public DualSelector? ProductCardSelector { get; set; }
 
     /// <summary>Selector CSS del SKU/código de producto</summary>
-    public string? SkuSelector { get; set; }
+    public DualSelector? SkuSelector { get; set; }
 
     /// <summary>Selector CSS del nombre del producto</summary>
-    public string? NameSelector { get; set; }
+    public DualSelector? NameSelector { get; set; }
 
     /// <summary>Selector CSS de la imagen del producto</summary>
-    public string? ImageSelector { get; set; }
+    public DualSelector? ImageSelector { get; set; }
 
     /// <summary>Selector CSS del precio del producto</summary>
-    public string? PriceSelector { get; set; }
+    public DualSelector? PriceSelector { get; set; }
 
     /// <summary>Selector CSS de las características/especificaciones del producto</summary>
-    public string? CharacteristicsSelector { get; set; }
+    public DualSelector? CharacteristicsSelector { get; set; }
 
     /// <summary>Selectores secundarios sugeridos (alternativas y fallbacks por campo)</summary>
     public Dictionary<string, List<string>> SecondarySelectors { get; set; } = new();

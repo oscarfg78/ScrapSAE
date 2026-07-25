@@ -21,6 +21,7 @@ public class ScrapedProduct
     public List<string> NavigationUrls { get; set; } = new();
     public DateTime ScrapedAt { get; set; } = DateTime.UtcNow;
     public bool AiEnriched { get; set; }
+    public string? CharacteristicsHtml { get; set; }
     
     /// <summary>
     /// Adjuntos encontrados durante el scraping (ej: datasheets)
@@ -132,6 +133,7 @@ public class SiteSelectors
     public string? DetailTitleSelector { get; set; }        // Selector para el tÃ­tulo en la pÃ¡gina de detalle
     public string? DetailDescriptionSelector { get; set; }  // Selector para la descripciÃ³n en la pÃ¡gina de detalle
     public string? DetailImageSelector { get; set; }        // Selector para la imagen principal en la pÃ¡gina de detalle
+    public string? CharacteristicsSelector { get; set; }    // Selector para especificaciones detalladas (ej: tab-content-description)
     
     // Selectores para galerÃ­a de imÃ¡genes
     public string? ImageGallerySelector { get; set; }       // Selector para el contenedor de la galerÃ­a

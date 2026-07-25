@@ -78,7 +78,7 @@ public class Worker : BackgroundService
                             var delayBeforeScraping = _random.Next(3000, 8000);
                             await Task.Delay(delayBeforeScraping, stoppingToken);
 
-                            var products = await _scrapingService.ScrapeAsync(site, stoppingToken);
+                            var products = await _scrapingService.ScrapeAsync(site, null, stoppingToken);
                             int savedCount = 0;
 
                             foreach (var scrapedProduct in products)

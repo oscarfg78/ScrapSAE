@@ -18,11 +18,13 @@ public class GenericPlaywrightStrategy : IProviderScraperStrategy
         _serviceProvider = serviceProvider;
     }
 
-    public Task<IEnumerable<ScrapedProduct>> ScrapeAsync(SiteProfile site, CancellationToken cancellationToken = default)
+    public Task<IEnumerable<ScrapedProduct>> ScrapeAsync(
+        SiteProfile site, 
+        ScrapeExecutionContext? context = null,
+        CancellationToken cancellationToken = default)
     {
-        // Resuelve el motor central original (PlaywrightScrapingService)
         var scrapingService = _serviceProvider.GetRequiredService<IScrapingService>();
-        return scrapingService.ScrapeAsync(site, cancellationToken);
+        return scrapingService.ScrapeAsync(site, context, cancellationToken);
     }
 
     public Task<List<ScrapedProduct>> ScrapeDirectUrlsAsync(

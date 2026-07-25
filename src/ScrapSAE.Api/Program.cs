@@ -281,45 +281,26 @@ app.MapPost("/api/scraping/run/{siteId:guid}", async (
     ScrapingRunner runner,
     CancellationToken token) =>
 {
+    // Construir ScrapeExecutionContext tipado desde query params.
+    // La estrategia de scraping se lee de SiteProfile.StrategyType (fuente de verdad).
     var manualLogin = bool.TryParse(request.Query["manualLogin"], out var manual) && manual;
     var headless = !bool.TryParse(request.Query["headless"], out var headlessParsed) || headlessParsed;
     var keepBrowser = bool.TryParse(request.Query["keepBrowser"], out var keepBrowserParsed) && keepBrowserParsed;
     var screenshotFallback = bool.TryParse(request.Query["screenshotFallback"], out var screenshotParsed) && screenshotParsed;
-    var scrapingMode = request.Query["mode"].ToString() ?? "traditional";
-    if (scrapingMode.Contains("Familias")) scrapingMode = "families"; else if (scrapingMode.Contains("Tradicional")) scrapingMode = "traditional";
 
-    var previousManual = Environment.GetEnvironmentVariable("SCRAPSAE_MANUAL_LOGIN");
-    var previousForceManual = Environment.GetEnvironmentVariable("SCRAPSAE_FORCE_MANUAL_LOGIN");
-    var previousHeadless = Environment.GetEnvironmentVariable("SCRAPSAE_HEADLESS");
-    var previousKeepBrowser = Environment.GetEnvironmentVariable("SCRAPSAE_KEEP_BROWSER");
-    var previousScreenshotFallback = Environment.GetEnvironmentVariable("SCRAPSAE_SCREENSHOT_FALLBACK");
-    var previousMode = Environment.GetEnvironmentVariable("SCRAPSAE_MODE");
-
-    try
+    var executionContext = new ScrapSAE.Core.DTOs.ScrapeExecutionContext
     {
-        Console.WriteLine($"[DEBUG] Scraping request for site {siteId}: manualLogin={manualLogin}, headless={headless}, keepBrowser={keepBrowser}, screenshotFallback={screenshotFallback}");
-        Environment.SetEnvironmentVariable("SCRAPSAE_MANUAL_LOGIN", manualLogin ? "true" : "false");
-        Environment.SetEnvironmentVariable("SCRAPSAE_FORCE_MANUAL_LOGIN", manualLogin ? "true" : "false");
-        Environment.SetEnvironmentVariable("SCRAPSAE_HEADLESS", headless ? "true" : "false");
-        Environment.SetEnvironmentVariable("SCRAPSAE_KEEP_BROWSER", keepBrowser ? "true" : "false");
-        Environment.SetEnvironmentVariable("SCRAPSAE_SCREENSHOT_FALLBACK", screenshotFallback ? "true" : "false");
-        Environment.SetEnvironmentVariable("SCRAPSAE_MODE", scrapingMode);
-        
-        Console.WriteLine($"[DEBUG] Env SCRAPSAE_MANUAL_LOGIN: {Environment.GetEnvironmentVariable("SCRAPSAE_MANUAL_LOGIN")}");
-        Console.WriteLine($"[DEBUG] Env SCRAPSAE_HEADLESS: {Environment.GetEnvironmentVariable("SCRAPSAE_HEADLESS")}");
+        IsHeadless = headless,
+        ManualLogin = manualLogin,
+        KeepBrowser = keepBrowser,
+        ScreenshotFallback = screenshotFallback
+    };
 
-        var result = await runner.RunForSiteAsync(siteId, token);
-        return Results.Ok(result);
-    }
-    finally
-    {
-        Environment.SetEnvironmentVariable("SCRAPSAE_MANUAL_LOGIN", previousManual);
-        Environment.SetEnvironmentVariable("SCRAPSAE_FORCE_MANUAL_LOGIN", previousForceManual);
-        Environment.SetEnvironmentVariable("SCRAPSAE_HEADLESS", previousHeadless);
-        Environment.SetEnvironmentVariable("SCRAPSAE_KEEP_BROWSER", previousKeepBrowser);
-        Environment.SetEnvironmentVariable("SCRAPSAE_SCREENSHOT_FALLBACK", previousScreenshotFallback);
-        Environment.SetEnvironmentVariable("SCRAPSAE_MODE", previousMode);
-    }
+    Log.Information("[API] Scraping request for site {SiteId}: headless={Headless}, manualLogin={ManualLogin}, keepBrowser={KeepBrowser}",
+        siteId, headless, manualLogin, keepBrowser);
+
+    var result = await runner.RunForSiteAsync(siteId, executionContext, token);
+    return Results.Ok(result);
 });
 
 

@@ -66,7 +66,10 @@ public interface IScrapingService
     /// <summary>
     /// Ejecuta el scraping de un sitio proveedor
     /// </summary>
-    Task<IEnumerable<ScrapedProduct>> ScrapeAsync(SiteProfile site, CancellationToken cancellationToken = default);
+    Task<IEnumerable<ScrapedProduct>> ScrapeAsync(
+        SiteProfile site, 
+        ScrapeExecutionContext? context = null,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Registra/actualiza metadata de sitio para scraping directo por URL.

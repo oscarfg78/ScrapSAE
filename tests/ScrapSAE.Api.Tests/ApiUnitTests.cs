@@ -68,7 +68,7 @@ public class ApiUnitTests
             categoryMappingService,
             scrapeControl.Object,
             logger.Object);
-        var result = await runner.RunForSiteAsync(site.Id, CancellationToken.None);
+        var result = await runner.RunForSiteAsync(site.Id, null, CancellationToken.None);
 
         result.ProductsCreated.Should().Be(2);
     }
@@ -89,7 +89,7 @@ public class ApiUnitTests
 
         var scrapingService = new Mock<IScrapingService>();
         scrapingService
-            .Setup(x => x.ScrapeAsync(It.IsAny<SiteProfile>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.ScrapeAsync(It.IsAny<SiteProfile>(), It.IsAny<ScrapeExecutionContext?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<ScrapedProduct>
             {
                 new()
@@ -133,7 +133,7 @@ public class ApiUnitTests
             scrapeControl.Object,
             logger.Object);
 
-        await runner.RunForSiteAsync(site.Id, CancellationToken.None);
+        await runner.RunForSiteAsync(site.Id, null, CancellationToken.None);
 
         capturedRaw.Should().NotBeNull();
         capturedRaw.Should().Contain("ImageUrls");
@@ -158,7 +158,7 @@ public class ApiUnitTests
 
         var scrapingService = new Mock<IScrapingService>();
         scrapingService
-            .Setup(x => x.ScrapeAsync(It.IsAny<SiteProfile>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.ScrapeAsync(It.IsAny<SiteProfile>(), It.IsAny<ScrapeExecutionContext?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<ScrapedProduct>
             {
                 new()
@@ -204,7 +204,7 @@ public class ApiUnitTests
             scrapeControl.Object,
             logger.Object);
 
-        await runner.RunForSiteAsync(site.Id, CancellationToken.None);
+        await runner.RunForSiteAsync(site.Id, null, CancellationToken.None);
 
         var rows = await client.GetAsync<StagingProduct>($"staging_products?site_id=eq.{site.Id}&select=*");
         rows.Should().HaveCount(1);

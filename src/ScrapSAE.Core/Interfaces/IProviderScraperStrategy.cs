@@ -11,7 +11,10 @@ public interface IProviderScraperStrategy
     /// <summary>
     /// Ejecuta el scraping de un sitio proveedor de acuerdo a la estrategia concreta.
     /// </summary>
-    Task<IEnumerable<ScrapedProduct>> ScrapeAsync(SiteProfile site, CancellationToken cancellationToken = default);
+    Task<IEnumerable<ScrapedProduct>> ScrapeAsync(
+        SiteProfile site, 
+        ScrapeExecutionContext? context = null,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Extrae datos de una lista de URLs específicas utilizando esta estrategia.
