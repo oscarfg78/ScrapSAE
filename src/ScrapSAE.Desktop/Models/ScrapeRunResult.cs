@@ -9,4 +9,5 @@ public sealed class ScrapeRunResult
     public int ProductsUpdated { get; set; }
     public int ProductsSkipped { get; set; }
     public int DurationMs { get; set; }
+    public List<ScrapSAE.Core.DTOs.ScrapingLogStep>? ExecutionLogs { get; set; }
 }

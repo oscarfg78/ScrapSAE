@@ -1,0 +1,426 @@
+# Estrategia integral para la extracción fiable y combinable de productos en ScrapSAE
+
+**Autor:** Manus AI  
+**Fecha:** 25 de julio de 2026  
+**Estado:** propuesta para validación; **no implementada**  
+**Repositorio analizado:** `C:\Proyectos\ScrapSAE`, rama `extension1`
+
+> **Restricción respetada:** esta auditoría no ha modificado código, documentos, especificaciones ni configuración del repositorio. Todos los artefactos de análisis se han creado fuera del proyecto. No se debe iniciar implementación ni alterar OpenSpec hasta contar con aprobación expresa de esta estrategia.
+
+## 1. Decisión ejecutiva
+
+ScrapSAE ya contiene casi todas las piezas funcionales necesarias —análisis de catálogo y detalle, Direct, List, Families, Shopify, descubrimiento, enriquecimiento, captura asistida, extensión y procesamiento IA—, pero **no forman todavía un sistema único y predecible**. El problema principal es la superposición de responsabilidades: algunos mecanismos descubren, otros extraen, otros enriquecen, pero varios también seleccionan el siguiente camino, persisten estado, mutan configuración o sustituyen silenciosamente el flujo configurado. El resultado es una cadena de shortcuts y fallbacks, no una composición controlada.[5] [7]
+
+La estrategia recomendada es mantener **OpenSpec** como marco de especificaciones, reconciliar los diez cambios activos mediante un cambio paraguas y evolucionar hacia un **núcleo único de ejecución**. El wizard será el plano de control: analizará, permitirá revisar la configuración, ejecutará una demo real a través de ese mismo núcleo y mostrará un reporte autocontenido. Los pathways funcionarán como contributors independientes que emiten observaciones; un plan explícito decidirá cuándo usarlos como fallback, complemento o ensemble. La persistencia ocurrirá una sola vez, después de reconciliar y validar.
+
+| Decisión | Recomendación | Razón determinante |
+|---|---|---|
+| Framework de especificaciones | Mantener OpenSpec `spec-driven` | Ya está integrado y está concebido para acordar requisitos antes de escribir código en proyectos brownfield.[1] |
+| Punto de entrada | Wizard de alta de proveedores | Es donde se dispone de contexto humano, URLs, marca, análisis y aceptación de calidad. |
+| Núcleo de ejecución | Uno solo para demo y producción | Evita que la demo certifique un camino diferente del que luego se ejecutará. |
+| Pathways | Contributors independientes y combinables | Cada uno podrá fallar, no aplicar o aportar campos sin anular a los demás. |
+| Composición | Plan explícito con políticas `fallback`, `augment` y `ensemble` | Sustituye los retornos tempranos y el criterio actual de “primer resultado no vacío”. |
+| Resultado | Reporte canónico autocontenido con provenance por campo | Permite explicar qué se extrajo, cómo, con qué confianza y por qué se eligió cada valor. |
+| Demo | No destructiva, sin autoaprendizaje y con máximo único de 10 productos | Elimina perfiles temporales de negocio, staging como transporte y configuración mutable. |
+| Persistencia | Frontera única posterior al quality gate | Evita colisiones, sobrescrituras y resultados parciales promovidos accidentalmente. |
+
+La palabra “infalible” no puede significar que una web externa nunca cambiará, bloqueará o devolverá datos ambiguos. En esta estrategia significa algo más exigente y verificable: **ningún fallo será silencioso, ningún resultado parcial se declarará completo, ninguna estrategia alterará a otra por estado oculto y toda decisión de combinación podrá explicarse y reproducirse**.
+
+## 2. Alcance y método de auditoría
+
+El análisis ha cubierto la arquitectura efectiva, la intención normativa y sus divergencias. Se revisaron los artefactos OpenSpec activos y archivados, la carpeta `docs`, los contratos Core, API, Desktop, Infrastructure, Worker, Extension y las pruebas relacionadas. Las tareas marcadas como completadas se trataron como afirmaciones hasta contrastarlas con código y pruebas.[6] [7]
+
+| Corpus o superficie | Cobertura realizada | Observación |
+|---|---|---|
+| `docs` | 29 archivos versionados, más documentación local no versionada | Se usaron para reconstruir decisiones e intención; no se asumió que describieran el runtime actual. |
+| OpenSpec | 58 archivos versionados, diez cambios activos y cambios locales recientes | Se reconstruyeron requisitos, solapamientos, límites y contradicciones. |
+| Wizard Desktop | ViewModel, XAML, code-behind y cliente HTTP | Se trazó análisis, configuración, demo, preview, guardado, cancelación y limpieza. |
+| API y runner | Endpoints, DI, `ScrapingRunner`, staging, actualización y limpieza | Se siguió el flujo completo y sus efectos laterales. |
+| Infraestructura | Playwright, análisis IA, orquestador y estrategias concretas | Se identificaron retornos tempranos, contratos incompatibles y fallbacks legacy. |
+| Shopify y extensión | Estrategia nativa, extractor TypeScript y endpoint de extensión | Se evaluaron como pathways independientes y su desconexión del pipeline común. |
+| Pruebas | Suites API y E2E existentes | Se midió cobertura del circuito crítico por referencias y dobles usados. |
+
+No se ejecutó la suite de compilación o pruebas porque podría crear `bin/obj`, snapshots u otros artefactos dentro de un árbol con cambios locales previos. La evidencia de esta fase es, por tanto, una **auditoría estática y contractual exhaustiva**, complementada con la validación no destructiva de OpenSpec. Las pruebas ejecutables se incluyen como requisito de la hoja de ruta, no como una afirmación de funcionamiento actual.
+
+## 3. Intención normativa reconstruida
+
+La intención coherente que emerge de OpenSpec es que el wizard no sea un scraper alternativo. Debe ser el lugar donde se descubre y valida una configuración que después consumirá el runtime real. Con el mismo perfil y el mismo estado del sitio, la demo y producción deben producir los mismos campos; solo deben variar el presupuesto y la política de persistencia.[6]
+
+| Dominio | Requisito canónico reconstruido |
+|---|---|
+| Entrada | Capturar catálogo, detalle opcional y marca; descubrir una URL representativa si falta detalle. |
+| Análisis | Renderizar, detectar plataforma, podar DOM y analizar catálogo y detalle por separado, devolviendo selectores duales, capacidades y confianza. |
+| Configuración | Mostrar una propuesta editable antes de probarla, sin degradar los selectores ni perder las recomendaciones. |
+| Demo | Ejecutar extracción real con módulos comunes y máximo de 10 productos. |
+| Preview | Mostrar valores, faltantes, confianza, errores accionables y evidencia de cómo se obtuvo cada dato. |
+| Perfil | Persistir solo la configuración confirmada; usar 120 como límite normal cuando corresponda. |
+| Runtime | Tratar el perfil y el contexto de ejecución como fuentes de verdad, sin variables globales ni decisiones por nombre de proveedor. |
+| Paridad | Repetir en producción el resultado de demo cuando perfil y snapshot de entrada sean equivalentes. |
+
+La intención, sin embargo, deja vacíos normativos sobre identidad, provenance, combinación, aislamiento de fallos, quality gates, versionado y observabilidad. La estrategia propuesta convierte esos vacíos en requisitos explícitos antes de escribir código.[6]
+
+## 4. Diagnóstico del sistema actual
+
+![Flujo efectivo actual](https://private-us-east-1.manuscdn.com/sessionFile/W2MSZH2VAgC4WhxukEZ5OB/sandbox/eYpLkSdPkhroYvDPvjEglH-images_1784961499133_na1fn_L2hvbWUvdWJ1bnR1L3NjcmFwc2FlX3N0cmF0ZWd5L2N1cnJlbnRfZmxvdw.png?Policy=eyJTdGF0ZW1lbnQiOlt7IlJlc291cmNlIjoiaHR0cHM6Ly9wcml2YXRlLXVzLWVhc3QtMS5tYW51c2Nkbi5jb20vc2Vzc2lvbkZpbGUvVzJNU1pIMlZBZ0M0V2h4dWtFWjVPQi9zYW5kYm94L2VZcExrU2RQa2hyb1l2RFB2akVnbEgtaW1hZ2VzXzE3ODQ5NjE0OTkxMzNfbmExZm5fTDJodmJXVXZkV0oxYm5SMUwzTmpjbUZ3YzJGbFgzTjBjbUYwWldkNUwyTjFjbkpsYm5SZlpteHZkdy5wbmciLCJDb25kaXRpb24iOnsiRGF0ZUxlc3NUaGFuIjp7IkFXUzpFcG9jaFRpbWUiOjE3ODY3NTIwMDB9fX1dfQ__&Key-Pair-Id=K2QY5QTL8JSY6C&Signature=MEUCIQDDvIdOteMr7ValzkX05q80BNp6pgaFjTiVcdhHlZ12IwIgCLDZTMBSpwptERqCIIPw3jKERH5DFq0Uokn3E7TmM1s_)
+
+El wizard recibe un `PageAnalysisResult` rico, pero reduce sus selectores duales a JSON embebido en strings y reconstruye prioridades fijas. La demo crea un perfil temporal, lo persiste con límite 5, ejecuta el endpoint normal, procesa y escribe staging, y después consulta staging para mostrar hasta 10 productos. Mientras tanto, el contexto `WizardTest` define 2 y ni siquiera se transmite. La demo reutiliza parte del runtime, pero lo hace mediante efectos laterales y tres límites contradictorios.[7]
+
+En el runner, el descubrimiento mezcla URLs aprendidas y descubiertas en una variable de entorno. Al detectar ese pool, Playwright retorna anticipadamente por la ruta de URLs directas y evita el orquestador. Si llega al orquestador, este retorna con la primera estrategia que produzca algo, independientemente de su calidad. Si tampoco obtiene resultado, entra en un bloque legacy con heurísticas y casos nominales. Por ello, habilitar más mecanismos no aumenta cobertura de forma controlada: puede cambiar cuál sustituye a cuál.[5] [7]
+
+### 4.1 Riesgos que bloquean una implementación segura
+
+| ID | Prioridad | Bloqueo actual | Condición estratégica de cierre |
+|---|---|---|---|
+| P0-01 | Crítica | El descubrimiento “aditivo” puede reemplazar el flujo configurado. | El descubridor solo devuelve candidatos; el planner decide cómo consumirlos. |
+| P0-02 | Crítica | Wizard, `SiteSelectors`, estrategias y extensión usan vocabularios/formats incompatibles. | Un schema versionado y adaptadores de frontera; cero parseo ad hoc dentro de contributors. |
+| P0-03 | Crítica | La demo persiste, consulta staging, activa post-análisis y puede mutar configuración. | `DemoSession` no destructiva, `mutationPolicy=none` y reporte directo. |
+| P0-04 | Crítica | No existe observación canónica ni provenance para combinar productos o campos. | Envelope por producto/campo con contributor, URL, selector, evidencia, confianza y decisión de merge. |
+| P0-05 | Alta | Families no puede configurarse válidamente desde el wizard. | Descriptor de capacidades y formulario que exija su contrato completo antes de habilitarlo. |
+| P1-01 | Alta | El primer resultado no vacío bloquea estrategias posteriores. | Quality gate por contributor y políticas de composición explícitas. |
+| P1-02 | Alta | Shopify y extensión quedan fuera del enriquecimiento y reconciliación comunes. | Adaptadores al mismo contrato de observaciones; degradación declarada por capacidades. |
+| P1-03 | Alta | Staging hace upsert por `SiteId + SKU`; SKU vacío puede colisionar. | Identidad por cascada, observaciones preservadas e idempotencia versionada. |
+| P1-04 | Alta | El preview oculta campos, conflictos, origen y errores. | Reporte autocontenido con vistas de análisis, plan, resultados, calidad y diagnóstico. |
+| P1-05 | Alta | No hay pruebas del wizard, orquestación, combinación ni paridad. | Harness contractual, fixtures, integración, concurrencia y E2E del wizard. |
+
+### 4.2 Fragmentación de contratos
+
+| Plano | Contrato actual | Pérdida o ambigüedad |
+|---|---|---|
+| Análisis | `PageAnalysisResult`, `DualSelector`, secundarios y confianzas | El wizard conserva solo una fracción y no versiona el snapshot. |
+| Configuración | Siete strings y tres booleanos principales | No expresa capacidades, precondiciones, orden, presupuesto ni política de combinación. |
+| Persistencia | `Selectors` como objeto JSONB más secundarios y compatibilidad legacy | Varias representaciones del mismo concepto y normalización dependiente del caller. |
+| Estrategias | Dos interfaces distintas para estrategia de proveedor y estrategia interna | Ninguna declara capacidades, precondiciones o resultado diagnóstico uniforme. |
+| Productos | `ScrapedProduct` y `ProcessedProduct` | Mezclan fases y no preservan provenance ni conflicto por campo. |
+| Resultado | `ScrapeRunResult` con contadores y duración | Obliga al wizard a releer staging y no explica qué ocurrió. |
+| Extensión | `SiteSelectors` TypeScript y endpoint propio | No comparte XPath, runner, staging, deduplicación ni observabilidad. |
+
+### 4.3 Estado de OpenSpec
+
+La instalación local es **OpenSpec 1.5.0**. La validación `openspec validate --all --strict --json` devuelve 14 elementos: 11 válidos y 3 inválidos. El cambio `enhance-wizard-simulation` no contiene deltas parseables; `project-organization` y `readme-documentation` carecen de `## Purpose`. Por tanto, el corpus no puede actuar hoy como gate de implementación.
+
+| Señal | Interpretación |
+|---|---|
+| Diez cambios activos | Hay trabajo concurrente y alcance solapado que debe reconciliarse. |
+| Cambios “complete” sin archivar | Una casilla de tarea no demuestra correspondencia con código ni pruebas. |
+| Dos cambios casi homónimos de detalle | La capacidad no tiene todavía una autoridad normativa única. |
+| Tres elementos inválidos en estricto | Primero debe sanearse la fuente de verdad. |
+| Configuración sin reglas de dominio | OpenSpec valida estructura, pero no exige trazabilidad, paridad o evidencia. |
+
+OpenSpec sigue siendo adecuado. Su documentación oficial propone precisamente revisar propuesta, especificaciones, diseño y tareas antes de implementar, y permite inyectar reglas de proyecto o definir schemas propios.[1] [2]
+
+> “Your AI writes these; you review the plan before any code is written.” — documentación oficial de OpenSpec.[1]
+
+## 5. Invariantes de fiabilidad
+
+La nueva arquitectura debe diseñarse desde invariantes, no desde excepciones por proveedor. Una ejecución puede acabar con éxito, éxito con advertencias o fallo; nunca debe ocultar incertidumbre ni promover silenciosamente datos parciales.
+
+| Invariante | Implicación verificable |
+|---|---|
+| Misma lógica | Demo y producción llaman al mismo planner, contributors, reconciliador y quality gate. |
+| Entrada inmutable | Cada run recibe un snapshot versionado; ningún componente lee o escribe opciones globales. |
+| Independencia | Todo pathway puede devolver `NotApplicable`, `NoData`, `Partial`, `Success` o error sin cancelar a los demás salvo política fatal explícita. |
+| Composición explícita | Ningún descubridor, URL aprendida o resultado parcial activa un retorno oculto. |
+| Presupuesto único | Límites de productos, URLs, páginas, profundidad, tiempo, reintentos y concurrencia viven en el request. |
+| Observabilidad | Cada contributor informa duración, estado, entradas, candidatos, advertencias y causa de terminación. |
+| Provenance | Cada valor elegido mantiene la observación original, contributor, URL, selector/evidencia y regla de selección. |
+| Persistencia tardía | Contributors, normalización y reconciliación son libres de escritura de negocio. |
+| Configuración controlada | El aprendizaje crea propuestas versionadas; nunca cambia el perfil confirmado durante una demo. |
+| Reproducibilidad | El reporte registra versiones de perfil, selectores, contributors, reglas y snapshot de entrada. |
+
+## 6. Arquitectura objetivo
+
+![Arquitectura objetivo](https://private-us-east-1.manuscdn.com/sessionFile/W2MSZH2VAgC4WhxukEZ5OB/sandbox/eYpLkSdPkhroYvDPvjEglH-images_1784961499133_na1fn_L2hvbWUvdWJ1bnR1L3NjcmFwc2FlX3N0cmF0ZWd5L3RhcmdldF9hcmNoaXRlY3R1cmU.png?Policy=eyJTdGF0ZW1lbnQiOlt7IlJlc291cmNlIjoiaHR0cHM6Ly9wcml2YXRlLXVzLWVhc3QtMS5tYW51c2Nkbi5jb20vc2Vzc2lvbkZpbGUvVzJNU1pIMlZBZ0M0V2h4dWtFWjVPQi9zYW5kYm94L2VZcExrU2RQa2hyb1l2RFB2akVnbEgtaW1hZ2VzXzE3ODQ5NjE0OTkxMzNfbmExZm5fTDJodmJXVXZkV0oxYm5SMUwzTmpjbUZ3YzJGbFgzTjBjbUYwWldkNUwzUmhjbWRsZEY5aGNtTm9hWFJsWTNSMWNtVS5wbmciLCJDb25kaXRpb24iOnsiRGF0ZUxlc3NUaGFuIjp7IkFXUzpFcG9jaFRpbWUiOjE3ODY3NTIwMDB9fX1dfQ__&Key-Pair-Id=K2QY5QTL8JSY6C&Signature=MEQCIA7UCnwGcNFw59qrmZ7nx0cgoFbhOWUbwG7tn8Fk1GVyAiBQZ5gXU0UtVRUxyP0XthS8wR1IN1eMrsJVqlNNsOqwfg__)
+
+La arquitectura separa **plano de control**, **núcleo de ejecución** y **frontera de persistencia**. El wizard analiza y propone; no extrae por su cuenta. El núcleo recibe un request inmutable, crea un plan, ejecuta contributors aislados y combina observaciones. El reporte resultante es la fuente del preview y de la evidencia de paridad. Solo producción, después de promoción explícita, puede persistir datos de negocio.
+
+| Capa | Responsabilidad | Prohibición |
+|---|---|---|
+| Wizard/control | Capturar, analizar, editar, ejecutar demo, comparar y aprobar. | No acceder directamente a staging ni fabricar un motor alternativo. |
+| Planner | Resolver un DAG de contributors según capacidades, política y presupuesto. | No inferir rutas por nombre de proveedor o estado global. |
+| Contributors | Producir candidatos u observaciones con diagnóstico. | No persistir, mutar perfil, decidir el flujo completo ni depender de otro contributor. |
+| Normalización | Convertir valores y unidades sin elegir aún la verdad final. | No borrar valores brutos ni evidencias. |
+| Reconciliación | Resolver identidad, duplicados y conflictos por reglas deterministas. | No sobrescribir observaciones perdedoras. |
+| Quality gate | Clasificar resultado y explicar incumplimientos. | No usar “hay al menos un producto” como criterio suficiente. |
+| Reporte | Entregar snapshot autocontenido a UI, pruebas y observabilidad. | No exigir una consulta posterior a estado global. |
+| Persistencia | Escribir una vez, idempotentemente y con versión. | No aceptar SKU vacío como clave única ni mezclar demo con negocio. |
+
+## 7. Contratos canónicos propuestos
+
+Los nombres siguientes son conceptuales; su forma exacta se decidirá en OpenSpec. Lo importante es que cada responsabilidad tenga **un solo contrato** y que los adapters legacy se sitúen en la frontera, no dentro del núcleo.
+
+| Contrato conceptual | Contenido mínimo | Invariante |
+|---|---|---|
+| `SelectorDescriptor` | Tipo CSS/XPath/atributo, expresión, scope catálogo/detalle, cardinalidad, atributo/texto, fallbacks, confianza y versión. | Nunca se serializa un objeto selector dentro de un string etiquetado como CSS. |
+| `ProviderConfigurationSnapshot` | Identidad, URLs, marca, plataforma, selector schema, contributors habilitados, políticas y versión. | Es inmutable durante un run. |
+| `ExtractionExecutionRequest` | `runId`, modo, snapshot, browser options, presupuesto, persistencia, mutación y cancelación. | Contiene toda opción runtime; no requiere variables de entorno. |
+| `ContributorDescriptor` | ID/versión, tipo, capacidades, precondiciones, inputs/outputs, coste, timeout y compatibilidad. | Permite validar el plan antes de abrir navegador. |
+| `ContributorResult` | Estado, observaciones, candidatos, diagnósticos, métricas y error tipado. | Un error recuperable queda contenido y observable. |
+| `ProductObservation` | Identidad candidata y observaciones por campo con bruto, normalizado, URL, selector, evidencia, confianza y timestamp. | Es append-only hasta reconciliación. |
+| `ReconciledProduct` | Identidad canónica, valor elegido por campo, alternativas, conflictos, cobertura y decisión de merge. | Cada valor seleccionado explica su origen. |
+| `ExtractionRunReport` | Request/snapshot, plan, resultados por contributor, productos, descartes, quality gate y métricas. | Es autocontenido y alimenta directamente la demo. |
+| `ConfigurationProposal` | Diferencia sugerida, evidencia, confianza, impacto y versión base. | Requiere promoción humana; no se aplica automáticamente. |
+
+### 7.1 Estados uniformes de contributor
+
+| Estado | Significado | Efecto del planner |
+|---|---|---|
+| `NotApplicable` | Las capacidades o precondiciones no coinciden. | Continúa sin penalizar calidad. |
+| `NoData` | Se ejecutó correctamente, pero no produjo observaciones. | Puede activar fallback. |
+| `Partial` | Produjo datos útiles con faltantes o advertencias. | Puede activar augment/ensemble; nunca equivale automáticamente a éxito global. |
+| `Success` | Cumplió su contrato y presupuesto. | Sus observaciones pasan a reconciliación. |
+| `RecoverableFailure` | Timeout, selector sin match, bloqueo transitorio u otro error acotado. | Registra diagnóstico y continúa según política. |
+| `FatalFailure` | Configuración inválida, violación de dominio o inconsistencia que invalida el run. | Detiene solo cuando la política lo declare fatal para la ejecución. |
+| `Cancelled` | Cancelación solicitada o presupuesto agotado. | Devuelve evidencia parcial y termina limpiamente. |
+
+### 7.2 Presupuesto de ejecución
+
+El límite de productos no es suficiente. El request debe declarar productos, URLs candidatas, páginas, profundidad, duración, reintentos, paralelismo y pausas de cortesía. Demo fijará `maxProducts=10`; producción usará el valor confirmado del perfil, actualmente 120 como intención normativa. Cada contributor consumirá del mismo presupuesto y explicará por qué terminó.
+
+## 8. Pathways: independencia y combinación
+
+La palabra pathway debe representar una capacidad seleccionable, no un bloque que controle el pipeline completo. El planner podrá ejecutar cualquiera en solitario y también aceptar sus observaciones junto con otras. Ninguno dependerá de que otro exista; las dependencias de datos, como una URL candidata, serán entradas opcionales del plan y no llamadas directas entre contributors.
+
+| Pathway actual | Rol objetivo | Independencia exigida | Forma de combinación |
+|---|---|---|---|
+| Descubrimiento | `CandidateDiscoverer` | Devuelve URLs canónicas y evidencia; no extrae ni publica globals. | Alimenta candidatos a detalle sin reemplazar List, Shopify u otros. |
+| Direct | Contributor de página actual o detalle | Selector contract común, presupuesto y resultado diagnóstico. | Puede ser único, fallback o augment de un listado/API. |
+| List | Contributor de catálogo/tarjetas | Respeta límites, paginación y URL de detalle; no decide éxito global. | Produce observaciones iniciales y candidatos para enriquecimiento. |
+| Families | Contributor jerárquico de familias/variantes | Declara y valida `family/variant` selectors; puede ejecutarse solo. | Ensemble con List/Direct o pathway único en sitios jerárquicos. |
+| Shopify API | Contributor nativo de catálogo | Devuelve variantes e imágenes disponibles sin exigir ruta directa propia. | Se complementa con detalle HTML para campos ausentes. |
+| Direct URLs/aprendidas | Input de candidatos + contributor de detalle | El pool vive en el request y se deduplica; nunca activa retorno temprano. | Augment de cualquier catálogo o ejecución independiente. |
+| Legacy Playwright | Adaptador de compatibilidad temporal | Se encapsula con estado, presupuesto y diagnóstico; sin casos ocultos fuera del adapter. | Fallback explícito mientras se estrangulan sus ramas. |
+| Galería/stock/adjuntos | Enriquecedores de detalle | Reciben observación/candidato y devuelven campos adicionales. | Augment posterior, reutilizable por Generic, Shopify y extensión. |
+| Screenshot/IA | Contributor de fallback costoso | Se activa por política y registra coste/evidencia. | Rellena campos, pero no oculta que provienen de inferencia. |
+| Extensión | Contributor cliente | Emite el mismo envelope y puede ejecutarse sin servidor scraper. | Se reconcilia por `runId/sessionId`; no depende de staging ni de Playwright. |
+
+### 8.1 Políticas de composición
+
+| Política | Uso | Regla de avance |
+|---|---|---|
+| `fallback` | Varios mecanismos equivalentes con coste creciente. | Avanza si el anterior es `NoData`, fallo recuperable o no alcanza su quality gate. |
+| `augment` | Un contributor aporta campos o detalle que otro no tiene. | Se ejecuta sobre candidatos elegibles dentro del presupuesto. |
+| `ensemble` | Dos fuentes aportan cobertura o validación cruzada. | Ambas se ejecutan y sus observaciones se reconcilian; los desacuerdos quedan visibles. |
+
+La política recomendada inicial es **List o Shopify para candidatos, Direct/detail para augment, Families cuando su descriptor sea aplicable y legacy solo como fallback explícito**. No obstante, cada proveedor conservará un plan versionado y podrá usar un único contributor. La independencia se prueba ejecutando cada pathway sin ningún otro; la combinabilidad se prueba con matrices de pares y fallos inyectados.
+
+## 9. Flujo objetivo del wizard
+
+El wizard debe mostrar progresivamente evidencia, no ocultarla entre pasos. Cada transición tiene una salida tipada y un gate visible.
+
+| Paso | Acción | Información visible | Gate |
+|---|---|---|---|
+| 1. Identidad | Nombre, marca, catálogo, detalle opcional y requisitos de login. | Validación de dominio, URLs y campos downstream obligatorios. | Entradas válidas y consentimiento para analizar. |
+| 2. Análisis | Renderizado de catálogo y detalle; detección de plataforma y capacidades. | URL candidata, snapshot/timestamp, campos detectados, confianza, selectores y advertencias. | El usuario confirma o corrige página de detalle. |
+| 3. Configuración | Construcción del selector schema y plan de contributors. | CSS/XPath separados, secundarios, precondiciones, prioridades, políticas, presupuesto y razones. | Plan validable; ningún contributor habilitado con requisitos faltantes. |
+| 4. Demo | Ejecución real `mode=Demo`, máximo 10, sin persistencia ni mutación. | Progreso por fase/contributor, cancelación y presupuesto consumido. | Run finalizado con reporte, incluso si falla. |
+| 5. Revisión | Quality gate y comparación de resultados. | Productos y todos sus campos, faltantes, conflictos, fuente, selector, confianza, descartes y errores. | `Pass`, `PassWithWarnings` con override razonado, o `Fail`. |
+| 6. Confirmación | Promoción de configuración y, si se decide, ejecución productiva. | Resumen exacto de lo que se persistirá y versión. | Aprobación explícita; nunca automática. |
+
+El paso 4 no debe llamarse “Información simulada”: es una **ejecución demo real**. Tampoco debe saltarse automáticamente a un resumen. El usuario necesita una vista estable para inspeccionar el análisis, el plan, los productos y los diagnósticos antes de guardar.
+
+### 9.1 Presentación mínima del reporte
+
+| Vista | Contenido |
+|---|---|
+| Análisis | Plataforma, idioma, catálogo/detalle, URL candidata, timestamp, hashes/snapshot y selectores candidatos. |
+| Plan | Contributors, modo, orden/DAG, precondiciones, políticas, límites y razones de selección. |
+| Productos | SKU/identidad, nombre, marca, modelo, precio/moneda, stock, descripción, características, categorías, imágenes, galería, adjuntos, variantes y URL. |
+| Calidad | Cobertura por campo, validez, duplicados, conflictos, productos aceptados/rechazados y criterio de éxito. |
+| Provenance | Contributor, página, selector/evidencia, valor bruto/normalizado, confianza y regla de merge para cada campo. |
+| Diagnóstico | Estado y tiempo por contributor, URLs descubiertas, matches de selectores, timeouts, bloqueos y fallos recuperables/fatales. |
+| Exportable | Árbol JSON del `ExtractionRunReport` y diff de configuración, descargables para soporte y pruebas. |
+
+## 10. Demo, producción y paridad
+
+Demo y producción deben compartir todo el camino desde `ExecutionRequest` hasta `ExtractionRunReport`. Las únicas diferencias permitidas son el modo, el presupuesto, la política de persistencia y, si se aprueba, el nivel de evidencia retenido.
+
+| Propiedad | Demo | Producción |
+|---|---|---|
+| Núcleo | Idéntico | Idéntico |
+| Máximo de productos | 10 | Perfil confirmado, inicialmente 120 |
+| Persistencia de negocio | `none` | `commit` después del quality gate |
+| Mutación de configuración | `none` | `suggest`; promoción humana separada |
+| Staging como transporte | Prohibido | No necesario para el reporte; puede existir como destino explícito |
+| Resultado al caller | Reporte completo | El mismo reporte más resultado de persistencia |
+| Limpieza | Sesión scoped por `demoSessionId` | Recursos scoped por `runId` |
+
+La prueba de paridad debe ejecutar el mismo snapshot dos veces con `persistencePolicy=none` y `persistencePolicy=commit-dry-run` o equivalente. Los productos reconciliados, valores seleccionados, conflictos y diagnósticos funcionales deben ser iguales; solo pueden diferir IDs de persistencia, timestamps no semánticos y métricas ambientales definidas.
+
+## 11. Identidad, deduplicación y reconciliación
+
+La combinación solo es segura si se define identidad antes de mezclar. El SKU no puede seguir siendo la única clave cuando puede faltar o representar una variante.
+
+| Nivel de identidad | Criterio | Confianza |
+|---|---|---|
+| 1 | Proveedor + SKU normalizado + variante, cuando existe y es válido. | Alta |
+| 2 | Proveedor + URL canónica/handle estable. | Alta-media |
+| 3 | Identificador nativo de plataforma/API. | Alta, dentro de esa plataforma |
+| 4 | Fingerprint de marca, modelo/título y variante normalizados. | Media; requiere revisión ante conflicto |
+| 5 | Sin identidad estable | No se promueve; queda como observación rechazada o pendiente. |
+
+La reconciliación debe usar reglas por campo, no “último escritor gana”. Cada campo tendrá una matriz de autoridad inicial —por ejemplo, un detalle explícito suele superar una tarjeta de listado; un identificador nativo suele superar texto inferido; evidencia DOM supera inferencia visual cuando ambas son válidas—, combinada con validez, confianza, frescura y especificidad. Las alternativas nunca se eliminan; el producto reconciliado apunta a la observación ganadora y registra el motivo.
+
+| Situación | Resolución recomendada |
+|---|---|
+| Mismo valor normalizado desde dos contributors | Aumentar corroboración y conservar ambas evidencias. |
+| Valor vacío frente a valor válido | Elegir el válido, sin considerar conflicto. |
+| Dos valores válidos distintos | Aplicar autoridad por campo; si no decide, marcar conflicto y bloquear o advertir según criticidad. |
+| SKU distinto para misma URL | Tratar como conflicto de identidad; no fusionar automáticamente. |
+| Variantes en una misma página | Crear identidades de variante separadas vinculadas al producto padre. |
+| Producto sin SKU pero con URL canónica | Admitir con identidad de nivel 2 y mostrar la ausencia de SKU. |
+| Producto sin identidad estable | Rechazar para persistencia, conservar en el reporte con explicación. |
+
+## 12. Quality gate y criterio de éxito
+
+La existencia de un producto no prueba que un proveedor esté bien configurado. El quality gate debe considerar identidad, campos obligatorios, validez, duplicación, conflictos, errores y reproducibilidad.
+
+| Categoría | Regla base recomendada |
+|---|---|
+| Identidad | El 100 % de productos promovibles tiene identidad estable y `SourceUrl` válida. |
+| Nombre | El 100 % tiene nombre no vacío y normalizado. |
+| Campos de negocio | El proveedor define un `AcceptanceProfile`; imagen, precio, marca, descripción o stock pueden ser obligatorios según destino. |
+| Validez | Precios, moneda, URLs, imágenes y stock superan validadores tipados. |
+| Duplicados | No existen colisiones sin resolver dentro del lote. |
+| Conflictos | Ningún conflicto crítico de identidad o campo obligatorio queda sin decisión. |
+| Errores | No hay `FatalFailure`; los recuperables están explicados y no invalidan la cobertura exigida. |
+| Provenance | Cada campo obligatorio seleccionado tiene origen rastreable. |
+| Presupuesto | Toda terminación por límite se declara; no se confunde con fin real de catálogo. |
+
+El resultado global será `Pass`, `PassWithWarnings` o `Fail`. Un override desde el wizard solo será posible para advertencias, exigirá una razón y quedará ligado a la versión de configuración. Los fallos de identidad, contrato, configuración o ausencia de campos obligatorios no deberían poder ignorarse.
+
+## 13. Persistencia, aprendizaje y versionado
+
+La demo no debe crear un proveedor de negocio ni usar staging como bus de mensajes. Si se necesita conservar evidencia, se utilizará un almacén de sesiones de demo separado, scoped por `demoSessionId`, con TTL y sin efectos sobre `config_sites` o productos. El reporte seguirá siendo la respuesta primaria.
+
+La configuración confirmada será versionada. Cada run registrará `profileVersion`, `selectorSchemaVersion`, versiones de contributors, reglas de reconciliación y quality gate. El análisis post-ejecución podrá generar un `ConfigurationProposal` con diff y evidencia, pero nunca aplicarlo durante el run. La promoción de una propuesta crea una nueva versión; el rollback selecciona la anterior.
+
+La persistencia de productos ocurrirá después de reconciliación y validación. Debe ser idempotente y preservar observaciones o, como mínimo, referencias de auditoría suficientes. La clave de upsert usará la cascada de identidad y nunca la cadena vacía como sustituto de SKU.
+
+## 14. Estrategia de pruebas
+
+La cobertura debe demostrar tres propiedades distintas: cada contributor funciona de forma aislada, las combinaciones son deterministas y el wizard certifica el mismo camino que producción.
+
+| Nivel | Objetivo | Evidencia mínima |
+|---|---|---|
+| Schema/contrato | Validar selectores, requests, budgets, estados y envelopes. | Casos CSS, XPath, atributos, aliases legacy, cardinalidad, errores y versionado. |
+| Contract test de contributor | Aplicar el mismo harness a Direct, List, Families, Shopify, legacy, extensión y enriquecedores. | No persistencia, presupuesto, cancelación, diagnóstico, salida canónica y aislamiento de excepción. |
+| Fixtures offline | Probar DOMs estables de catálogo, detalle, variantes, Shopify y páginas degradadas. | Golden observations y resultados reconciliados reproducibles. |
+| Integración | Verificar planner, contributors, merge, quality y reporte. | List solo; Direct solo; Families solo; Shopify solo; Extension solo; combinaciones y un contributor fallando. |
+| Concurrencia | Ejecutar runs simultáneos con opciones y URLs diferentes. | Cero contaminación de contexto o browser/session. |
+| Persistencia | Verificar identidad, idempotencia, rollback y conflictos. | Repetir el mismo run sin duplicados ni pérdida de observaciones. |
+| E2E wizard | Recorrer análisis, edición, demo, revisión, override y guardado/cancelación. | UI muestra todo el reporte y bloquea promoción inválida. |
+| Paridad | Comparar demo y producción con mismo snapshot. | Diff semántico vacío salvo campos permitidos. |
+| Smoke live | Detectar deriva real de sitios representativos. | Ejecución controlada, respetuosa y fuera del gate determinista principal. |
+
+La matriz obligatoria de escenarios incluirá `NotApplicable`, no-data, partial, timeout, bloqueo, selector inválido, cancelación, límite alcanzado, conflicto de SKU, URL duplicada, variante, contributor lento, error recuperable y error fatal. Los sitios en vivo no deben ser la base de CI porque introducen deriva y bloqueos; se usarán fixtures para determinismo y smokes separados para detectar cambios externos.
+
+## 15. Uso de OpenSpec
+
+OpenSpec debe pasar de colección de cambios a sistema de decisión. La documentación oficial confirma que el proyecto puede añadir contexto y reglas por artefacto en `openspec/config.yaml`, o clonar el schema `spec-driven` si más adelante necesita un artefacto de revisión propio.[2] Su flujo es deliberadamente iterativo, y las versiones recientes permiten revisar artefactos existentes; la estrategia, sin embargo, no depende de funciones posteriores a la 1.5.0 instalada.[1] [3]
+
+La validación nativa debe complementarse con una matriz de trazabilidad porque la validación estructural no garantiza coherencia semántica entre proposal, specs, diseño, tareas, código y pruebas. La propia evolución pública de OpenSpec distingue esos problemas.[4]
+
+### 15.1 Cambio paraguas
+
+Tras la aprobación se propone crear `stabilize-provider-extraction-pipeline`. Antes de código, deberá clasificar cada requisito de los diez cambios activos como **conservar, modificar, reemplazar, descartar o fuera de alcance**. No se archivará mecánicamente ningún cambio incompleto o inválido como si estuviera implementado.
+
+| Capability propuesta | Alcance |
+|---|---|
+| `provider-onboarding-analysis` | Entrada, análisis catálogo/detalle, plataforma y revisión humana. |
+| `selector-contract` | Schema de selectores versionado y adaptadores legacy. |
+| `extraction-contributors` | Descriptores, estados y contrato común. |
+| `execution-planning` | DAG, políticas, presupuesto, cancelación y aislamiento. |
+| `demo-session` | Demo real, no destructiva y máximo 10. |
+| `product-observation-and-reconciliation` | Provenance, identidad, fusión y conflictos. |
+| `execution-result-and-preview` | Reporte canónico y presentación completa. |
+| `persistence-boundary` | Persistencia tardía, idempotencia y versionado. |
+| `pathway-adapters` | Generic, Direct, List, Families, Shopify, legacy y extensión. |
+| `parity-observability-and-testing` | Métricas, fixtures, contract tests y paridad. |
+
+### 15.2 Gates de especificación
+
+| Gate | Evidencia requerida | Qué habilita |
+|---|---|---|
+| G0 — Baseline | 14/14 válidos en estricto o disposición explícita para cada inválido. | Reconciliación documental. |
+| G1 — Alcance | Propuesta paraguas y tabla de supersesión aprobadas. | Redacción de specs y diseño. |
+| G2 — Contratos | Selector schema, contributors, request, observaciones, reporte y políticas aprobados. | Plan de pruebas y tareas. |
+| G3 — Ejecutabilidad | Matriz requisito→prueba completa y cero contradicciones P0 abiertas. | Solicitud de autorización de implementación. |
+| G4 — Autorización | Aprobación explícita del usuario sobre diseño y roadmap. | Inicio de código. |
+| G5 — Incremento | Contract, integración y evidencia del slice pasan sin regresión. | Siguiente slice. |
+| G6 — Paridad | Demo/producción equivalentes, `validate --strict` y verify satisfactorios. | Archivo y cutover. |
+
+## 16. Hoja de ruta posterior a la aprobación
+
+La implementación debe avanzar mediante slices verticales y reversibles. No se recomienda una reescritura total ni sustituir todos los pathways a la vez.
+
+| Ola | Entregable | Gate de salida | Rollback |
+|---|---|---|---|
+| 0. Saneamiento | Corregir validez OpenSpec, reconciliar cambios, aprobar contrato y matriz de pruebas. | G0–G4. | Ningún cambio runtime. |
+| 1. Caracterización | Fixtures y pruebas que capturen comportamiento actual, incluidos defectos deliberadamente documentados. | Baseline reproducible. | Solo pruebas; no cambia producción. |
+| 2. Contratos canónicos | Selector schema, execution request/report, observaciones, statuses y adapters legacy. | Serialización y contract tests. | Mantener interfaces actuales detrás de adapters. |
+| 3. Primer slice del wizard | Wizard → request demo → adapter Generic existente → reporte directo, sin staging ni mutación. | E2E de demo con máximo 10 y cleanup scoped. | Feature flag por proveedor; volver al flujo actual. |
+| 4. Planner en shadow | Plan explícito y ejecución shadow sin escritura; comparar con runtime actual. | Diagnósticos y diff por contributor. | Desactivar planner por flag. |
+| 5. Reconciliación | Identidad, provenance, merge, quality gate y preview completo. | Matriz de combinación determinista. | Reportar sin promover; conservar legacy como autoridad temporal. |
+| 6. Migración de pathways | Envolver y después refinar Direct, List, Families, Shopify, descubrimiento, enriquecedores y extensión. | Cada contributor supera harness aislado y combinado. | Activación individual por contributor/site. |
+| 7. Producción común | Misma ruta para demo y producción; persistencia única e idempotente. | Paridad y smokes controlados. | Rollback por versión/feature flag. |
+| 8. Retirada de shortcuts | Eliminar globals, retornos tempranos, auto-mutación y ramas legacy ya reemplazadas. | Cero perfiles dependientes y métricas estables. | Posponer retirada; no afecta contrato nuevo. |
+
+El primer resultado útil no debe esperar a la migración completa. La ola 3 entrega el circuito que el usuario necesita —demo real y explicable desde el wizard— usando un adapter del motor actual. Las siguientes olas sustituyen internamente los mecanismos sin romper el contrato presentado al wizard.
+
+## 17. Cutover y control de riesgo
+
+El nuevo pipeline se habilitará por proveedor o versión de perfil. En shadow mode podrá ejecutar el plan nuevo con `persistencePolicy=none`, comparar sus productos con el resultado actual y producir un diff sin cambiar negocio. Solo después de superar fixtures, integración, paridad y un conjunto controlado de proveedores se promoverá como autoridad.
+
+| Mecanismo | Objetivo |
+|---|---|
+| Feature flag por perfil | Activación y rollback granular. |
+| Shadow run | Medir cobertura y diferencias sin escritura. |
+| Configuración versionada | Reproducir y volver a una versión anterior. |
+| Adapter legacy | Mantener continuidad mientras se extraen responsabilidades. |
+| Métricas por contributor | Detectar degradación de un pathway sin confundirla con fallo global. |
+| Diff de productos/campos | Validar paridad y reglas de merge antes del cutover. |
+
+No se eliminará una ruta legacy hasta que ningún perfil la requiera y exista evidencia de equivalencia o una decisión explícita de cambio de comportamiento.
+
+## 18. Decisiones solicitadas al usuario
+
+La estrategia puede aprobarse en conjunto o con ajustes. Las siguientes decisiones determinan la futura especificación; las recomendaciones incluidas son el punto de partida propuesto.
+
+| ID | Decisión | Recomendación |
+|---|---|---|
+| D1 | Framework | Conservar OpenSpec `spec-driven`; no introducir un segundo framework. |
+| D2 | Cambio paraguas | Crear uno solo para reconciliar los diez cambios antes de implementar. |
+| D3 | Semántica de demo | Cero persistencia de negocio y cero mutación; evidencia opcional en store de sesión con TTL. |
+| D4 | Límite demo | Un único presupuesto con máximo de 10 productos. |
+| D5 | Composición inicial | List/Shopify como candidatos, Direct/detail como augment, Families por capacidad y legacy como fallback explícito. |
+| D6 | Criterio de éxito | `AcceptanceProfile` por proveedor/destino; identidad, nombre, URL y provenance obligatorios globalmente. |
+| D7 | Aprendizaje | Solo propuestas versionadas y promoción humana; nunca autoaplicación durante el run. |
+| D8 | Extensión | Mantenerla independiente, pero adaptar su salida al mismo envelope y reconciliador. |
+| D9 | Compatibilidad | Migración gradual con adapters, shadow mode y feature flag por perfil. |
+| D10 | Inicio de código | No comenzar hasta G4, después de revisar OpenSpec, contratos y matriz de pruebas. |
+
+## 19. Criterios de aceptación de la estrategia
+
+La estrategia estará validada cuando se confirme que: el wizard será el único plano de alta y demostración; demo y producción compartirán núcleo; los pathways se modelarán como contributors independientes; la combinación será explícita y conservará provenance; demo no tendrá efectos de negocio; el quality gate sustituirá el criterio de “algún producto”; OpenSpec seguirá siendo la fuente normativa; y la implementación avanzará por slices reversibles con pruebas contractuales y de paridad.
+
+Una aprobación inequívoca podría expresarse así:
+
+> **“Apruebo la estrategia propuesta, incluidas las decisiones D1–D10. Autorizo únicamente la siguiente fase documental: sanear y reconciliar OpenSpec y preparar el cambio paraguas. No autorizo todavía implementación de código.”**
+
+Si alguna decisión necesita ajuste, basta con indicar su ID y la alternativa deseada. Hasta recibir esa validación, no se modificará el repositorio.
+
+## 20. Conclusión
+
+ScrapSAE no necesita otro extractor monolítico. Necesita **separar control, contribución, reconciliación y persistencia**. Esta separación permite conservar todos los pathways, probarlos en aislamiento, combinarlos cuando aporten valor y degradar limpiamente cuando uno falle. El wizard se convierte en una herramienta de verificación real: muestra lo que el análisis propuso, lo que el plan ejecutó, qué datos obtuvo cada contributor, cómo se resolvieron los conflictos y exactamente qué se promoverá.
+
+OpenSpec es suficiente y apropiado, siempre que primero se sanee su baseline y se convierta la trazabilidad en un gate real. La ruta recomendada no es una reescritura: es una migración incremental, observable y reversible que entrega pronto el circuito wizard→demo→reporte y después absorbe los pathways existentes uno a uno.
+
+## Referencias
+
+[1]: https://github.com/Fission-AI/OpenSpec "Fission-AI/OpenSpec: Spec-driven development for AI coding assistants"
+[2]: https://github.com/Fission-AI/OpenSpec/blob/main/docs/customization.md "OpenSpec: Customization"
+[3]: https://github.com/Fission-AI/OpenSpec/issues/694 "OpenSpec workflow and artifact iteration discussion"
+[4]: https://github.com/Fission-AI/OpenSpec/issues/829 "OpenSpec proposal: schema-driven artifact validation"
+[5]: ./current_state_matrices.md "Matrices del estado actual: contratos, pathways y riesgos"
+[6]: ./requirements_baseline.md "Línea base documental reconstruida"
+[7]: ./audit_notes.md "Evidencia detallada de la auditoría del repositorio"

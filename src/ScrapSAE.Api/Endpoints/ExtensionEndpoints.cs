@@ -58,7 +58,7 @@ public static class ExtensionEndpoints
                             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
                         });
 
-                        var processed = await aiProcessor.ProcessProductAsync(rawJson, token);
+                        var processed = await aiProcessor.ProcessProductAsync(rawJson, cancellationToken: token);
                         if (processed != null)
                         {
                             processedProducts.Add(processed);

@@ -1,0 +1,58 @@
+flowchart LR
+    subgraph CP["Plano de control · Wizard de alta"]
+        I["Identidad, marca y URLs"] --> A["Análisis catálogo + detalle"]
+        A --> C["Borrador de configuración versionado"]
+        C --> V["Vista de selectores, capacidades y plan"]
+        V --> H{"Aprobación humana"}
+    end
+
+    H --> R["ExecutionRequest\nperfil + versión + modo + budget"]
+
+    subgraph EK["Núcleo único de ejecución · Demo y Producción"]
+        R --> P["Execution Planner"]
+
+        subgraph CT["Contributors aislados · sin persistencia ni dependencias ocultas"]
+            D["Descubrimiento"]
+            L["List"]
+            X["Direct"]
+            F["Families"]
+            S["Shopify API"]
+            G["Legacy adaptado"]
+            E["Extensión adaptada"]
+        end
+
+        P --> D
+        P --> L
+        P --> X
+        P --> F
+        P --> S
+        P --> G
+        P --> E
+
+        D --> O["ProductObservations\nprovenance por campo"]
+        L --> O
+        X --> O
+        F --> O
+        S --> O
+        G --> O
+        E --> O
+
+        O --> N["Normalización + enriquecimiento"]
+        N --> M["Identidad, deduplicación y merge determinista"]
+        M --> Q["Quality Gate"]
+        Q --> RR["ExtractionRunReport autocontenido"]
+    end
+
+    RR --> PW["Preview: productos, conflictos, faltantes, evidencias y diagnósticos"]
+    PW --> PR{"Promoción explícita"}
+    PR -->|"Demo: nunca"| ND["Sin escritura de negocio"]
+    PR -->|"Producción aprobada"| DB["Persistencia única e idempotente"]
+
+    classDef control fill:#e7f0ff,stroke:#1d4ed8,color:#0f172a;
+    classDef kernel fill:#ecfdf5,stroke:#047857,color:#0f172a;
+    classDef contributor fill:#fff7ed,stroke:#c2410c,color:#0f172a;
+    classDef gate fill:#fef2f2,stroke:#b91c1c,color:#0f172a;
+    class I,A,C,V,H,PW,PR control;
+    class R,P,O,N,M,RR,DB,ND kernel;
+    class D,L,X,F,S,G,E contributor;
+    class Q gate;

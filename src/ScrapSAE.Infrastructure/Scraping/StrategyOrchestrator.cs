@@ -1,8 +1,14 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Microsoft.Playwright;
 using ScrapSAE.Core.DTOs;
 using ScrapSAE.Core.Entities;
 using ScrapSAE.Core.Interfaces;
+using ScrapSAE.Infrastructure.Scraping.Strategies;
 
 namespace ScrapSAE.Infrastructure.Scraping;
 
@@ -18,14 +24,15 @@ public class StrategyOrchestrator : IStrategyOrchestrator
         ILogger<StrategyOrchestrator> logger,
         IEnumerable<IScrapingStrategy> strategies)
     {
-        _logger = logger;
-        _strategies = strategies;
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _strategies = strategies ?? throw new ArgumentNullException(nameof(strategies));
     }
 
     public async Task<List<ScrapedProduct>> ExecuteStrategiesAsync(
         object pageObj,
         SiteProfile site,
         Guid executionId,
+        ScrapeExecutionContext? context = null,
         CancellationToken cancellationToken = default)
     {
         var page = (IPage)pageObj;
@@ -34,7 +41,6 @@ public class StrategyOrchestrator : IStrategyOrchestrator
             site.Name
         );
 
-        // Obtener las estrategias habilitadas y ordenadas por prioridad
         var enabledStrategies = GetEnabledStrategies(site);
         
         if (!enabledStrategies.Any())
@@ -43,13 +49,12 @@ public class StrategyOrchestrator : IStrategyOrchestrator
             return new List<ScrapedProduct>();
         }
 
-        // Intentar cada estrategia en orden
         foreach (var strategyDef in enabledStrategies)
         {
             if (cancellationToken.IsCancellationRequested)
                 break;
 
-            var strategy = _strategies.FirstOrDefault(s => s.StrategyName == strategyDef.StrategyName);
+            var strategy = _strategies.FirstOrDefault(s => s.StrategyName.Equals(strategyDef.StrategyName, StringComparison.OrdinalIgnoreCase));
             
             if (strategy == null)
             {
@@ -68,23 +73,26 @@ public class StrategyOrchestrator : IStrategyOrchestrator
                     strategyDef.Priority
                 );
 
-                var products = await strategy.ExecuteAsync(page, site, executionId, cancellationToken);
+                var products = await strategy.ExecuteAsync(page, site, executionId, context, cancellationToken);
+                var validProducts = products.Where(p => SelectorCombinator.IsValidProduct(p)).ToList();
 
-                if (products.Any())
+                if (validProducts.Any())
                 {
                     _logger.LogInformation(
-                        "[Orchestrator] Estrategia {StrategyName} exitosa: {Count} productos extraídos",
+                        "[Orchestrator] Estrategia {StrategyName} exitosa: {Count} productos válidos extraídos",
                         strategy.StrategyName,
-                        products.Count
+                        validProducts.Count
                     );
-                    return products;
+                    context?.LogTracker?.AddLog("Orchestrator", details: $"Estrategia {strategy.StrategyName} exitosa: {validProducts.Count} productos extraídos");
+                    return validProducts;
                 }
                 else
                 {
                     _logger.LogInformation(
-                        "[Orchestrator] Estrategia {StrategyName} no extrajo productos, intentando siguiente...",
+                        "[Orchestrator] Estrategia {StrategyName} no extrajo productos válidos, intentando siguiente...",
                         strategy.StrategyName
                     );
+                    context?.LogTracker?.AddLog("Orchestrator", details: $"Estrategia {strategy.StrategyName} no extrajo productos válidos");
                 }
             }
             catch (Exception ex)
@@ -94,6 +102,7 @@ public class StrategyOrchestrator : IStrategyOrchestrator
                     "[Orchestrator] Error en estrategia {StrategyName}, intentando siguiente...",
                     strategy.StrategyName
                 );
+                context?.LogTracker?.AddLog("Orchestrator", error: $"Error en estrategia {strategy.StrategyName}: {ex.Message}");
             }
         }
 
@@ -103,44 +112,50 @@ public class StrategyOrchestrator : IStrategyOrchestrator
 
     private List<ScrapingStrategyDefinition> GetEnabledStrategies(SiteProfile site)
     {
-        // Si el sitio tiene estrategias configuradas, usarlas
+        var strategies = new List<ScrapingStrategyDefinition>();
+
         if (site.Strategies != null && site.Strategies.Any())
         {
-            var strategies = site.Strategies
+            strategies = site.Strategies
                 .Where(s => s.IsEnabled)
-                .OrderBy(s => s.Priority)
                 .ToList();
-
-            // Auto-inject List strategy si no está pero tenemos selectores de lista en el diccionario
-            var hasListStrategy = strategies.Any(s => s.StrategyName.Equals("List", StringComparison.OrdinalIgnoreCase));
-            bool hasListSelectors = false;
-            if (site.Selectors != null)
-            {
-                try
-                {
-                    var selectorsJson = System.Text.Json.JsonSerializer.Serialize(site.Selectors);
-                    var dict = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(selectorsJson);
-                    hasListSelectors = dict != null && dict.ContainsKey("productContainer") && !string.IsNullOrWhiteSpace(dict["productContainer"]);
-                }
-                catch { /* Ignore */ }
-            }
-            if (!hasListStrategy && hasListSelectors)
-            {
-                _logger.LogInformation("[Orchestrator] Inyectando ListStrategy automáticamente porque existen selectores de lista pero no estaba habilitada explícitamente.");
-                strategies.Add(new ScrapingStrategyDefinition { StrategyName = "List", Priority = 2, IsEnabled = true });
-                strategies = strategies.OrderBy(s => s.Priority).ToList();
-            }
-
-            return strategies;
         }
 
-        // Si no hay estrategias configuradas, usar un orden por defecto
-        _logger.LogInformation("[Orchestrator] Usando orden de estrategias por defecto");
-        return new List<ScrapingStrategyDefinition>
+        bool hasListSelectors = SelectorCombinator.GetDualSelector(site, "productContainer") != null ||
+                                SelectorCombinator.GetDualSelector(site, "productCard") != null;
+
+        var hasListStrategy = strategies.Any(s => s.StrategyName.Equals("List", StringComparison.OrdinalIgnoreCase));
+
+        if (!hasListStrategy && hasListSelectors)
         {
-            new ScrapingStrategyDefinition { StrategyName = "Direct", Priority = 1, IsEnabled = true },
-            new ScrapingStrategyDefinition { StrategyName = "List", Priority = 2, IsEnabled = true },
-            new ScrapingStrategyDefinition { StrategyName = "Families", Priority = 3, IsEnabled = true }
-        };
+            _logger.LogInformation("[Orchestrator] Inyectando ListStrategy automáticamente porque existen selectores de lista.");
+            strategies.Add(new ScrapingStrategyDefinition { StrategyName = "List", Priority = 1, IsEnabled = true });
+        }
+
+        // Always prioritize List strategy over Direct strategy if List strategy is enabled or list selectors exist
+        if (hasListSelectors || hasListStrategy)
+        {
+            foreach (var s in strategies)
+            {
+                if (s.StrategyName.Equals("List", StringComparison.OrdinalIgnoreCase))
+                    s.Priority = 1;
+                else if (s.StrategyName.Equals("Direct", StringComparison.OrdinalIgnoreCase))
+                    s.Priority = 2;
+                else if (s.StrategyName.Equals("Families", StringComparison.OrdinalIgnoreCase))
+                    s.Priority = 3;
+            }
+        }
+
+        if (!strategies.Any())
+        {
+            _logger.LogInformation("[Orchestrator] Usando orden de estrategias por defecto (List -> Direct)");
+            strategies = new List<ScrapingStrategyDefinition>
+            {
+                new() { StrategyName = "List", Priority = 1, IsEnabled = true },
+                new() { StrategyName = "Direct", Priority = 2, IsEnabled = true }
+            };
+        }
+
+        return strategies.OrderBy(s => s.Priority).ToList();
     }
 }

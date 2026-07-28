@@ -62,6 +62,9 @@ public class StagingProduct
     public Guid? FlashlyProductId { get; set; }
     public DateTime? FlashlySyncedAt { get; set; }
 
+    public string? Brand { get; set; }
+    public string? Category { get; set; }
+
     public DateTime? LastSeenAt { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }

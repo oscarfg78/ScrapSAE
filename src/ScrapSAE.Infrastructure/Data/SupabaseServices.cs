@@ -84,6 +84,8 @@ public class SupabaseStagingService : IStagingService
                     raw_data = product.RawData, 
                     ai_processed_json = product.AIProcessedJson, 
                     source_url = product.SourceUrl,
+                    brand = product.Brand,
+                    category = product.Category,
                     status = product.Status,
                     updated_at = DateTime.UtcNow 
                 };
@@ -97,6 +99,8 @@ public class SupabaseStagingService : IStagingService
                 existing.RawData = product.RawData;
                 existing.AIProcessedJson = product.AIProcessedJson;
                 existing.SourceUrl = product.SourceUrl;
+                existing.Brand = product.Brand;
+                existing.Category = product.Category;
                 existing.Status = product.Status;
                 existing.UpdatedAt = DateTime.UtcNow;
                 
@@ -136,7 +140,7 @@ public class SupabaseStagingService : IStagingService
         try
         {
             var response = await _httpClient.GetAsync(
-                $"{_baseUrl}/rest/v1/staging_products?status=eq.pending");
+                $"{_baseUrl}/rest/v1/staging_products?status=eq.pending&order=created_at.desc");
             
             response.EnsureSuccessStatusCode();
             

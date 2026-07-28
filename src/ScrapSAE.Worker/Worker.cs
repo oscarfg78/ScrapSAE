@@ -96,6 +96,8 @@ public class Worker : BackgroundService
                                     SkuSource = scrapedProduct.SkuSource,
                                     RawData = JsonSerializer.Serialize(scrapedProduct),
                                     SourceUrl = scrapedProduct.SourceUrl,
+                                    Brand = scrapedProduct.Brand,
+                                    Category = scrapedProduct.Category,
                                     Status = "pending"
                                 };
 
@@ -431,7 +433,7 @@ public class Worker : BackgroundService
 
         try
         {
-            var processed = await _aiProcessorService.ProcessProductAsync(rawData, cancellationToken);
+            var processed = await _aiProcessorService.ProcessProductAsync(rawData, cancellationToken: cancellationToken);
             
             // Merge logic: Ensure we don't lose data found by the scraper even if AI misses it or doesn't return it
             processed.Sku ??= scrapedProduct.SkuSource;

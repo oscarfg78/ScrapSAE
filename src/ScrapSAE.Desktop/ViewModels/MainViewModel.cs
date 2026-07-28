@@ -2950,7 +2950,7 @@ public sealed class MainViewModel : ViewModelBase
         }
 
         StagingProducts.Clear();
-        foreach (var item in products)
+        foreach (var item in products.OrderByDescending(p => p.CreatedAt))
         {
             StagingProducts.Add(CreateStagingProductUi(item));
         }

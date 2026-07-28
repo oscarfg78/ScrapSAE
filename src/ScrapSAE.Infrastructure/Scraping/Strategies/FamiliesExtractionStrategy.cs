@@ -28,6 +28,7 @@ public class FamiliesExtractionStrategy : IScrapingStrategy
         object pageObj,
         SiteProfile site,
         Guid executionId,
+        ScrapeExecutionContext? context = null,
         CancellationToken cancellationToken = default)
     {
         var page = (IPage)pageObj;
@@ -45,11 +46,13 @@ public class FamiliesExtractionStrategy : IScrapingStrategy
             if (string.IsNullOrEmpty(familyLinkSelector))
             {
                 _logger.LogWarning("[FamiliesStrategy] No se encontró selector de enlaces de familia");
+                context?.LogTracker?.AddLog("FamiliesExtraction", error: "No se encontró selector de enlaces de familia", count: 0);
                 return products;
             }
             
             var familyLinks = await page.QuerySelectorAllAsync(familyLinkSelector);
             _logger.LogInformation("[FamiliesStrategy] Encontrados {Count} enlaces de familia", familyLinks.Count);
+            context?.LogTracker?.AddLog("FamiliesExtraction", selector: familyLinkSelector, details: $"Encontrados {familyLinks.Count} enlaces de familia", count: familyLinks.Count);
             
             // Extraer URLs de las familias
             var familyUrls = new List<string>();

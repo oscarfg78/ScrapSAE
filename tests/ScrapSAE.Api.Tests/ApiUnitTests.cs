@@ -51,7 +51,7 @@ public class ApiUnitTests
 
         var aiProcessor = new Mock<IAIProcessorService>();
         aiProcessor
-            .Setup(x => x.ProcessProductAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.ProcessProductAsync(It.IsAny<string>(), It.IsAny<Action<string,string>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ProcessedProduct());
         var syncLogService = new SupabaseTableService<SyncLog>(client, "sync_logs");
         var categoryMappingService = new SupabaseTableService<CategoryMapping>(client, "category_mapping");
@@ -113,8 +113,8 @@ public class ApiUnitTests
         string? capturedRaw = null;
         var aiProcessor = new Mock<IAIProcessorService>();
         aiProcessor
-            .Setup(x => x.ProcessProductAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .Callback<string, CancellationToken>((raw, _) => capturedRaw = raw)
+            .Setup(x => x.ProcessProductAsync(It.IsAny<string>(), It.IsAny<Action<string,string>?>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Action<string,string>?, CancellationToken>((raw, _, _) => capturedRaw = raw)
             .ReturnsAsync(new ProcessedProduct());
 
         var syncLogService = new SupabaseTableService<SyncLog>(client, "sync_logs");
@@ -185,7 +185,7 @@ public class ApiUnitTests
 
         var aiProcessor = new Mock<IAIProcessorService>();
         aiProcessor
-            .Setup(x => x.ProcessProductAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.ProcessProductAsync(It.IsAny<string>(), It.IsAny<Action<string,string>?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("ai unavailable"));
 
         var syncLogService = new SupabaseTableService<SyncLog>(client, "sync_logs");

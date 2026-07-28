@@ -115,6 +115,21 @@ public sealed class ApiClient
         }
     }
 
+    public async Task<ExtractionRunReport?> RunDemoScrapingAsync(ExtractionExecutionRequest request)
+    {
+        try
+        {
+            var response = await _httpClient.PostAsJsonAsync("api/scraping/demo", request);
+            response.EnsureSuccessStatusCode();
+            return await response.Content.ReadFromJsonAsync<ExtractionRunReport>(_jsonOptions);
+        }
+        catch (Exception ex)
+        {
+            AppLogger.Error($"RunDemoScrapingAsync failed.", ex);
+            throw;
+        }
+    }
+
     public async Task<InspectUrlsResponse?> InspectUrlsAsync(Guid siteId, List<string> urls)
     {
         var body = new { urls };

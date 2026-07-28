@@ -68,6 +68,10 @@ builder.Services.AddSingleton<IStrategyOrchestrator>(sp =>
     return new StrategyOrchestrator(logger, strategies);
 });
 
+builder.Services.AddSingleton<IReconciliationEngine, ScrapSAE.Infrastructure.Scraping.Pipeline.ReconciliationEngine>();
+builder.Services.AddSingleton<IExecutionPlanner, ScrapSAE.Infrastructure.Scraping.Pipeline.ExecutionPlanner>();
+builder.Services.AddSingleton<IContributor, ScrapSAE.Infrastructure.Scraping.Pipeline.LegacyAdapterContributor>();
+
 builder.Services.AddSingleton(sp => new SupabaseTableService<SiteProfile>(sp.GetRequiredService<ISupabaseRestClient>(), "config_sites"));
 builder.Services.AddSingleton(sp => new SupabaseTableService<StagingProduct>(sp.GetRequiredService<ISupabaseRestClient>(), "staging_products"));
 builder.Services.AddSingleton(sp => new SupabaseTableService<CategoryMapping>(sp.GetRequiredService<ISupabaseRestClient>(), "category_mapping"));
@@ -274,6 +278,16 @@ MapCrud(app, "/api/execution-reports", "ExecutionReport",
     app.Services.GetRequiredService<SupabaseTableService<ExecutionReport>>(),
     entity => entity.CreatedAt = DateTime.UtcNow,
     _ => { });
+
+app.MapPost("/api/scraping/demo", async (
+    [Microsoft.AspNetCore.Mvc.FromBody] ScrapSAE.Core.Interfaces.ExtractionExecutionRequest request,
+    [Microsoft.AspNetCore.Mvc.FromServices] ScrapSAE.Core.Interfaces.IExecutionPlanner planner,
+    [Microsoft.AspNetCore.Mvc.FromServices] IEnumerable<ScrapSAE.Core.Interfaces.IContributor> contributors,
+    CancellationToken token) =>
+{
+    var report = await planner.ExecutePipelineAsync(request, contributors, token);
+    return Results.Ok(report);
+});
 
 app.MapPost("/api/scraping/run/{siteId:guid}", async (
     Guid siteId,

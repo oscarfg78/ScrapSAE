@@ -7,6 +7,7 @@ using ScrapSAE.Core.Entities;
 using ScrapSAE.Desktop.Infrastructure;
 using ScrapSAE.Desktop.Models;
 using ScrapSAE.Desktop.Services;
+using ScrapSAE.Core.Interfaces;
 
 namespace ScrapSAE.Desktop.ViewModels;
 
@@ -35,6 +36,11 @@ public class WizardSiteConfig
     public bool UseDirectStrategy { get; set; } = true;
     public bool UseListStrategy { get; set; } = false;
     public bool UseFamiliesStrategy { get; set; } = false;
+
+    // Additional Execution Config
+    public int MaxProductsTest { get; set; } = 5;
+    public string AuthUsername { get; set; } = string.Empty;
+    public string AuthPassword { get; set; } = string.Empty;
 }
 
 /// <summary>
@@ -56,6 +62,7 @@ public sealed class ProviderWizardViewModel : ViewModelBase
     // ─── Step 1 ────────────────────────────────────────────────────────────────
     private string _url = string.Empty;
     private string _productDetailUrl = string.Empty;
+    private ObservableCollection<string> _discoveredCandidateUrls = new();
     private string _brandOverride = string.Empty;
 
     // ─── Step 2 ────────────────────────────────────────────────────────────────
@@ -226,6 +233,12 @@ public sealed class ProviderWizardViewModel : ViewModelBase
         }
     }
 
+    public ObservableCollection<string> DiscoveredCandidateUrls
+    {
+        get => _discoveredCandidateUrls;
+        private set => SetField(ref _discoveredCandidateUrls, value);
+    }
+
     // Step 4
     public ObservableCollection<WizardScrapePreviewProduct> PreviewProducts
     {
@@ -291,6 +304,15 @@ public sealed class ProviderWizardViewModel : ViewModelBase
                 return;
             }
 
+            if (result.CandidateUrls != null && result.CandidateUrls.Any())
+            {
+                DiscoveredCandidateUrls.Clear();
+                foreach (var url in result.CandidateUrls)
+                {
+                    DiscoveredCandidateUrls.Add(url);
+                }
+            }
+
             if (!string.IsNullOrWhiteSpace(result.CandidateDetailUrl) && string.IsNullOrWhiteSpace(ProductDetailUrl))
             {
                 ProductDetailUrl = result.CandidateDetailUrl;
@@ -327,6 +349,26 @@ public sealed class ProviderWizardViewModel : ViewModelBase
         return Task.CompletedTask;
     }
 
+    private string GetBestSelectorString(DualSelector? descriptor)
+    {
+        if (descriptor == null) return string.Empty;
+        if (string.IsNullOrWhiteSpace(descriptor.Css) && string.IsNullOrWhiteSpace(descriptor.XPath)) return string.Empty;
+        
+        var parts = new List<string>();
+        
+        if (!string.IsNullOrWhiteSpace(descriptor.Css))
+        {
+            parts.Add($"css={descriptor.Css}");
+        }
+        
+        if (!string.IsNullOrWhiteSpace(descriptor.XPath))
+        {
+            parts.Add($"xpath={descriptor.XPath}");
+        }
+        
+        return string.Join(", ", parts);
+    }
+
     private void PopulateConfigFromAnalysis(PageAnalysisResult result)
     {
         // Derive a clean name from the URL domain
@@ -340,13 +382,13 @@ public sealed class ProviderWizardViewModel : ViewModelBase
             Name = name,
             BaseUrl = Url,
             StrategyType = result.StrategyType,
-            ProductContainerSelector = result.ProductContainerSelector?.ToString() ?? string.Empty,
-            ProductCardSelector = result.ProductCardSelector?.ToString() ?? string.Empty,
-            SkuSelector = result.SkuSelector?.ToString() ?? string.Empty,
-            NameSelector = result.NameSelector?.ToString() ?? string.Empty,
-            ImageSelector = result.ImageSelector?.ToString() ?? string.Empty,
-            PriceSelector = result.PriceSelector?.ToString() ?? string.Empty,
-            CharacteristicsSelector = result.CharacteristicsSelector?.ToString() ?? string.Empty,
+            ProductContainerSelector = GetBestSelectorString(result.ProductContainerSelector),
+            ProductCardSelector = GetBestSelectorString(result.ProductCardSelector),
+            SkuSelector = GetBestSelectorString(result.SkuSelector),
+            NameSelector = GetBestSelectorString(result.NameSelector),
+            ImageSelector = GetBestSelectorString(result.ImageSelector),
+            PriceSelector = GetBestSelectorString(result.PriceSelector),
+            CharacteristicsSelector = GetBestSelectorString(result.CharacteristicsSelector),
         };
 
         // Configure strategies from recommendations
@@ -430,76 +472,51 @@ public sealed class ProviderWizardViewModel : ViewModelBase
 
         try
         {
-            // Build a temporary SiteProfile and save it
-            var tempSite = BuildSiteProfile($"[TEMP] {WizardConfig.Name}");
-            var created = await _apiClient.CreateSiteAsync(tempSite);
-            if (created == null)
+            var req = new ExtractionExecutionRequest
             {
-                ErrorMessage = "No se pudo crear el proveedor temporal para la prueba.";
-                CurrentStep = 3;
-                return;
-            }
+                RunId = Guid.NewGuid().ToString(),
+                IsDemo = true,
+                ProductLimit = WizardConfig.MaxProductsTest,
+                ProviderConfig = new ProviderConfigurationSnapshot
+                {
+                    CatalogUrl = WizardConfig.BaseUrl,
+                    DetailUrl = ProductDetailUrl,
+                    AuthParameters = new Dictionary<string, string>
+                    {
+                        { "username", WizardConfig.AuthUsername },
+                        { "password", WizardConfig.AuthPassword }
+                    },
+                    Selectors = new SiteSelectors
+                    {
+                        ProductListSelector = WizardConfig.ProductContainerSelector,
+                        ProductCardClassPrefix = WizardConfig.ProductCardSelector,
+                        ProductLinkSelector = WizardConfig.ProductCardSelector, // Added this mapping
+                        SkuSelector = WizardConfig.SkuSelector,
+                        TitleSelector = WizardConfig.NameSelector,
+                        ImageSelector = WizardConfig.ImageSelector,
+                        PriceSelector = WizardConfig.PriceSelector,
+                        CharacteristicsSelector = WizardConfig.CharacteristicsSelector
+                    }
+                }
+            };
 
-            _tempSiteId = created.Id;
+            var scrapeResult = await _apiClient.RunDemoScrapingAsync(req);
 
-            // For the test run, override MaxProductsPerScrape to 5 so the scrape
-            // is fast and avoids unnecessary AI/processing credits. The final saved site uses 120.
-            var testSiteOverride = new SiteProfile();
-            testSiteOverride.Id = created.Id;
-            testSiteOverride.MaxProductsPerScrape = 5;
-            // Apply override so the API scrape respects the 5-product limit
-            var patchedForTest = BuildSiteProfile($"[TEMP] {WizardConfig.Name}");
-            patchedForTest.Id = created.Id;
-            patchedForTest.MaxProductsPerScrape = 5;
-            await _apiClient.UpdateSiteAsync(created.Id, patchedForTest);
-            ScrapeRunResult? scrapeResult = null;
-            try
-            {
-                scrapeResult = await _apiClient.RunScrapingAsync(
-                    created.Id,
-                    manualLogin: false,
-                    headless: true,
-                    keepBrowser: false);
-            }
-            catch (Exception ex)
-            {
-                ErrorMessage = $"Error durante el scrape de prueba: {ex.Message}";
-                // Don't go back — stay on step 4 showing empty result
-            }
-
-            // Build preview from staging products
-            var stagingProducts = await _apiClient.GetStagingProductsAsync();
-            var products = stagingProducts
-                .Where(p => p.SiteId == created.Id)
-                .Take(10)  // test preview capped at 10
-                .ToList();
-
-            TotalProductsFound = scrapeResult?.ProductsFound ?? products.Count;
+            TotalProductsFound = scrapeResult?.Products.Count ?? 0;
+            var products = scrapeResult?.Products.Take(WizardConfig.MaxProductsTest).ToList() ?? new List<ReconciledProduct>();
 
             foreach (var sp in products)
             {
-                ProcessedProduct? processed = null;
-                if (!string.IsNullOrWhiteSpace(sp.AIProcessedJson))
-                {
-                    try
-                    {
-                        processed = JsonSerializer.Deserialize<ProcessedProduct>(sp.AIProcessedJson,
-                            new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-                    }
-                    catch { }
-                }
-
                 var preview = new WizardScrapePreviewProduct
                 {
-                    Sku = sp.SkuSource ?? processed?.Sku,
-                    Name = processed?.Name ?? sp.SkuSource,
-                    ImageUrl = processed?.Images?.FirstOrDefault(),
-                    Price = processed?.Price?.ToString("F2"),
-                    CharacteristicsCount = processed?.Specifications?.Count ?? 0,
+                    Sku = sp.Sku,
+                    Name = sp.Title ?? sp.Sku,
+                    ImageUrl = sp.ImageUrl ?? sp.ImageUrls.FirstOrDefault(),
+                    Price = sp.Price?.ToString("F2"),
+                    CharacteristicsCount = sp.FieldProvenance.Count, // Approximation for preview
                     SourceUrl = sp.SourceUrl
                 };
 
-                // Determine found/missing fields
                 if (!string.IsNullOrWhiteSpace(preview.Sku)) preview.FoundFields.Add("SKU");
                 else preview.MissingFields.Add("SKU");
 
@@ -512,9 +529,6 @@ public sealed class ProviderWizardViewModel : ViewModelBase
                 if (!string.IsNullOrWhiteSpace(preview.Price)) preview.FoundFields.Add("Precio");
                 else preview.MissingFields.Add("Precio");
 
-                if (preview.CharacteristicsCount > 0) preview.FoundFields.Add("Características");
-                else preview.MissingFields.Add("Características");
-
                 PreviewProducts.Add(preview);
             }
 
@@ -523,7 +537,6 @@ public sealed class ProviderWizardViewModel : ViewModelBase
             if (PreviewProducts.Count == 0 && string.IsNullOrEmpty(ErrorMessage))
             {
                 ErrorMessage = "No se encontraron productos. Revisa los selectores en el paso anterior.";
-                // Stay on step 4 with empty state, allow going back
                 return;
             }
 
@@ -633,21 +646,17 @@ public sealed class ProviderWizardViewModel : ViewModelBase
 
     private SiteProfile BuildSiteProfile(string name)
     {
-        var selectors = new Dictionary<string, string>();
-        if (!string.IsNullOrWhiteSpace(WizardConfig.ProductContainerSelector))
-            selectors["productContainer"] = WizardConfig.ProductContainerSelector;
-        if (!string.IsNullOrWhiteSpace(WizardConfig.ProductCardSelector))
-            selectors["productCard"] = WizardConfig.ProductCardSelector;
-        if (!string.IsNullOrWhiteSpace(WizardConfig.SkuSelector))
-            selectors["sku"] = WizardConfig.SkuSelector;
-        if (!string.IsNullOrWhiteSpace(WizardConfig.NameSelector))
-            selectors["name"] = WizardConfig.NameSelector;
-        if (!string.IsNullOrWhiteSpace(WizardConfig.ImageSelector))
-            selectors["image"] = WizardConfig.ImageSelector;
-        if (!string.IsNullOrWhiteSpace(WizardConfig.PriceSelector))
-            selectors["price"] = WizardConfig.PriceSelector;
-        if (!string.IsNullOrWhiteSpace(WizardConfig.CharacteristicsSelector))
-            selectors["characteristics"] = WizardConfig.CharacteristicsSelector;
+        var siteSelectors = new SiteSelectors
+        {
+            ProductListSelector = string.IsNullOrWhiteSpace(WizardConfig.ProductContainerSelector) ? null : WizardConfig.ProductContainerSelector,
+            ProductCardClassPrefix = string.IsNullOrWhiteSpace(WizardConfig.ProductCardSelector) ? null : WizardConfig.ProductCardSelector,
+            ProductLinkSelector = string.IsNullOrWhiteSpace(WizardConfig.ProductCardSelector) ? null : WizardConfig.ProductCardSelector,
+            SkuSelector = string.IsNullOrWhiteSpace(WizardConfig.SkuSelector) ? null : WizardConfig.SkuSelector,
+            TitleSelector = string.IsNullOrWhiteSpace(WizardConfig.NameSelector) ? null : WizardConfig.NameSelector,
+            ImageSelector = string.IsNullOrWhiteSpace(WizardConfig.ImageSelector) ? null : WizardConfig.ImageSelector,
+            PriceSelector = string.IsNullOrWhiteSpace(WizardConfig.PriceSelector) ? null : WizardConfig.PriceSelector,
+            CharacteristicsSelector = string.IsNullOrWhiteSpace(WizardConfig.CharacteristicsSelector) ? null : WizardConfig.CharacteristicsSelector
+        };
 
         var strategies = new List<ScrapingStrategyDefinition>();
         if (WizardConfig.UseDirectStrategy)
@@ -663,17 +672,19 @@ public sealed class ProviderWizardViewModel : ViewModelBase
             strategies.Insert(0, new ScrapingStrategyDefinition { StrategyName = "Shopify", Priority = 1, IsEnabled = true });
         }
 
+        var strategyType = strategies.Any() ? "Orchestrated" : WizardConfig.StrategyType;
+
         return new SiteProfile
         {
             Id = Guid.NewGuid(),
             Name = name,
             BaseUrl = WizardConfig.BaseUrl,
-            StrategyType = WizardConfig.StrategyType,
+            StrategyType = strategyType,
             IsActive = true,
             RequiresLogin = false,
             MaxProductsPerScrape = 120,
             BrandOverride = string.IsNullOrWhiteSpace(BrandOverride) ? null : BrandOverride.Trim(),
-            Selectors = selectors.Count > 0 ? selectors : null,
+            Selectors = siteSelectors,
             SecondarySelectors = AnalysisResult?.SecondarySelectors ?? new Dictionary<string, List<string>>(),
             Strategies = strategies,
             CreatedAt = DateTime.UtcNow,

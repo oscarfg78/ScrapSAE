@@ -321,3 +321,86 @@ public class RescrapeJobLogResponse
     public string? DetailsJson { get; set; }
     public DateTime CreatedAt { get; set; }
 }
+
+#region Extraction Pipeline Contracts
+
+public enum SelectorType { Css, XPath, Attribute }
+
+public class SelectorDescriptor 
+{
+    public SelectorType Type { get; set; }
+    public string Expression { get; set; } = string.Empty;
+    public string? TargetAttribute { get; set; }
+    public decimal Confidence { get; set; } = 1.0m;
+}
+
+public enum ContributorStatus { NotApplicable, NoData, Partial, Success, RecoverableFailure, FatalFailure }
+
+public class ContributorDescriptor 
+{
+    public string Id { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string Type { get; set; } = string.Empty;
+    public List<string> Capabilities { get; set; } = new();
+}
+
+public class ContributorResult 
+{
+    public string ContributorId { get; set; } = string.Empty;
+    public ContributorStatus Status { get; set; }
+    public List<ProductObservation> Observations { get; set; } = new();
+    public List<string> CandidateUrls { get; set; } = new();
+    public string? ErrorMessage { get; set; }
+    public int DurationMs { get; set; }
+}
+
+public class ProductObservation 
+{
+    public string Field { get; set; } = string.Empty;
+    public string? RawValue { get; set; }
+    public string? NormalizedValue { get; set; }
+    public SelectorDescriptor? ProvenanceSelector { get; set; }
+    public string ContributorId { get; set; } = string.Empty;
+    public string SourceUrl { get; set; } = string.Empty;
+    public decimal Confidence { get; set; } = 1.0m;
+    public DateTime Timestamp { get; set; } = DateTime.UtcNow;
+}
+
+public class ReconciledProduct 
+{
+    public string? Sku { get; set; }
+    public string? Title { get; set; }
+    public string? Description { get; set; }
+    public decimal? Price { get; set; }
+    public string? Currency { get; set; }
+    public string? Brand { get; set; }
+    public string? ImageUrl { get; set; }
+    public List<string> ImageUrls { get; set; } = new();
+    public int? Stock { get; set; }
+    public string SourceUrl { get; set; } = string.Empty;
+    
+    public Dictionary<string, ProductObservation> FieldProvenance { get; set; } = new();
+    public List<string> Warnings { get; set; } = new();
+}
+
+public enum QualityGateResult { Pass, PassWithWarnings, Fail }
+
+public class QualityGateEvaluation
+{
+    public QualityGateResult Result { get; set; }
+    public List<string> Reasons { get; set; } = new();
+}
+
+public class ExtractionRunReport 
+{
+    public string RunId { get; set; } = Guid.NewGuid().ToString();
+    public bool IsDemo { get; set; }
+    public List<ContributorResult> ContributorResults { get; set; } = new();
+    public List<ReconciledProduct> Products { get; set; } = new();
+    public QualityGateEvaluation QualityGate { get; set; } = new();
+    public DateTime StartedAt { get; set; }
+    public DateTime CompletedAt { get; set; }
+    public int TotalDurationMs { get; set; }
+}
+
+#endregion

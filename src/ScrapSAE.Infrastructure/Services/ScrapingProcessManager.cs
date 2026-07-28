@@ -237,7 +237,7 @@ public class ScrapingProcessManager
 
     public async Task WaitForHydrationAsync(IPage page, CancellationToken cancellationToken)
     {
-        await WaitForHydrationAsync(page, async (msg) => _logger.LogWarning(msg));
+        await WaitForHydrationAsync(page, (msg) => { _logger.LogWarning(msg); return Task.CompletedTask; });
     }
 
     private async Task<bool> IsProductPageAsync(IPage page)

@@ -1,0 +1,37 @@
+flowchart LR
+    W["Wizard"] --> A["PageAnalysisResult\ncatálogo + detalle"]
+    A --> D["Dictionary string/string\nDualSelector serializado"]
+    D --> T["SiteProfile temporal\nMax=5"]
+    T --> API["Endpoint normal de scraping"]
+    API --> R["ScrapingRunner"]
+    R --> EV["Variables de entorno globales\nheadless/login/learned URLs"]
+    R --> DS["Descubrimiento denominado aditivo"]
+    DS --> EV
+    R --> K{"StrategyType keyed"}
+    K -->|"Shopify"| SH["Shopify API\nprimera variante/imagen"]
+    K -->|"Generic"| PW["PlaywrightScrapingService"]
+    EV --> PW
+    PW -->|"learned/direct URLs presentes"| ER["Retorno temprano\nScrapeDirectUrls"]
+    PW -->|"sin pool"| OR["Orchestrator\nfirst non-empty"]
+    OR --> DI["Direct"]
+    OR --> LI["List"]
+    OR --> FA["Families"]
+    PW -->|"sin resultado"| LG["Fallback legacy\nheurísticas y casos nominales"]
+    SH --> PP["Procesamiento IA + enriquecimiento"]
+    ER --> PP
+    DI --> PP
+    LI --> PP
+    FA --> PP
+    LG --> PP
+    PP --> ST["Staging\nupsert SiteId + SKU"]
+    PP --> AU["Post-análisis\nmutación automática"]
+    AU --> T
+    ST --> Q["Consulta global y filtro del wizard"]
+    Q --> PV["Preview parcial\nhasta 10"]
+
+    classDef risk fill:#fef2f2,stroke:#b91c1c,color:#0f172a;
+    classDef control fill:#e7f0ff,stroke:#1d4ed8,color:#0f172a;
+    classDef data fill:#fff7ed,stroke:#c2410c,color:#0f172a;
+    class W,A,PV control;
+    class EV,ER,OR,LG,AU,ST risk;
+    class D,T,DS,K,SH,PW,DI,LI,FA,PP,Q data;

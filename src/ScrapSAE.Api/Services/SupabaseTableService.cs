@@ -11,9 +11,12 @@ public sealed class SupabaseTableService<T> where T : class
         _tableName = tableName;
     }
 
-    public async Task<IReadOnlyList<T>> GetAllAsync()
+    public async Task<IReadOnlyList<T>> GetAllAsync(string? orderBy = "created_at.desc")
     {
-        var result = await _client.GetAsync<T>($"{_tableName}?select=*");
+        var query = string.IsNullOrWhiteSpace(orderBy)
+            ? $"{_tableName}?select=*"
+            : $"{_tableName}?select=*&order={orderBy}";
+        var result = await _client.GetAsync<T>(query);
         return result;
     }
 

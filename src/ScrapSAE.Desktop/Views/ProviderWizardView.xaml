@@ -403,6 +403,26 @@
                         <CheckBox IsChecked="{Binding WizardConfig.UseFamiliesStrategy}" Content="Families (categorías)"/>
                     </StackPanel>
 
+                    <!-- Test Config -->
+                    <TextBlock Text="Configuración de prueba (Demo)" Style="{StaticResource SectionHeader}" Margin="0,12,0,8"/>
+                    
+                    <StackPanel Margin="0,0,0,12" Visibility="{Binding DiscoveredCandidateUrls.Count, Converter={StaticResource CountToVisibility}}">
+                        <TextBlock Style="{StaticResource FieldLabel}" Text="URL de detalle a probar"/>
+                        <ComboBox ItemsSource="{Binding DiscoveredCandidateUrls}"
+                                  Text="{Binding ProductDetailUrl, UpdateSourceTrigger=PropertyChanged}"
+                                  IsEditable="True"
+                                  FontSize="14" Padding="6" />
+                        <TextBlock Margin="0,4,0,0" FontSize="11" Foreground="#9CA3AF">
+                            URLs candidatas descubiertas durante el análisis. Puedes seleccionar una o escribir otra.
+                        </TextBlock>
+                    </StackPanel>
+                    
+                    <StackPanel Margin="0,0,0,12">
+                        <TextBlock Style="{StaticResource FieldLabel}" Text="Límite de productos a extraer"/>
+                        <TextBox Text="{Binding WizardConfig.MaxProductsTest, UpdateSourceTrigger=PropertyChanged}" 
+                                 Style="{StaticResource Input}" Width="120" HorizontalAlignment="Left"/>
+                    </StackPanel>
+
                     <!-- Validation message -->
                     <Border Background="#FEF2F2" BorderBrush="#DC2626" BorderThickness="1"
                             CornerRadius="6" Padding="10,6"
@@ -429,7 +449,7 @@
                         <!-- Demo Mode badge -->
                         <Border Background="#F3E8FF" BorderBrush="#9333EA" BorderThickness="1"
                                 CornerRadius="4" Padding="8,4" Margin="0,0,0,12" HorizontalAlignment="Left">
-                            <TextBlock Text="Demo Mode: Información Simulada (5 productos máx)" Foreground="#7E22CE" FontSize="12" FontWeight="SemiBold"/>
+                            <TextBlock Text="{Binding WizardConfig.MaxProductsTest, StringFormat='Demo Mode: Información Simulada ({0} productos máx)'}" Foreground="#7E22CE" FontSize="12" FontWeight="SemiBold"/>
                         </Border>
 
                         <!-- Product count banner -->

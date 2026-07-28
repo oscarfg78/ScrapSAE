@@ -41,6 +41,11 @@ public sealed record ScrapeExecutionContext
     public int? MaxProductsOverride { get; init; } = null;
 
     /// <summary>
+    /// Tracker para recolectar logs de ejecución detallados.
+    /// </summary>
+    public ScrapingLogTracker? LogTracker { get; init; } = null;
+
+    /// <summary>
     /// Contexto de ejecución por defecto (headless, sin login manual).
     /// </summary>
     public static ScrapeExecutionContext Default => new();

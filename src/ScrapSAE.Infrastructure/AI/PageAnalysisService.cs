@@ -79,6 +79,7 @@ public sealed class PageAnalysisService : IPageAnalysisService, IAsyncDisposable
             var truncatedHtml = ExtractDomSkeleton(html);
 
             string? truncatedProductDetailHtml = null;
+            List<string>? candidateLinks = null;
             if (!string.IsNullOrWhiteSpace(productDetailUrl))
             {
                 _logger.LogInformation("[PageAnalysis] Descargando HTML de detalle de producto: {Url}", productDetailUrl);
@@ -87,8 +88,9 @@ public sealed class PageAnalysisService : IPageAnalysisService, IAsyncDisposable
             }
             else
             {
-                // Attempt to discover a candidate link
-                var candidateLink = FindCandidateProductLink(html, catalogUrl);
+                // Attempt to discover candidate links
+                candidateLinks = FindCandidateProductLinks(html, catalogUrl);
+                var candidateLink = candidateLinks.FirstOrDefault();
                 if (candidateLink != null)
                 {
                     _logger.LogInformation("[PageAnalysis] Descubierto enlace candidato: {Url}", candidateLink);
@@ -100,7 +102,16 @@ public sealed class PageAnalysisService : IPageAnalysisService, IAsyncDisposable
 
             // 3. Send to GPT for analysis
             var result = await AnalyzeWithGptAsync(catalogUrl, productDetailUrl, truncatedHtml, truncatedProductDetailHtml, pageTitle, cts.Token);
-            result.CandidateDetailUrl = productDetailUrl;
+            
+            if (candidateLinks != null && candidateLinks.Any())
+            {
+                result.CandidateUrls = candidateLinks;
+                result.CandidateDetailUrl = productDetailUrl ?? candidateLinks.First();
+            }
+            else
+            {
+                result.CandidateDetailUrl = productDetailUrl;
+            }
             
             if (isShopify)
             {
@@ -248,17 +259,20 @@ public sealed class PageAnalysisService : IPageAnalysisService, IAsyncDisposable
         return bodyHtml[..MaxHtmlChars];
     }
 
-    private static string? FindCandidateProductLink(string catalogHtml, string baseUrl)
+    private static List<string> FindCandidateProductLinks(string catalogHtml, string baseUrl)
     {
         var parser = new AngleSharp.Html.Parser.HtmlParser();
         var document = parser.ParseDocument(catalogHtml);
         var baseUri = new Uri(baseUrl);
+        var candidates = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         // Find links that might be product details (e.g., have an image inside, or have long hrefs, or specific paths)
         var links = document.QuerySelectorAll("a[href]");
         
         foreach (var link in links)
         {
+            if (candidates.Count >= 20) break;
+
             var href = link.GetAttribute("href");
             if (string.IsNullOrWhiteSpace(href) || href.StartsWith("#") || href.StartsWith("javascript:")) continue;
 
@@ -275,13 +289,13 @@ public sealed class PageAnalysisService : IPageAnalysisService, IAsyncDisposable
                     // Filter out external links
                     if (absoluteUri.Host == baseUri.Host)
                     {
-                        return absoluteUri.ToString();
+                        candidates.Add(absoluteUri.ToString());
                     }
                 }
                 catch { }
             }
         }
-        return null;
+        return candidates.ToList();
     }
 
     // ─────────────────────────────────────────────────────────────────────────

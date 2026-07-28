@@ -593,10 +593,10 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
             // Intenta ejecutar las estrategias configuradas en SiteProfile.Strategies
             try
             {
-                var orchestratedProducts = await _strategyOrchestrator.ExecuteStrategiesAsync(page, site, site.Id, cancellationToken);
+                var orchestratedProducts = await _strategyOrchestrator.ExecuteStrategiesAsync(page, site, site.Id, executionContext, cancellationToken);
                 if (orchestratedProducts != null && orchestratedProducts.Any())
                 {
-                    await LogStepAsync(site.Id, "success", $"Scraping orquestado completado. Total: {orchestratedProducts.Count}", new { count = orchestratedProducts.Count });
+                    await LogStepAsync(site.Id, "success", $"Scraping orquestado completado. Total: {orchestratedProducts.Count()}", new { count = orchestratedProducts.Count() });
                     return orchestratedProducts;
                 }
                 else
@@ -4780,18 +4780,26 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
         {
             try
             {
+                _logger.LogInformation("[Playwright] Probando selector de contenedor de productos: {Selector}", selector);
                 var elements = await page.QuerySelectorAllAsync(selector);
                 if (elements.Count > 0)
                 {
+                    _logger.LogInformation("[Playwright] ¡Éxito! Se encontraron {Count} elementos usando el selector: {Selector}", elements.Count, selector);
                     return (elements, selector);
                 }
+                else
+                {
+                    _logger.LogInformation("[Playwright] No se encontraron elementos para el selector: {Selector}", selector);
+                }
             }
-            catch
+            catch (Exception ex)
             {
+                _logger.LogWarning("[Playwright] Selector {Selector} falló con error: {Message}", selector, ex.Message);
                 // Ignore and try next selector.
             }
         }
 
+        _logger.LogWarning("[Playwright] Agotados todos los selectores de contenedores. No se encontró ninguno válido.");
         return (Array.Empty<IElementHandle>(), string.Empty);
     }
 
@@ -4990,6 +4998,16 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
 
     private static string BuildClassPrefixSelector(string prefix)
     {
+        if (string.IsNullOrWhiteSpace(prefix)) return prefix;
+        
+        // If it looks like a full selector (e.g., from the Wizard AI), pass it through
+        if (prefix.StartsWith("css=", StringComparison.OrdinalIgnoreCase) || 
+            prefix.StartsWith("xpath=", StringComparison.OrdinalIgnoreCase) ||
+            prefix.Contains("=") || prefix.Contains("/") || prefix.StartsWith(".") || prefix.StartsWith("#") || prefix.Contains(",")) 
+        {
+            return prefix;
+        }
+
         var safe = prefix.Replace("'", "\\'");
         return $"[class^='{safe}'], [class*=' {safe}'], [class*='{safe}-']";
     }
@@ -5264,9 +5282,7 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
                             }
                         }
 
-                        if (expandRelated &&
-                            (url.Contains("festo.com", StringComparison.OrdinalIgnoreCase) ||
-                             (site.Name != null && site.Name.Contains("Festo", StringComparison.OrdinalIgnoreCase))))
+                        if (expandRelated)
                         {
                             _logger.LogInformation("URL directa -> iniciando expansión de relacionados.");
                             var queue = new Queue<string>();
@@ -6427,12 +6443,19 @@ private async Task SimulateReadingAsync(IPage page)
         // Pausa antes de navegar
         await HumanDelayAsync(1500, 3000);
         
-        // Navegar
-        await page.GotoAsync(url, new PageGotoOptions 
-        { 
-            WaitUntil = waitUntil,
-            Timeout = 90000
-        });
+        try
+        {
+            // Navegar
+            await page.GotoAsync(url, new PageGotoOptions 
+            { 
+                WaitUntil = waitUntil,
+                Timeout = 90000
+            });
+        }
+        catch (TimeoutException)
+        {
+            _logger.LogWarning($"Timeout esperando {waitUntil} en {url}. Asumiendo página cargada y continuando.");
+        }
         
         // Pausa después de cargar
         await HumanDelayAsync(2500, 5000);

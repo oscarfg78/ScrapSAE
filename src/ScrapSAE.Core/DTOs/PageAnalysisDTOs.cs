@@ -86,6 +86,9 @@ public class PageAnalysisResult
     /// <summary>URL del detalle de producto descubierta automáticamente (si aplica)</summary>
     public string? CandidateDetailUrl { get; set; }
 
+    /// <summary>Lista de URLs candidatas de detalle de producto descubiertas en la página analizada</summary>
+    public List<string> CandidateUrls { get; set; } = new();
+
     /// <summary>Idioma detectado del contenido</summary>
     public string? DetectedLanguage { get; set; }
 

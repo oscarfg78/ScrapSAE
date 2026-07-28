@@ -122,7 +122,7 @@ public class ExtensionEndpointTests
     {
         var aiProcessor = new Mock<IAIProcessorService>();
         aiProcessor
-            .Setup(x => x.ProcessProductAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.ProcessProductAsync(It.IsAny<string>(), It.IsAny<Action<string,string>?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("IA no disponible"));
 
         var products = new List<ScrapedProduct>
@@ -144,7 +144,7 @@ public class ExtensionEndpointTests
             try
             {
                 var rawJson = JsonSerializer.Serialize(scraped);
-                var processed = await aiProcessor.Object.ProcessProductAsync(rawJson, CancellationToken.None);
+                var processed = await aiProcessor.Object.ProcessProductAsync(rawJson, null, CancellationToken.None);
                 if (processed != null) processedProducts.Add(processed);
             }
             catch
@@ -186,11 +186,11 @@ public class ExtensionEndpointTests
 
         var aiProcessor = new Mock<IAIProcessorService>();
         aiProcessor
-            .Setup(x => x.ProcessProductAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.ProcessProductAsync(It.IsAny<string>(), It.IsAny<Action<string,string>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(aiResult);
 
         var rawJson = JsonSerializer.Serialize(new ScrapedProduct { SkuSource = "SKU-AI", Title = "Producto" });
-        var result = await aiProcessor.Object.ProcessProductAsync(rawJson, CancellationToken.None);
+        var result = await aiProcessor.Object.ProcessProductAsync(rawJson, null, CancellationToken.None);
 
         result.Should().NotBeNull();
         result!.Sku.Should().Be("SKU-AI");
@@ -230,6 +230,25 @@ public class ExtensionEndpointTests
         layouts.Should().HaveCount(1);
         layouts[0].Name.Should().Be("Layout Festo");
         layouts[0].IsDefault.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task UpdateLayout_ShouldWork()
+    {
+        await Task.CompletedTask;
+        var client = new FakeSupabaseRestClient();
+        var layoutId = Guid.NewGuid().ToString();
+
+        var layout = new UserLayoutDto
+        {
+            Id = layoutId,
+            UserId = "user-456",
+            Name = "Layout a actualizar",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+
+        await client.PostAsync("user_layouts", layout);
     }
 
     [Fact]

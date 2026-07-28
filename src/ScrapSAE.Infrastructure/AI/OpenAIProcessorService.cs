@@ -44,12 +44,14 @@ public sealed class OpenAIProcessorService : IAIProcessorService
         _httpClient.Timeout = TimeSpan.FromSeconds(Math.Max(5, timeoutSeconds));
     }
 
-    public async Task<ProcessedProduct> ProcessProductAsync(string rawData, CancellationToken cancellationToken = default)
+    public async Task<ProcessedProduct> ProcessProductAsync(string rawData, Action<string, string>? onLog = null, CancellationToken cancellationToken = default)
     {
         EnsureEnabled();
 
         var request = BuildProcessedProductRequest(rawData);
+        var requestJsonStr = JsonSerializer.Serialize(request, JsonOptions);
         var responseJson = await SendRequestAsync(request, cancellationToken);
+        onLog?.Invoke(requestJsonStr, responseJson.RootElement.ToString());
         var outputText = ExtractOutputText(responseJson);
         if (string.IsNullOrWhiteSpace(outputText))
         {
@@ -197,7 +199,7 @@ public sealed class OpenAIProcessorService : IAIProcessorService
 
         if (TryExtractScreenshot(rawData, out var screenshotBase64, out var sanitizedText))
         {
-            return BuildProcessedProductVisionRequest(systemPrompt, sanitizedText, screenshotBase64!);
+            return BuildProcessedProductVisionRequest(systemPrompt, sanitizedText ?? string.Empty, screenshotBase64!);
         }
 
         var userPrompt = $"Datos crudos del producto:\n{rawData}";

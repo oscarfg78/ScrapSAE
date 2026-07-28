@@ -118,7 +118,7 @@ public interface IAIProcessorService
     /// <summary>
     /// Procesa datos crudos de un producto y los estructura
     /// </summary>
-    Task<ProcessedProduct> ProcessProductAsync(string rawData, CancellationToken cancellationToken = default);
+    Task<ProcessedProduct> ProcessProductAsync(string rawData, Action<string, string>? onLog = null, CancellationToken cancellationToken = default);
     
     /// <summary>
     /// Sugiere una categoría de SAE para un producto
@@ -286,6 +286,7 @@ public interface IScrapingStrategy
         object page,
         SiteProfile site,
         Guid executionId,
+        ScrapeExecutionContext? context = null,
         CancellationToken cancellationToken = default);
 }
 
@@ -301,6 +302,7 @@ public interface IStrategyOrchestrator
         object page,
         SiteProfile site,
         Guid executionId,
+        ScrapeExecutionContext? context = null,
         CancellationToken cancellationToken = default);
 }
 

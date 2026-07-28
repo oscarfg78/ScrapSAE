@@ -304,7 +304,8 @@ public sealed class ScrapingRunner
             ProductsCreated = created,
             ProductsUpdated = updated,
             ProductsSkipped = skipped,
-            DurationMs = duration
+            DurationMs = duration,
+            ExecutionLogs = context?.LogTracker?.Logs.ToList()
         };
     }
 
@@ -353,7 +354,7 @@ public sealed class ScrapingRunner
                 : await EnrichScrapedProductAsync(siteId, item, existing, cancellationToken);
             ApplyProviderBrandAndCategory(effectiveProduct, site.Name);
             var rawSnapshotJson = SerializeScrapedSnapshot(effectiveProduct);
-            var incomingAiJson = await BuildAiJsonAsync(effectiveProduct, isTempSite, cancellationToken) ?? "{}";
+            var incomingAiJson = await BuildAiJsonAsync(effectiveProduct, isTempSite, null, cancellationToken) ?? "{}";
             var pdfSpecs = isTempSite ? null : await ExtractPdfSpecificationsAsync(effectiveProduct, cancellationToken);
             var finalAiJson = MergeConservative(existing?.AIProcessedJson, incomingAiJson, pdfSpecs ?? new Dictionary<string, string>());
             var sourceUrl = ResolvePreferredSourceUrl(effectiveProduct, existing?.SourceUrl);
@@ -374,6 +375,8 @@ public sealed class ScrapingRunner
                     raw_data = rawSnapshotJson,
                     ai_processed_json = finalAiJson,
                     source_url = sourceUrl,
+                    brand = effectiveProduct.Brand,
+                    category = effectiveProduct.Category,
                     updated_at = DateTime.UtcNow,
                     last_seen_at = DateTime.UtcNow
                 };
@@ -408,6 +411,8 @@ public sealed class ScrapingRunner
             SkuSource = item.SkuSource,
             RawData = SerializeScrapedSnapshot(item),
             SourceUrl = item.SourceUrl,
+            Brand = item.Brand,
+            Category = item.Category,
             Status = "pending",
             Attempts = 0,
             LastSeenAt = DateTime.UtcNow,
@@ -438,7 +443,7 @@ public sealed class ScrapingRunner
         }
     }
 
-    private async Task<string?> BuildAiJsonAsync(ScrapedProduct scrapedProduct, bool skipAi, CancellationToken cancellationToken)
+    private async Task<string?> BuildAiJsonAsync(ScrapedProduct scrapedProduct, bool skipAi, ScrapeExecutionContext? context, CancellationToken cancellationToken)
     {
         var rawData = SerializeScrapedSnapshot(scrapedProduct);
 
@@ -450,7 +455,12 @@ public sealed class ScrapingRunner
 
         try
         {
-            var processed = await _aiProcessorService.ProcessProductAsync(rawData, cancellationToken);
+            var processed = await _aiProcessorService.ProcessProductAsync(rawData, (prompt, response) => 
+            {
+                context?.LogTracker?.AddLog("AIExtraction", details: $"Prompt sent to AI, Received JSON.", error: "", count: 1);
+                context?.LogTracker?.AddLog("AIPrompt", details: prompt);
+                context?.LogTracker?.AddLog("AIResponse", details: response);
+            }, cancellationToken);
             processed.Sku ??= scrapedProduct.SkuSource;
             processed.Name = string.IsNullOrWhiteSpace(processed.Name) ? (scrapedProduct.Title ?? string.Empty) : processed.Name;
             processed.Description = string.IsNullOrWhiteSpace(processed.Description) ? (scrapedProduct.Description ?? string.Empty) : processed.Description;
@@ -477,7 +487,7 @@ public sealed class ScrapingRunner
 
     public Task<string?> BuildAiJsonFromScrapedAsync(ScrapedProduct scrapedProduct, CancellationToken cancellationToken)
     {
-        return BuildAiJsonAsync(scrapedProduct, skipAi: false, cancellationToken);
+        return BuildAiJsonAsync(scrapedProduct, skipAi: false, null!, cancellationToken);
     }
 
     private static string SerializeScrapedSnapshot(ScrapedProduct scrapedProduct)
@@ -1411,17 +1421,31 @@ public sealed class ScrapingRunner
 
         foreach (var imageUrl in scrapedProduct.ImageUrls ?? Enumerable.Empty<string>())
         {
-            if (!string.IsNullOrWhiteSpace(imageUrl) &&
-                !processed.Images.Contains(imageUrl, StringComparer.OrdinalIgnoreCase))
+            var cleanUrl = SanitizeUrl(imageUrl);
+            if (!string.IsNullOrWhiteSpace(cleanUrl) &&
+                !processed.Images.Contains(cleanUrl, StringComparer.OrdinalIgnoreCase))
             {
-                processed.Images.Add(imageUrl.Trim());
+                processed.Images.Add(cleanUrl);
             }
         }
 
-        if (!string.IsNullOrWhiteSpace(scrapedProduct.ImageUrl) &&
-            !processed.Images.Contains(scrapedProduct.ImageUrl, StringComparer.OrdinalIgnoreCase))
+        if (!string.IsNullOrWhiteSpace(scrapedProduct.ImageUrl))
         {
-            processed.Images.Insert(0, scrapedProduct.ImageUrl.Trim());
+            var cleanUrl = SanitizeUrl(scrapedProduct.ImageUrl);
+            if (!string.IsNullOrWhiteSpace(cleanUrl) &&
+                !processed.Images.Contains(cleanUrl, StringComparer.OrdinalIgnoreCase))
+            {
+                processed.Images.Insert(0, cleanUrl);
+            }
+        }
+
+        if (processed.Images != null && processed.Images.Count > 0)
+        {
+            processed.Images = processed.Images
+                .Select(SanitizeUrl)
+                .Where(u => !string.IsNullOrWhiteSpace(u))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
         }
 
         var existingAttachmentUrls = new HashSet<string>(
@@ -1573,4 +1597,13 @@ public sealed class ScrapingRunner
         "currency",
         "source_url"
     };
+
+    public static string SanitizeUrl(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return string.Empty;
+        var clean = url.Replace("\0", string.Empty).Replace("\u0000", string.Empty).Trim();
+        clean = System.Text.RegularExpressions.Regex.Replace(clean, @"\x00+26", "&");
+        clean = System.Text.RegularExpressions.Regex.Replace(clean, @"\\u000026", "&");
+        return clean;
+    }
 }
