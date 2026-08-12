@@ -109,6 +109,84 @@ public class FlashlySyncService : IFlashlySyncService
         return result;
     }
 
+    public async Task<FlashlySyncResult> SyncPayloadsAsync(IEnumerable<FlashlyProductSyncPayload> payloads, CancellationToken cancellationToken = default)
+    {
+        var input = payloads
+            .Where(p => !string.IsNullOrWhiteSpace(p.SourceSku))
+            .ToList();
+
+        if (input.Count == 0)
+        {
+            return new FlashlySyncResult
+            {
+                Success = true,
+                Message = "No valid product payloads to sync."
+            };
+        }
+
+        _logger.LogInformation("Starting Flashly sync for {Count} payloads", input.Count);
+
+        var batchSize = _syncOptions.BatchSize <= 0 ? 50 : _syncOptions.BatchSize;
+        var created = 0;
+        var updated = 0;
+        var allErrors = new List<FlashlySyncError>();
+        string? lastJobId = null;
+
+        foreach (var batch in Batch(input, batchSize))
+        {
+            var requestBody = new { products = batch };
+            var requestJson = JsonSerializer.Serialize(requestBody, JsonOptions);
+
+            var response = await ExecuteWithRetriesAsync(async () =>
+            {
+                using var content = new StringContent(requestJson, Encoding.UTF8, "application/json");
+                return await _httpClient.PostAsync("/api/v1/products/sync", content, cancellationToken);
+            }, cancellationToken);
+
+            var payloadStr = await response.Content.ReadAsStringAsync(cancellationToken);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogError("Flashly payload sync failed with status {StatusCode}. Body: {Body}", response.StatusCode, payloadStr);
+                return new FlashlySyncResult
+                {
+                    Success = false,
+                    Message = $"HTTP {(int)response.StatusCode}: {payloadStr}",
+                    Errors = allErrors
+                };
+            }
+
+            var parsed = JsonSerializer.Deserialize<FlashlySyncResponse>(payloadStr, JsonOptions);
+            if (parsed?.Results != null)
+            {
+                created += parsed.Results.Created;
+                updated += parsed.Results.Updated;
+                if (parsed.Results.Errors.Count > 0)
+                {
+                    allErrors.AddRange(parsed.Results.Errors);
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(parsed?.JobId))
+            {
+                lastJobId = parsed.JobId;
+            }
+        }
+
+        var result = new FlashlySyncResult
+        {
+            Success = true,
+            Created = created,
+            Updated = updated,
+            Errors = allErrors,
+            JobId = lastJobId,
+            Message = $"Flashly payload sync completed. Created: {created}, Updated: {updated}, Errors: {allErrors.Count}."
+        };
+
+        _logger.LogInformation(result.Message);
+        return result;
+    }
+
     private async Task<HttpResponseMessage> ExecuteWithRetriesAsync(
         Func<Task<HttpResponseMessage>> operation,
         CancellationToken cancellationToken)

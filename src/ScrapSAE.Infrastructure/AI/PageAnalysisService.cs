@@ -395,24 +395,16 @@ public sealed class PageAnalysisService : IPageAnalysisService, IAsyncDisposable
         {
             model = _model,
             temperature = 0.1,
-            input = new object[]
+            messages = new object[]
             {
-                new
-                {
-                    role = "system",
-                    content = new object[] { new { type = "input_text", text = systemPrompt } }
-                },
-                new
-                {
-                    role = "user",
-                    content = new object[] { new { type = "input_text", text = userPrompt } }
-                }
+                new { role = "system", content = systemPrompt },
+                new { role = "user", content = userPrompt }
             },
-            text = new
+            response_format = new
             {
-                format = new
+                type = "json_schema",
+                json_schema = new
                 {
-                    type = "json_schema",
                     name = "page_analysis_result",
                     strict = true,
                     schema = new
@@ -497,7 +489,7 @@ public sealed class PageAnalysisService : IPageAnalysisService, IAsyncDisposable
 
     private async Task<JsonDocument> SendRequestAsync(object request, CancellationToken cancellationToken)
     {
-        using var message = new HttpRequestMessage(HttpMethod.Post, "responses");
+        using var message = new HttpRequestMessage(HttpMethod.Post, "chat/completions");
         message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
         message.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
         message.Content = new StringContent(
@@ -521,28 +513,39 @@ public sealed class PageAnalysisService : IPageAnalysisService, IAsyncDisposable
     {
         var root = document.RootElement;
 
+        if (root.TryGetProperty("choices", out var choices) &&
+            choices.ValueKind == JsonValueKind.Array &&
+            choices.GetArrayLength() > 0)
+        {
+            var firstChoice = choices[0];
+            if (firstChoice.TryGetProperty("message", out var message) &&
+                message.TryGetProperty("content", out var content) &&
+                content.ValueKind == JsonValueKind.String)
+            {
+                return content.GetString();
+            }
+        }
+
         if (root.TryGetProperty("output_text", out var outputText) && outputText.ValueKind == JsonValueKind.String)
         {
             return outputText.GetString();
         }
 
-        if (!root.TryGetProperty("output", out var outputItems) || outputItems.ValueKind != JsonValueKind.Array)
+        if (root.TryGetProperty("output", out var outputItems) && outputItems.ValueKind == JsonValueKind.Array)
         {
-            return null;
-        }
-
-        foreach (var item in outputItems.EnumerateArray())
-        {
-            if (!item.TryGetProperty("content", out var content) || content.ValueKind != JsonValueKind.Array)
+            foreach (var item in outputItems.EnumerateArray())
             {
-                continue;
-            }
-
-            foreach (var contentItem in content.EnumerateArray())
-            {
-                if (contentItem.TryGetProperty("text", out var text) && text.ValueKind == JsonValueKind.String)
+                if (!item.TryGetProperty("content", out var content) || content.ValueKind != JsonValueKind.Array)
                 {
-                    return text.GetString();
+                    continue;
+                }
+
+                foreach (var contentItem in content.EnumerateArray())
+                {
+                    if (contentItem.TryGetProperty("text", out var text) && text.ValueKind == JsonValueKind.String)
+                    {
+                        return text.GetString();
+                    }
                 }
             }
         }

@@ -6,6 +6,7 @@ namespace ScrapSAE.Core.Interfaces;
 public interface IFlashlySyncService
 {
     Task<FlashlySyncResult> SyncProductsAsync(IEnumerable<StagingProduct> products, CancellationToken cancellationToken = default);
+    Task<FlashlySyncResult> SyncPayloadsAsync(IEnumerable<FlashlyProductSyncPayload> payloads, CancellationToken cancellationToken = default);
 }
 
 public interface ICsvExportService

@@ -1,0 +1,240 @@
+<Window x:Class="ScrapSAE.Desktop.Views.FlashlySyncWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:ScrapSAE.Desktop.Infrastructure"
+        mc:Ignorable="d"
+        Title="Sincronización de Productos con Flashly" Height="780" Width="1040"
+        WindowStartupLocation="CenterOwner" Background="#1E1E2E" Foreground="White"
+        FontFamily="Segoe UI">
+
+    <Window.Resources>
+        <local:BoolToVisibilityConverter x:Key="BoolToVis" />
+        <local:BoolToInverseVisibilityConverter x:Key="InverseBoolToVis" />
+
+        <Style x:Key="StatCardStyle" TargetType="Border">
+            <Setter Property="Background" Value="#252538" />
+            <Setter Property="BorderBrush" Value="#3A3A5C" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Padding" Value="12,8" />
+            <Setter Property="Margin" Value="0,0,10,0" />
+        </Style>
+
+        <Style x:Key="DarkButtonStyle" TargetType="Button">
+            <Setter Property="Background" Value="#3A3A5C" />
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="14,8" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" CornerRadius="6" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="AccentButtonStyle" TargetType="Button" BasedOn="{StaticResource DarkButtonStyle}">
+            <Setter Property="Background" Value="#7C3AED" />
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <StackPanel Grid.Row="0" Margin="0,0,0,15">
+            <TextBlock Text="⚡ Sincronización de Productos con Flashly" FontSize="22" FontWeight="Bold" Foreground="#DDD6FE" />
+            <TextBlock Text="Valida y exporta los productos procesados a la API de Flashly (/api/v1/products/sync)." FontSize="13" Foreground="#94A3B8" Margin="0,4,0,0" />
+        </StackPanel>
+
+        <!-- Stats Bar -->
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,15">
+            <Border Style="{StaticResource StatCardStyle}">
+                <StackPanel>
+                    <TextBlock Text="Total" FontSize="11" Foreground="#94A3B8" />
+                    <TextBlock Text="{Binding TotalCount}" FontSize="18" FontWeight="Bold" Foreground="White" />
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource StatCardStyle}">
+                <StackPanel>
+                    <TextBlock Text="Seleccionados" FontSize="11" Foreground="#94A3B8" />
+                    <TextBlock Text="{Binding SelectedCount}" FontSize="18" FontWeight="Bold" Foreground="#60A5FA" />
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource StatCardStyle}">
+                <StackPanel>
+                    <TextBlock Text="Válidos" FontSize="11" Foreground="#94A3B8" />
+                    <TextBlock Text="{Binding ValidCount}" FontSize="18" FontWeight="Bold" Foreground="#34D399" />
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource StatCardStyle}">
+                <StackPanel>
+                    <TextBlock Text="Con Errores" FontSize="11" Foreground="#94A3B8" />
+                    <TextBlock Text="{Binding InvalidCount}" FontSize="18" FontWeight="Bold" Foreground="#F87171" />
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource StatCardStyle}">
+                <StackPanel>
+                    <TextBlock Text="Sincronizados" FontSize="11" Foreground="#94A3B8" />
+                    <TextBlock Text="{Binding SyncedCount}" FontSize="18" FontWeight="Bold" Foreground="#A78BFA" />
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource StatCardStyle}">
+                <StackPanel>
+                    <TextBlock Text="Fallidos" FontSize="11" Foreground="#94A3B8" />
+                    <TextBlock Text="{Binding FailedCount}" FontSize="18" FontWeight="Bold" Foreground="#FCA5A5" />
+                </StackPanel>
+            </Border>
+        </StackPanel>
+
+        <!-- Action Bar -->
+        <Grid Grid.Row="2" Margin="0,0,0,10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <CheckBox Grid.Column="0" Content="Seleccionar Todos" IsChecked="{Binding SelectAll}" 
+                      VerticalAlignment="Center" Foreground="#CBD5E1" FontWeight="SemiBold" Margin="0,0,15,0" />
+
+            <StackPanel Grid.Column="2" Orientation="Horizontal">
+                <Button Content="Revalidar" Command="{Binding ValidateAllCommand}" Style="{StaticResource DarkButtonStyle}" Margin="0,0,10,0" />
+                <Button Content="Exportar Reporte" Command="{Binding ExportReportCommand}" Style="{StaticResource DarkButtonStyle}" Margin="0,0,10,0" />
+                <Button Content="🚀 Iniciar Sincronización" Command="{Binding StartSyncCommand}" Style="{StaticResource AccentButtonStyle}" />
+            </StackPanel>
+        </Grid>
+
+        <!-- Data Grid -->
+        <Border Grid.Row="3" Background="#181825" BorderBrush="#3A3A5C" BorderThickness="1" CornerRadius="8">
+            <DataGrid ItemsSource="{Binding Items}" AutoGenerateColumns="False" CanUserAddRows="False"
+                      Background="Transparent" RowBackground="#1E1E2E" AlternatingRowBackground="#252538"
+                      Foreground="White" GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#2E2E44"
+                      HeadersVisibility="Column" SelectionMode="Single">
+                <DataGrid.ColumnHeaderStyle>
+                    <Style TargetType="DataGridColumnHeader">
+                        <Setter Property="Background" Value="#252538" />
+                        <Setter Property="Foreground" Value="#DDD6FE" />
+                        <Setter Property="FontWeight" Value="SemiBold" />
+                        <Setter Property="Padding" Value="10,8" />
+                        <Setter Property="BorderThickness" Value="0,0,0,1" />
+                        <Setter Property="BorderBrush" Value="#3A3A5C" />
+                    </Style>
+                </DataGrid.ColumnHeaderStyle>
+                <DataGrid.Columns>
+                    <!-- Select -->
+                    <DataGridCheckBoxColumn Header="Sel" Binding="{Binding IsSelected, UpdateSourceTrigger=PropertyChanged}" Width="40" />
+
+                    <!-- SKU -->
+                    <DataGridTextColumn Header="SKU Origen" Binding="{Binding SourceSku}" Width="120" IsReadOnly="True" />
+
+                    <!-- Name -->
+                    <DataGridTextColumn Header="Nombre del Producto" Binding="{Binding Name}" Width="*" IsReadOnly="True" />
+
+                    <!-- Price -->
+                    <DataGridTextColumn Header="Precio" Binding="{Binding PurchasePrice, StringFormat='{}{0:C}'}" Width="100" IsReadOnly="True" />
+
+                    <!-- Currency -->
+                    <DataGridTextColumn Header="Moneda" Binding="{Binding Currency}" Width="70" IsReadOnly="True" />
+
+                    <!-- Categories -->
+                    <DataGridTextColumn Header="Categorías" Binding="{Binding CategorySummary}" Width="140" IsReadOnly="True" />
+
+                    <!-- Validation Status -->
+                    <DataGridTemplateColumn Header="Validación" Width="110">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding ValidationStatusLabel}" ToolTip="{Binding ValidationErrors}"
+                                           FontWeight="SemiBold" VerticalAlignment="Center">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Foreground" Value="#34D399" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsValid}" Value="False">
+                                                    <Setter Property="Foreground" Value="#F87171" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+
+                    <!-- Sync Status -->
+                    <DataGridTemplateColumn Header="Estado Sync" Width="130">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding SyncStatusLabel}" ToolTip="{Binding SyncErrorMessage}"
+                                           FontWeight="SemiBold" VerticalAlignment="Center">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Foreground" Value="#94A3B8" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding SyncStatus}" Value="Sincronizado">
+                                                    <Setter Property="Foreground" Value="#A78BFA" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding SyncStatus}" Value="Sincronizando...">
+                                                    <Setter Property="Foreground" Value="#60A5FA" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding SyncStatus}" Value="Error">
+                                                    <Setter Property="Foreground" Value="#F87171" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+                </DataGrid.Columns>
+            </DataGrid>
+        </Border>
+
+        <!-- Progress Bar -->
+        <ProgressBar Grid.Row="4" Height="6" Value="{Binding ProgressPercent}" 
+                     Foreground="#7C3AED" Background="#252538" BorderThickness="0" Margin="0,10,0,10"
+                     Visibility="{Binding IsSyncing, Converter={StaticResource BoolToVis}}" />
+
+        <!-- Log Console -->
+        <Border Grid.Row="5" Background="#181825" BorderBrush="#3A3A5C" BorderThickness="1" CornerRadius="6"
+                Margin="0,0,0,10" Padding="10" Height="130">
+            <TextBox Text="{Binding LogText, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
+                     Background="Transparent" BorderThickness="0" Foreground="#A6E22E" FontFamily="Consolas" FontSize="12" />
+        </Border>
+
+        <!-- Footer -->
+        <Grid Grid.Row="6" Margin="0,5,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <TextBlock Grid.Column="0" Text="{Binding StatusMessage}" Foreground="#CBD5E1" VerticalAlignment="Center" />
+            <StackPanel Grid.Column="1" Orientation="Horizontal">
+                <Button Content="Copiar todo" Command="{Binding CopyLogCommand}" Style="{StaticResource DarkButtonStyle}" Width="110" Margin="0,0,10,0" />
+                <Button Content="Cerrar" Command="{Binding CloseCommand}" Style="{StaticResource DarkButtonStyle}" Width="100" />
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>

@@ -13,6 +13,17 @@ namespace ScrapSAE.Core.DTOs;
 public sealed record ScrapeExecutionContext
 {
     /// <summary>
+    /// Indica si el proceso debe utilizar Inteligencia Artificial durante la extracción de información.
+    /// Default: true
+    /// </summary>
+    public bool UseAI { get; init; } = true;
+
+    /// <summary>
+    /// Callback opcional que se invoca inmediatamente al finalizar la extracción de cada producto individual.
+    /// </summary>
+    public Func<ScrapedProduct, Task>? OnProductExtractedAsync { get; init; } = null;
+
+    /// <summary>
     /// Indica si el browser debe ejecutarse en modo headless (sin ventana visible).
     /// Default: true
     /// </summary>

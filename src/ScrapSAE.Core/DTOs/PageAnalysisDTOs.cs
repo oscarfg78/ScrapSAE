@@ -10,6 +10,12 @@ public class PageAnalysisRequest
 
     /// <summary>URL opcional de un detalle de producto para forzar el análisis de campos de detalle en esta URL</summary>
     public string? ProductDetailUrl { get; set; }
+
+    /// <summary>Selectores del proveedor base para comparación y refinamiento híbrido</summary>
+    public string? BaselineSelectorsJson { get; set; }
+
+    /// <summary>Contexto histórico previo de análisis GPT para reintentos</summary>
+    public string? PreviousContextJson { get; set; }
 }
 
 /// <summary>

@@ -46,12 +46,15 @@ public class ListExtractionStrategy : IScrapingStrategy
 
             IReadOnlyList<IElementHandle> productElements = Array.Empty<IElementHandle>();
 
+            var waitTimeout = (itemSelector?.Css != null && itemSelector.Css.Contains("snize")) ||
+                              (containerSelector?.Css != null && containerSelector.Css.Contains("snize")) ? 15000 : 12000;
+
             // 1. Try querying productCard selector directly on the page first
             if (itemSelector != null)
             {
                 if (!string.IsNullOrWhiteSpace(itemSelector.Css))
                 {
-                    try { await page.WaitForSelectorAsync(itemSelector.Css, new PageWaitForSelectorOptions { Timeout = 4000 }); } catch { }
+                    try { await page.WaitForSelectorAsync(itemSelector.Css, new PageWaitForSelectorOptions { Timeout = waitTimeout }); } catch { }
                 }
                 productElements = await SelectorCombinator.QuerySelectorAllResilientAsync(page, itemSelector, context?.LogTracker);
             }
@@ -61,7 +64,7 @@ public class ListExtractionStrategy : IScrapingStrategy
             {
                 if (!string.IsNullOrWhiteSpace(containerSelector.Css))
                 {
-                    try { await page.WaitForSelectorAsync(containerSelector.Css, new PageWaitForSelectorOptions { Timeout = 4000 }); } catch { }
+                    try { await page.WaitForSelectorAsync(containerSelector.Css, new PageWaitForSelectorOptions { Timeout = waitTimeout }); } catch { }
                 }
 
                 var container = await SelectorCombinator.QuerySelectorResilientAsync(page, containerSelector, context?.LogTracker);

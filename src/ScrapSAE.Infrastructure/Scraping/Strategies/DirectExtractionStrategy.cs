@@ -43,6 +43,14 @@ public class DirectExtractionStrategy : IScrapingStrategy
         {
             _logger.LogInformation("[DirectStrategy] Intentando extracción directa en {Url}", page.Url);
             
+            // Scroll hacia la parte inferior y footer para asegurar la hidratación de imágenes y especificaciones lazy-loaded
+            try
+            {
+                await page.EvaluateAsync("window.scrollTo(0, document.body.scrollHeight);");
+                await Task.Delay(500, cancellationToken);
+            }
+            catch { }
+
             var product = await ExtractProductFromCurrentPageAsync(page, site, executionId, context);
             
             if (SelectorCombinator.IsValidDirectProduct(product))

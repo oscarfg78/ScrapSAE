@@ -37,6 +37,9 @@ namespace ScrapSAE.Api.Services;
             existing.RawData = product.RawData;
             existing.AIProcessedJson = product.AIProcessedJson;
             existing.SourceUrl = product.SourceUrl;
+            existing.Brand = product.Brand;
+            existing.Category = product.Category;
+            existing.LastSeenAt = DateTime.UtcNow;
             existing.UpdatedAt = DateTime.UtcNow;
             existing.Status = product.Status; // Mantener estado o resetear a pending? User dijo "actualizar"
             await SafeUpdateAsync(existing.Id, existing);

@@ -1,0 +1,86 @@
+<Window x:Class="ScrapSAE.Desktop.Views.ConcurrentWizard.ProductDetailsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:ScrapSAE.Desktop.Infrastructure"
+        mc:Ignorable="d"
+        Title="Detalles del Producto Extraído" Height="650" Width="850"
+        WindowStartupLocation="CenterOwner" Background="#1E1E2E" Foreground="White"
+        FontFamily="Segoe UI">
+    
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <StackPanel Grid.Row="0" Margin="0,0,0,15">
+            <TextBlock Text="{Binding Title}" FontSize="22" FontWeight="Bold" Foreground="#DDD6FE" TextWrapping="Wrap" />
+            <TextBlock Text="{Binding Sku, StringFormat='SKU: {0}'}" FontSize="14" Foreground="#94A3B8" Margin="0,4,0,0" />
+            
+            <!-- Warning -->
+            <Border Background="#3D2A1C" BorderBrush="#F59E0B" BorderThickness="1" CornerRadius="6" Padding="10" Margin="0,10,0,0"
+                    Visibility="{Binding HasWarning, Converter={x:Static local:BoolToVisibilityConverter.Instance}}">
+                <TextBlock Text="{Binding WarningMessage}" Foreground="#FCD34D" TextWrapping="Wrap" />
+            </Border>
+        </StackPanel>
+
+        <!-- Content -->
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="0,0,10,0">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="280" />
+                    <ColumnDefinition Width="20" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <!-- Left Column: Image and Prices -->
+                <StackPanel Grid.Column="0">
+                    <Border Background="#2A2A3E" BorderBrush="#3A3A5C" BorderThickness="1" CornerRadius="8" Padding="10" MinHeight="250">
+                        <Image Source="{Binding FirstImageUrl}" Stretch="Uniform" />
+                    </Border>
+                    
+                    <Border Background="#252538" BorderBrush="#3A3A5C" BorderThickness="1" CornerRadius="6" Padding="15" Margin="0,15,0,0">
+                        <StackPanel>
+                            <TextBlock Text="Precios" FontSize="16" FontWeight="SemiBold" Foreground="#DDD6FE" Margin="0,0,0,10"/>
+                            
+                            <TextBlock Text="Costo Proveedor:" Foreground="#94A3B8" />
+                            <TextBlock Text="{Binding SupplierCost, StringFormat='{}{0:C}'}" FontSize="16" FontWeight="Bold" Margin="0,0,0,8" />
+                            
+                            <TextBlock Text="Precio Venta Estimado:" Foreground="#94A3B8" />
+                            <TextBlock Text="{Binding RetailPrice, StringFormat='{}{0:C}'}" FontSize="20" FontWeight="Bold" Foreground="#10B981" />
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+
+                <!-- Right Column: Description & Attributes -->
+                <StackPanel Grid.Column="2">
+                    <!-- Description -->
+                    <TextBlock Text="Descripción" FontSize="16" FontWeight="SemiBold" Foreground="#DDD6FE" Margin="0,0,0,8"/>
+                    <Border Background="#252538" BorderBrush="#3A3A5C" BorderThickness="1" CornerRadius="6" Padding="15" Margin="0,0,0,20">
+                        <TextBlock Text="{Binding Description}" TextWrapping="Wrap" Foreground="#CBD5E1" 
+                                   LineHeight="22" />
+                    </Border>
+
+                    <!-- Attributes -->
+                    <TextBlock Text="Atributos / Características (JSON)" FontSize="16" FontWeight="SemiBold" Foreground="#DDD6FE" Margin="0,0,0,8"/>
+                    <Border Background="#181825" BorderBrush="#3A3A5C" BorderThickness="1" CornerRadius="6" Padding="15">
+                        <TextBox Text="{Binding AttributesJson, Mode=OneWay}" 
+                                 IsReadOnly="True" TextWrapping="Wrap" 
+                                 Background="Transparent" BorderThickness="0" Foreground="#A6E22E" FontFamily="Consolas" />
+                    </Border>
+                </StackPanel>
+            </Grid>
+        </ScrollViewer>
+
+        <!-- Footer -->
+        <Border Grid.Row="2" BorderThickness="0,1,0,0" BorderBrush="#3A3A5C" Margin="0,15,0,0" Padding="0,15,0,0">
+            <Button Content="Cerrar" Width="100" HorizontalAlignment="Right"
+                    Background="#3A3A5C" Foreground="White" BorderThickness="0" Padding="8"
+                    Click="CloseButton_Click" Cursor="Hand" />
+        </Border>
+    </Grid>
+</Window>

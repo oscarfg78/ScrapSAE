@@ -35,9 +35,19 @@ public sealed class ApiClient
     /// Analiza la URL de un proveedor con IA para detectar la estructura del catálogo de productos.
     /// Puede tomar hasta 30 segundos (descarga HTML con Playwright + análisis GPT).
     /// </summary>
-    public async Task<PageAnalysisResult?> AnalyzePageAsync(string url, string? productDetailUrl = null)
+    public async Task<PageAnalysisResult?> AnalyzePageAsync(
+        string url, 
+        string? productDetailUrl = null, 
+        string? baselineSelectorsJson = null, 
+        string? previousContextJson = null)
     {
-        var body = new PageAnalysisRequest { Url = url, ProductDetailUrl = productDetailUrl };
+        var body = new PageAnalysisRequest 
+        { 
+            Url = url, 
+            ProductDetailUrl = productDetailUrl,
+            BaselineSelectorsJson = baselineSelectorsJson,
+            PreviousContextJson = previousContextJson
+        };
         try
         {
             var response = await _httpClient.PostAsJsonAsync("api/sites/analyze", body);
@@ -45,7 +55,30 @@ public sealed class ApiClient
             {
                 var content = await response.Content.ReadAsStringAsync();
                 AppLogger.Error($"POST api/sites/analyze failed. Status={(int)response.StatusCode}. Body={content}");
-                return null;
+
+                string errorMessage = $"Error ({(int)response.StatusCode}) al analizar la página.";
+                try
+                {
+                    using var doc = JsonDocument.Parse(content);
+                    if (doc.RootElement.TryGetProperty("detail", out var detailProp) && !string.IsNullOrWhiteSpace(detailProp.GetString()))
+                    {
+                        errorMessage = detailProp.GetString()!;
+                    }
+                    else if (doc.RootElement.TryGetProperty("error", out var errorProp) && !string.IsNullOrWhiteSpace(errorProp.GetString()))
+                    {
+                        errorMessage = errorProp.GetString()!;
+                    }
+                    else if (doc.RootElement.TryGetProperty("title", out var titleProp) && !string.IsNullOrWhiteSpace(titleProp.GetString()))
+                    {
+                        errorMessage = titleProp.GetString()!;
+                    }
+                }
+                catch
+                {
+                    if (!string.IsNullOrWhiteSpace(content)) errorMessage = content;
+                }
+
+                throw new InvalidOperationException(errorMessage);
             }
             return await response.Content.ReadFromJsonAsync<PageAnalysisResult>(_jsonOptions);
         }
@@ -301,6 +334,154 @@ public sealed class ApiClient
                 Message = ex.Message
             };
         }
+    }
+
+    public async Task<ApiOperationResult> SendFlashlyPayloadAsync(FlashlyProductSyncPayload payload)
+    {
+        return await SendFlashlyPayloadsAsync(new List<FlashlyProductSyncPayload> { payload });
+    }
+
+    public async Task<ApiOperationResult> SendFlashlyPayloadsAsync(List<FlashlyProductSyncPayload> payloads)
+    {
+        var path = "api/online-store/sync-payloads";
+        try
+        {
+            var batchRequest = new FlashlyProductSyncBatchRequest { Products = payloads };
+            var response = await _httpClient.PostAsJsonAsync(path, batchRequest, _jsonOptions);
+            if (response.IsSuccessStatusCode)
+            {
+                return new ApiOperationResult { Success = true };
+            }
+
+            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                var settings = await TryGetSettingsAsync();
+                var targetUrl = settings?.OnlineStoreBaseUrl;
+                var apiKey = settings?.OnlineStoreApiKey;
+
+                if (!string.IsNullOrWhiteSpace(targetUrl) && !string.IsNullOrWhiteSpace(apiKey))
+                {
+                    var directResult = await SendDirectToFlashlyAsync(targetUrl, apiKey, payloads);
+                    if (directResult.Success)
+                    {
+                        return directResult;
+                    }
+                }
+            }
+
+            var message = await ExtractErrorMessageAsync(response);
+            AppLogger.Error($"POST {path} failed. Status={(int)response.StatusCode}. Message={message}");
+            return new ApiOperationResult
+            {
+                Success = false,
+                StatusCode = (int)response.StatusCode,
+                Message = message
+            };
+        }
+        catch (Exception ex)
+        {
+            var settings = await TryGetSettingsAsync();
+            var targetUrl = settings?.OnlineStoreBaseUrl;
+            var apiKey = settings?.OnlineStoreApiKey;
+
+            if (!string.IsNullOrWhiteSpace(targetUrl) && !string.IsNullOrWhiteSpace(apiKey))
+            {
+                var directResult = await SendDirectToFlashlyAsync(targetUrl, apiKey, payloads);
+                if (directResult.Success)
+                {
+                    return directResult;
+                }
+                return directResult;
+            }
+
+            AppLogger.Error($"POST {path} exception.", ex);
+            return new ApiOperationResult
+            {
+                Success = false,
+                Message = ex.Message
+            };
+        }
+    }
+
+    private async Task<ApiOperationResult> SendDirectToFlashlyAsync(string targetUrl, string apiKey, List<FlashlyProductSyncPayload> payloads)
+    {
+        try
+        {
+            if (!Uri.TryCreate(targetUrl.Trim(), UriKind.Absolute, out var uri))
+            {
+                return new ApiOperationResult { Success = false, Message = "URL de tienda en línea inválida." };
+            }
+
+            var syncPath = "/api/v1/products/sync";
+            var builder = new UriBuilder(uri)
+            {
+                Path = syncPath,
+                Query = string.Empty
+            };
+
+            using var directClient = new HttpClient { Timeout = TimeSpan.FromMinutes(2) };
+            directClient.DefaultRequestHeaders.Remove("X-API-Key");
+            directClient.DefaultRequestHeaders.Add("X-API-Key", apiKey);
+
+            var json = JsonSerializer.Serialize(new { products = payloads }, _jsonOptions);
+            using var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+
+            var response = await directClient.PostAsync(builder.Uri, content);
+            var responseText = await response.Content.ReadAsStringAsync();
+
+            if (response.IsSuccessStatusCode)
+            {
+                return new ApiOperationResult { Success = true };
+            }
+
+            return new ApiOperationResult
+            {
+                Success = false,
+                StatusCode = (int)response.StatusCode,
+                Message = $"HTTP {(int)response.StatusCode}: {responseText}"
+            };
+        }
+        catch (Exception ex)
+        {
+            return new ApiOperationResult
+            {
+                Success = false,
+                Message = $"Error de conexión directa a Flashly: {ex.Message}"
+            };
+        }
+    }
+
+    private async Task<AppSettingsDto?> TryGetSettingsAsync()
+    {
+        try
+        {
+            var settings = await GetSettingsAsync();
+            if (settings != null && !string.IsNullOrWhiteSpace(settings.OnlineStoreBaseUrl))
+                return settings;
+        }
+        catch { }
+
+        try
+        {
+            var candidatePaths = new[]
+            {
+                System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "appsettings.runtime.json"),
+                System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "src", "ScrapSAE.Api", "appsettings.runtime.json"),
+                System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "appsettings.runtime.json")
+            };
+
+            foreach (var runtimePath in candidatePaths)
+            {
+                if (System.IO.File.Exists(runtimePath))
+                {
+                    var json = await System.IO.File.ReadAllTextAsync(runtimePath);
+                    return JsonSerializer.Deserialize<AppSettingsDto>(json, _jsonOptions);
+                }
+            }
+        }
+        catch { }
+
+        return null;
     }
 
     public async Task<AppSettingsDto?> GetSettingsAsync()

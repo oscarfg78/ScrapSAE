@@ -25,6 +25,7 @@ public class ProviderConfigurationSnapshot
     public string ProviderId { get; set; } = string.Empty;
     public string CatalogUrl { get; set; } = string.Empty;
     public string? DetailUrl { get; set; }
+    public string StrategyType { get; set; } = "Generic";
     public SiteSelectors Selectors { get; set; } = new();
     public Dictionary<string, string> AuthParameters { get; set; } = new();
 }

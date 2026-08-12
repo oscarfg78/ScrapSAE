@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -371,9 +371,9 @@ public class StagingProductUi : ViewModelBase
         }
         else
         {
-            var images = new JsonArray(value);
+            var images = new JsonArray { System.Text.Json.Nodes.JsonValue.Create(value) };
             node["Images"] = images;
-            node["images"] = new JsonArray(value);
+            node["images"] = new JsonArray { System.Text.Json.Nodes.JsonValue.Create(value) };
         }
 
         _product.AIProcessedJson = node.ToJsonString();

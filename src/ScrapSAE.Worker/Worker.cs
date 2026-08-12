@@ -78,17 +78,43 @@ public class Worker : BackgroundService
                             var delayBeforeScraping = _random.Next(3000, 8000);
                             await Task.Delay(delayBeforeScraping, stoppingToken);
 
-                            var products = await _scrapingService.ScrapeAsync(site, null, stoppingToken);
                             int savedCount = 0;
+                            var scrapeContext = ScrapeExecutionContext.Default with
+                            {
+                                OnProductExtractedAsync = async (scrapedProduct) =>
+                                {
+                                    if (site.MaxProductsPerScrape > 0 && savedCount >= site.MaxProductsPerScrape)
+                                    {
+                                        _logger.LogInformation("Reached max products limit ({Max}) for site {SiteName}", site.MaxProductsPerScrape, site.Name);
+                                        return;
+                                    }
 
+                                    var stagingProduct = new StagingProduct
+                                    {
+                                        SiteId = site.Id,
+                                        SkuSource = scrapedProduct.SkuSource,
+                                        RawData = JsonSerializer.Serialize(scrapedProduct),
+                                        SourceUrl = scrapedProduct.SourceUrl,
+                                        Brand = scrapedProduct.Brand,
+                                        Category = scrapedProduct.Category,
+                                        Status = "pending"
+                                    };
+
+                                    stagingProduct.AIProcessedJson = await BuildAiJsonAsync(scrapedProduct, stoppingToken);
+
+                                    await _stagingService.UpsertProductAsync(stagingProduct);
+                                    savedCount++;
+                                    _logger.LogInformation("Persistencia inmediata de registro [{Count}]: SKU {Sku} de {SiteName}", savedCount, scrapedProduct.SkuSource, site.Name);
+                                }
+                            };
+
+                            var products = await _scrapingService.ScrapeAsync(site, scrapeContext, stoppingToken);
+
+                            // Fallback: Si la estrategia no invocó el callback, persistir los productos restantes
                             foreach (var scrapedProduct in products)
                             {
-                                // Check if we've reached the max products limit for this site
                                 if (site.MaxProductsPerScrape > 0 && savedCount >= site.MaxProductsPerScrape)
-                                {
-                                    _logger.LogInformation("Reached max products limit ({Max}) for site {SiteName}", site.MaxProductsPerScrape, site.Name);
                                     break;
-                                }
 
                                 var stagingProduct = new StagingProduct
                                 {
@@ -102,16 +128,8 @@ public class Worker : BackgroundService
                                 };
 
                                 stagingProduct.AIProcessedJson = await BuildAiJsonAsync(scrapedProduct, stoppingToken);
-
                                 await _stagingService.UpsertProductAsync(stagingProduct);
                                 savedCount++;
-
-                                // Small random delay between saving products (100-500ms) to avoid hammering the database
-                                if (savedCount < products.Count() && (site.MaxProductsPerScrape == 0 || savedCount < site.MaxProductsPerScrape))
-                                {
-                                    var delayBetweenProducts = _random.Next(100, 500);
-                                    await Task.Delay(delayBetweenProducts, stoppingToken);
-                                }
                             }
 
                             // Update last run time after successful completion

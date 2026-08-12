@@ -3397,15 +3397,27 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
         int pageNum = 1;
         bool hasNextPage = true;
 
+        int scrollAttemptsWithoutNewProducts = 0;
+        int previousProductCount = 0;
+
         do
         {
-            await FastScrollToBottomAsync(page);
-            
-            // Updated Selectors for New HTML (Comprar Placas...) + Legacy Fallback
-            var cards = page.Locator("div[class*='article-card--'], div[class*='single-product-container--'], div.article-card");
+            var cardSelector = "div[class*='article-card--'], div[class*='single-product-container--'], div.article-card, .product-card, .product-item, [class*='product-item']";
+            var currentCount = await ScrollToLastProductAndHydrateAsync(page, cardSelector, previousProductCount, cancellationToken);
+            var cards = page.Locator(cardSelector);
             var count = await cards.CountAsync();
 
-            await LogStepAsync(siteId, "info", $"Página {pageNum}: Productos detectados en listado: {count}.", new
+            if (count == previousProductCount)
+            {
+                scrollAttemptsWithoutNewProducts++;
+            }
+            else
+            {
+                scrollAttemptsWithoutNewProducts = 0;
+                previousProductCount = count;
+            }
+
+            await LogStepAsync(siteId, "info", $"Página {pageNum}: Productos detectados en listado (scroll activo): {count}.", new
             {
                 count,
                 url = page.Url
@@ -3508,7 +3520,7 @@ public partial class PlaywrightScrapingService : IScrapingService, IAsyncDisposa
                }
             }
 
-            hasNextPage = clickedNext && products.Count < maxProducts;
+            hasNextPage = (clickedNext || scrollAttemptsWithoutNewProducts < 2) && products.Count < maxProducts;
 
         } while (hasNextPage && !cancellationToken.IsCancellationRequested);
     }
@@ -6396,6 +6408,56 @@ private async Task SimulateReadingAsync(IPage page)
             await Task.Delay(2000); // Wait for animations/AJAX
         }
         catch { /* Ignore scroll errors */ }
+    }
+
+    /// <summary>
+    /// Navega hasta el último producto visible y/o footer para activar la carga perezosa (infinite scroll)
+    /// y espera la hidratación de nuevos productos en el DOM.
+    /// </summary>
+    private async Task<int> ScrollToLastProductAndHydrateAsync(
+        IPage page,
+        string? cardSelector = null,
+        int currentCardCount = 0,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var selector = string.IsNullOrWhiteSpace(cardSelector)
+                ? "div[class*='article-card--'], div[class*='single-product-container--'], div.article-card, .product-card, .product-item, [class*='product-item']"
+                : cardSelector;
+
+            var locator = page.Locator(selector);
+            var count = await locator.CountAsync();
+
+            if (count > 0)
+            {
+                var lastCard = locator.Nth(count - 1);
+                try
+                {
+                    await lastCard.ScrollIntoViewIfNeededAsync(new LocatorScrollIntoViewIfNeededOptions { Timeout = 3000 });
+                    await Task.Delay(300, cancellationToken);
+                }
+                catch { }
+            }
+
+            // Scroll adicional hacia el footer / fondo de la página para disparar IntersectionObserver
+            await page.EvaluateAsync(@"async () => {
+                window.scrollBy(0, 800);
+                await new Promise(r => setTimeout(r, 200));
+                window.scrollTo(0, document.body.scrollHeight);
+            }");
+
+            // Esperar hidratación DOM e invocaciones AJAX
+            await Task.Delay(1200, cancellationToken);
+
+            var newCount = await page.Locator(selector).CountAsync();
+            return newCount;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Error en ScrollToLastProductAndHydrateAsync");
+            return currentCardCount;
+        }
     }
 
     /// <summary>

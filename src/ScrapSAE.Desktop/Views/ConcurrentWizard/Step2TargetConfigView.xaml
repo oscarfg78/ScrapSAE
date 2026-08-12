@@ -1,0 +1,343 @@
+<UserControl x:Class="ScrapSAE.Desktop.Views.ConcurrentWizard.Step2TargetConfigView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:dto="clr-namespace:ScrapSAE.Core.DTOs;assembly=ScrapSAE.Core"
+             xmlns:local="clr-namespace:ScrapSAE.Desktop.Infrastructure"
+             Background="#1E1E2E" Foreground="White" Padding="24">
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel>
+            <TextBlock Text="Paso 2: Configurar Fuentes de Búsqueda" FontSize="20" FontWeight="Bold" Margin="0,0,0,4"/>
+            <TextBlock Text="Define hasta dos URLs de búsqueda. El sistema las consultará en paralelo por cada SKU."
+                       Foreground="#94A3B8" FontSize="13" Margin="0,0,0,20"/>
+
+            <!-- ── Target 1 ── -->
+            <GroupBox Header="Fuente 1 (Obligatoria)" Foreground="#A78BFA" BorderBrush="#3A3A5C" Margin="0,0,0,16">
+                <StackPanel Margin="8">
+                    <TextBlock Text="URL de Búsqueda" Foreground="#94A3B8" FontSize="12" Margin="0,0,0,4"/>
+                    <TextBox Text="{Binding Target1Url, UpdateSourceTrigger=PropertyChanged}"
+                             Background="#2A2A3E" Foreground="White" BorderBrush="#3A3A5C"
+                             Padding="8,6" FontSize="13" Margin="0,0,0,12"/>
+
+                    <TextBlock Text="Modo de Búsqueda" Foreground="#DDD6FE" FontSize="12" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                    <WrapPanel Margin="0,0,0,12">
+                        <RadioButton Content="URL con parámetro query (ej: ?q={sku})"
+                                     IsChecked="{Binding Target1Mode, Converter={x:Static local:EnumToBoolConverter.Instance}, ConverterParameter=QueryParam}"
+                                     Foreground="White" Margin="0,0,16,6"/>
+                        <RadioButton Content="Campo de búsqueda DOM (tipear SKU)"
+                                     IsChecked="{Binding Target1Mode, Converter={x:Static local:EnumToBoolConverter.Instance}, ConverterParameter=DomInput}"
+                                     Foreground="White" Margin="0,0,16,6"/>
+                        <RadioButton Content="⚡ URL directa a detalle de producto (ej: /model/[sku])"
+                                     IsChecked="{Binding Target1Mode, Converter={x:Static local:EnumToBoolConverter.Instance}, ConverterParameter=DirectDetail}"
+                                     Foreground="#A78BFA" FontWeight="Bold" Margin="0,0,0,6"/>
+                    </WrapPanel>
+
+                    <!-- Template de URL (usa {sku} o [sku]) -->
+                    <StackPanel Margin="0,0,0,12">
+                        <TextBlock Text="Plantilla de URL (usa {sku} o [sku])" Foreground="#DDD6FE" FontSize="12" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                        <TextBox Text="{Binding Target1UrlTemplate, UpdateSourceTrigger=PropertyChanged}"
+                                 Background="#2A2A3E" Foreground="White" BorderBrush="#7C3AED"
+                                 Padding="8,6" FontSize="13"
+                                 ToolTip="Ejemplo: https://www.autonics.com/mx/model/[sku]"/>
+                    </StackPanel>
+
+                    <!-- Selector fields -->
+                    <Expander Header="Selectores CSS/XPath (descúbrelos con IA o ingrésalos manualmente)"
+                              Foreground="#DDD6FE" IsExpanded="True">
+                        <StackPanel Margin="0,8,0,0">
+                            <!-- Búsqueda DOM (solo DomInput) -->
+                            <Grid Margin="0,0,0,8" Visibility="{Binding Target1Mode, Converter={x:Static local:EnumToVisibilityConverter.Instance}, ConverterParameter=DomInput}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition/><ColumnDefinition Width="12"/><ColumnDefinition/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="Campo de búsqueda (DOM)" Foreground="#94A3B8" FontSize="11" Margin="0,0,0,2"/>
+                                    <TextBox Text="{Binding Target1Selectors.SearchInputSelector, UpdateSourceTrigger=PropertyChanged}"
+                                             Background="#2A2A3E" Foreground="White" BorderBrush="#3A3A5C" Padding="6,4"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="Botón submit" Foreground="#94A3B8" FontSize="11" Margin="0,0,0,2"/>
+                                    <TextBox Text="{Binding Target1Selectors.SearchSubmitSelector, UpdateSourceTrigger=PropertyChanged}"
+                                             Background="#2A2A3E" Foreground="White" BorderBrush="#3A3A5C" Padding="6,4"/>
+                                </StackPanel>
+                            </Grid>
+
+                            <!-- Tarjetas y Links -->
+                            <Grid Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition/><ColumnDefinition Width="12"/><ColumnDefinition/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <CheckBox Content="Requiere primera tarjeta de resultado"
+                                              IsChecked="{Binding Target1Selectors.RequireFirstResultCard}"
+                                              Foreground="#94A3B8" FontSize="11" Margin="0,0,0,4"/>
+                                    <TextBox Text="{Binding Target1Selectors.FirstResultCardSelector, UpdateSourceTrigger=PropertyChanged}"
+                                             Background="#2A2A3E" Foreground="White" BorderBrush="#3A3A5C" Padding="6,4"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="Link de detalle" Foreground="#94A3B8" FontSize="11" Margin="0,18,0,2"/>
+                                    <TextBox Text="{Binding Target1Selectors.DetailLinkSelector, UpdateSourceTrigger=PropertyChanged}"
+                                             Background="#2A2A3E" Foreground="White" BorderBrush="#3A3A5C" Padding="6,4"/>
+                                </StackPanel>
+                            </Grid>
+
+                            <!-- Datos de producto y Configuración de Precio -->
+                            <Grid Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition/><ColumnDefinition Width="12"/><ColumnDefinition/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <CheckBox Content="Extraer precio de venta de la web"
+                                              IsChecked="{Binding Target1Selectors.ExtractRetailPriceFromWeb}"
+                                              Foreground="#DDD6FE" FontSize="11" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                                    <TextBox Text="{Binding Target1Selectors.RetailPriceSelector, UpdateSourceTrigger=PropertyChanged}"
+                                             Background="#2A2A3E" Foreground="White" BorderBrush="#3A3A5C" Padding="6,4"
+                                             IsEnabled="{Binding Target1Selectors.ExtractRetailPriceFromWeb}"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="Galería de imágenes" Foreground="#94A3B8" FontSize="11" Margin="0,18,0,2"/>
+                                    <TextBox Text="{Binding Target1Selectors.ImageGallerySelector, UpdateSourceTrigger=PropertyChanged}"
+                                             Background="#2A2A3E" Foreground="White" BorderBrush="#3A3A5C" Padding="6,4"/>
+                                </StackPanel>
+                            </Grid>
+
+                            <!-- Panel de Margen de Ganancia (si no se extrae precio web) -->
+                            <Border Background="#252538" BorderBrush="#3A3A5C" BorderThickness="1" CornerRadius="6" Padding="12" Margin="0,4,0,12"
+                                    Visibility="{Binding Target1Selectors.ExtractRetailPriceFromWeb, Converter={x:Static local:BoolToInverseVisibilityConverter.Instance}}">
+                                <StackPanel>
+                                    <TextBlock Text="💰 Cálculo de Precio de Venta por Margen de Ganancia" Foreground="#F59E0B" FontSize="12" FontWeight="Bold" Margin="0,0,0,6"/>
+                                    <WrapPanel Margin="0,0,0,6">
+                                        <CheckBox Content="Usar columna de % Margen del Excel"
+                                                  IsChecked="{Binding Target1Selectors.UseExcelMarginColumn}"
+                                                  Foreground="#DDD6FE" FontSize="12" Margin="0,0,16,0"/>
+                                    </WrapPanel>
+                                    <Grid Margin="0,4,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0">
+                                            <TextBlock Text="% Fijo Margen Bruto (0 a 100%)" Foreground="#DDD6FE" FontSize="11" Margin="0,0,0,2"/>
+                                            <TextBox Text="{Binding Target1Selectors.DefaultMarginPercentage, UpdateSourceTrigger=PropertyChanged}"
+                                                     Background="#1E1E2E" Foreground="#10B981" FontWeight="Bold" Width="100" Padding="6,4"
+                                                     ToolTip="Ejemplo: 30 para aplicar 30% de margen al costo del proveedor"/>
+                                        </StackPanel>
+                                        <TextBlock Grid.Column="2"
+                                                   Text="⚠️ Si no se especifica un % de margen en Excel ni un % fijo, el precio de venta será igual al costo del proveedor con una advertencia."
+                                                   Foreground="#F59E0B" FontSize="11" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Descripción y Atributos separados -->
+                            <Grid Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition/><ColumnDefinition Width="12"/><ColumnDefinition/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="Descripción (une viñetas por comas)" Foreground="#DDD6FE" FontSize="11" Margin="0,0,0,2"/>
+                                    <TextBox Text="{Binding Target1Selectors.DescriptionSelector, UpdateSourceTrigger=PropertyChanged}"
+                                             Background="#2A2A3E" Foreground="White" BorderBrush="#3A3A5C" Padding="6,4"
+                                             ToolTip="Ejemplo: ul.dot-list o div.description"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="Atributos / Características (guarda en JSON)" Foreground="#DDD6FE" FontSize="11" Margin="0,0,0,2"/>
+                                    <TextBox Text="{Binding Target1Selectors.AttributesSelector, UpdateSourceTrigger=PropertyChanged}"
+                                             Background="#2A2A3E" Foreground="White" BorderBrush="#3A3A5C" Padding="6,4"
+                                             ToolTip="Ejemplo: table.table-m-row1 o ul.specs"/>
+                                </StackPanel>
+                            </Grid>
+                            
+                            <Grid Margin="0,0,0,12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="Categoría (Breadcrumbs / Clasificación)" Foreground="#DDD6FE" FontSize="11" Margin="0,0,0,2"/>
+                                    <TextBox Text="{Binding Target1Selectors.CategorySelector, UpdateSourceTrigger=PropertyChanged}"
+                                             Background="#2A2A3E" Foreground="White" BorderBrush="#3A3A5C" Padding="6,4"
+                                             ToolTip="Ejemplo: /html/body/div[2]/article/div[1]/div/ul/li[3]/a/span/text()"/>
+                                </StackPanel>
+                            </Grid>
+
+                            <!-- Opción URL de origen -->
+                            <CheckBox Content="Incluir URL de origen en los atributos del producto"
+                                      IsChecked="{Binding Target1Selectors.IncludeSourceUrlInAttributes}"
+                                      Foreground="#DDD6FE" FontSize="12" Margin="0,4,0,0"/>
+                        </StackPanel>
+                    </Expander>
+
+                    <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                        <Button Content="🤖 Analizar con IA" Command="{Binding DiscoverTarget1Command}"
+                                Background="#6D28D9" Foreground="White" Padding="14,7" BorderThickness="0" Cursor="Hand"/>
+                    </StackPanel>
+                    <TextBlock Text="{Binding Target1Status}" Foreground="#A78BFA" FontSize="11" Margin="0,6,0,0"
+                               TextWrapping="Wrap"/>
+                </StackPanel>
+            </GroupBox>
+
+            <!-- ── Target 2 toggle ── -->
+            <CheckBox Content="Agregar segunda fuente de búsqueda (opcional)"
+                      IsChecked="{Binding UseTarget2}"
+                      Foreground="#94A3B8" FontSize="13" Margin="0,0,0,12"/>
+
+            <!-- ── Target 2 ── -->
+            <GroupBox Header="Fuente 2 (Opcional)" Foreground="#A78BFA" BorderBrush="#3A3A5C"
+                      Visibility="{Binding UseTarget2, Converter={x:Static local:BoolToVisibilityConverter.Instance}}">
+                <StackPanel Margin="8">
+                    <TextBlock Text="URL de Búsqueda" Foreground="#94A3B8" FontSize="12" Margin="0,0,0,4"/>
+                    <TextBox Text="{Binding Target2Url, UpdateSourceTrigger=PropertyChanged}"
+                             Background="#2A2A3E" Foreground="White" BorderBrush="#3A3A5C"
+                             Padding="8,6" FontSize="13" Margin="0,0,0,12"/>
+
+                    <TextBlock Text="Modo de Búsqueda" Foreground="#DDD6FE" FontSize="12" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                    <WrapPanel Margin="0,0,0,12">
+                        <RadioButton Content="URL con parámetro query"
+                                     IsChecked="{Binding Target2Mode, Converter={x:Static local:EnumToBoolConverter.Instance}, ConverterParameter=QueryParam}"
+                                     Foreground="White" Margin="0,0,16,6"/>
+                        <RadioButton Content="Campo de búsqueda DOM"
+                                     IsChecked="{Binding Target2Mode, Converter={x:Static local:EnumToBoolConverter.Instance}, ConverterParameter=DomInput}"
+                                     Foreground="White" Margin="0,0,16,6"/>
+                        <RadioButton Content="⚡ URL directa a detalle"
+                                     IsChecked="{Binding Target2Mode, Converter={x:Static local:EnumToBoolConverter.Instance}, ConverterParameter=DirectDetail}"
+                                     Foreground="#A78BFA" FontWeight="Bold" Margin="0,0,0,6"/>
+                    </WrapPanel>
+
+                    <StackPanel Margin="0,0,0,12">
+                        <TextBlock Text="Plantilla de URL" Foreground="#DDD6FE" FontSize="12" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                        <TextBox Text="{Binding Target2UrlTemplate, UpdateSourceTrigger=PropertyChanged}"
+                                 Background="#2A2A3E" Foreground="White" BorderBrush="#3A3A5C"
+                                 Padding="8,6" FontSize="13"/>
+                    </StackPanel>
+
+                    <Expander Header="Selectores CSS/XPath Fuente 2" Foreground="#DDD6FE" IsExpanded="True">
+                        <StackPanel Margin="0,8,0,0">
+                            <!-- Búsqueda DOM (solo DomInput) -->
+                            <Grid Margin="0,0,0,8" Visibility="{Binding Target2Mode, Converter={x:Static local:EnumToVisibilityConverter.Instance}, ConverterParameter=DomInput}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition/><ColumnDefinition Width="12"/><ColumnDefinition/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="Campo de búsqueda (DOM)" Foreground="#94A3B8" FontSize="11" Margin="0,0,0,2"/>
+                                    <TextBox Text="{Binding Target2Selectors.SearchInputSelector, UpdateSourceTrigger=PropertyChanged}"
+                                             Background="#2A2A3E" Foreground="White" BorderBrush="#3A3A5C" Padding="6,4"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="Botón submit" Foreground="#94A3B8" FontSize="11" Margin="0,0,0,2"/>
+                                    <TextBox Text="{Binding Target2Selectors.SearchSubmitSelector, UpdateSourceTrigger=PropertyChanged}"
+                                             Background="#2A2A3E" Foreground="White" BorderBrush="#3A3A5C" Padding="6,4"/>
+                                </StackPanel>
+                            </Grid>
+
+                            <!-- Tarjeta y Link -->
+                            <Grid Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition/><ColumnDefinition Width="12"/><ColumnDefinition/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <CheckBox Content="Requiere primera tarjeta de resultado"
+                                              IsChecked="{Binding Target2Selectors.RequireFirstResultCard}"
+                                              Foreground="#94A3B8" FontSize="11" Margin="0,0,0,4"/>
+                                    <TextBox Text="{Binding Target2Selectors.FirstResultCardSelector, UpdateSourceTrigger=PropertyChanged}"
+                                             Background="#2A2A3E" Foreground="White" BorderBrush="#3A3A5C" Padding="6,4"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="Link de detalle" Foreground="#94A3B8" FontSize="11" Margin="0,18,0,2"/>
+                                    <TextBox Text="{Binding Target2Selectors.DetailLinkSelector, UpdateSourceTrigger=PropertyChanged}"
+                                             Background="#2A2A3E" Foreground="White" BorderBrush="#3A3A5C" Padding="6,4"/>
+                                </StackPanel>
+                            </Grid>
+
+                            <!-- Precio y Galería -->
+                            <Grid Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition/><ColumnDefinition Width="12"/><ColumnDefinition/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <CheckBox Content="Extraer precio de venta de la web"
+                                              IsChecked="{Binding Target2Selectors.ExtractRetailPriceFromWeb}"
+                                              Foreground="#DDD6FE" FontSize="11" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                                    <TextBox Text="{Binding Target2Selectors.RetailPriceSelector, UpdateSourceTrigger=PropertyChanged}"
+                                             Background="#2A2A3E" Foreground="White" BorderBrush="#3A3A5C" Padding="6,4"
+                                             IsEnabled="{Binding Target2Selectors.ExtractRetailPriceFromWeb}"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="Galería de imágenes" Foreground="#94A3B8" FontSize="11" Margin="0,18,0,2"/>
+                                    <TextBox Text="{Binding Target2Selectors.ImageGallerySelector, UpdateSourceTrigger=PropertyChanged}"
+                                             Background="#2A2A3E" Foreground="White" BorderBrush="#3A3A5C" Padding="6,4"/>
+                                </StackPanel>
+                            </Grid>
+
+                            <!-- Panel Margen (si no hay precio web) -->
+                            <Border Background="#252538" BorderBrush="#3A3A5C" BorderThickness="1" CornerRadius="6" Padding="12" Margin="0,4,0,12"
+                                    Visibility="{Binding Target2Selectors.ExtractRetailPriceFromWeb, Converter={x:Static local:BoolToInverseVisibilityConverter.Instance}}">
+                                <StackPanel>
+                                    <TextBlock Text="💰 Cálculo de Precio de Venta por Margen de Ganancia" Foreground="#F59E0B" FontSize="12" FontWeight="Bold" Margin="0,0,0,6"/>
+                                    <WrapPanel Margin="0,0,0,6">
+                                        <CheckBox Content="Usar columna de % Margen del Excel"
+                                                  IsChecked="{Binding Target2Selectors.UseExcelMarginColumn}"
+                                                  Foreground="#DDD6FE" FontSize="12" Margin="0,0,16,0"/>
+                                    </WrapPanel>
+                                    <Grid Margin="0,4,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0">
+                                            <TextBlock Text="% Fijo Margen Bruto (0 a 100%)" Foreground="#DDD6FE" FontSize="11" Margin="0,0,0,2"/>
+                                            <TextBox Text="{Binding Target2Selectors.DefaultMarginPercentage, UpdateSourceTrigger=PropertyChanged}"
+                                                     Background="#1E1E2E" Foreground="#10B981" FontWeight="Bold" Width="100" Padding="6,4"
+                                                     ToolTip="Ejemplo: 30 para aplicar 30% de margen al costo del proveedor"/>
+                                        </StackPanel>
+                                        <TextBlock Grid.Column="2"
+                                                   Text="⚠️ Si no se especifica un % de margen en Excel ni un % fijo, el precio de venta será igual al costo del proveedor con una advertencia."
+                                                   Foreground="#F59E0B" FontSize="11" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Descripción y Atributos Fuente 2 -->
+                            <Grid Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition/><ColumnDefinition Width="12"/><ColumnDefinition/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="Descripción (une viñetas por comas)" Foreground="#DDD6FE" FontSize="11" Margin="0,0,0,2"/>
+                                    <TextBox Text="{Binding Target2Selectors.DescriptionSelector, UpdateSourceTrigger=PropertyChanged}"
+                                             Background="#2A2A3E" Foreground="White" BorderBrush="#3A3A5C" Padding="6,4"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="Atributos / Características (guarda en JSON)" Foreground="#DDD6FE" FontSize="11" Margin="0,0,0,2"/>
+                                    <TextBox Text="{Binding Target2Selectors.AttributesSelector, UpdateSourceTrigger=PropertyChanged}"
+                                             Background="#2A2A3E" Foreground="White" BorderBrush="#3A3A5C" Padding="6,4"/>
+                                </StackPanel>
+                            </Grid>
+
+                            <Grid Margin="0,0,0,12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="Categoría (Breadcrumbs / Clasificación)" Foreground="#DDD6FE" FontSize="11" Margin="0,0,0,2"/>
+                                    <TextBox Text="{Binding Target2Selectors.CategorySelector, UpdateSourceTrigger=PropertyChanged}"
+                                             Background="#2A2A3E" Foreground="White" BorderBrush="#3A3A5C" Padding="6,4"
+                                             ToolTip="Ejemplo: /html/body/div[2]/article/div[1]/div/ul/li[3]/a/span/text()"/>
+                                </StackPanel>
+                            </Grid>
+
+                            <!-- Opción URL de origen -->
+                            <CheckBox Content="Incluir URL de origen en los atributos del producto"
+                                      IsChecked="{Binding Target2Selectors.IncludeSourceUrlInAttributes}"
+                                      Foreground="#DDD6FE" FontSize="12" Margin="0,4,0,0"/>
+                        </StackPanel>
+                    </Expander>
+
+                    <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                        <Button Content="🤖 Analizar con IA" Command="{Binding DiscoverTarget2Command}"
+                                Background="#6D28D9" Foreground="White" Padding="14,7" BorderThickness="0" Cursor="Hand"/>
+                    </StackPanel>
+                    <TextBlock Text="{Binding Target2Status}" Foreground="#A78BFA" FontSize="11" Margin="0,6,0,0"
+                               TextWrapping="Wrap"/>
+                </StackPanel>
+            </GroupBox>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

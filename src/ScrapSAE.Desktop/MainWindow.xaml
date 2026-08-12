@@ -125,6 +125,20 @@
                             <TextBlock Text=" proveedores" Foreground="#9CA3AF" FontSize="11" VerticalAlignment="Center" Margin="2,0,0,0" />
                         </StackPanel>
                     </Border>
+                    <Border Background="#1F2937" CornerRadius="4" Padding="10,4" Margin="0,0,8,0" ToolTip="Activa o desactiva las peticiones continuas en segundo plano (Status / SyncLogs)">
+                        <CheckBox IsChecked="{Binding IsLiveMonitoringEnabled}"
+                                  Content="Monitoreo en vivo"
+                                  Foreground="White"
+                                  FontSize="12"
+                                  VerticalAlignment="Center"
+                                  Cursor="Hand" />
+                    </Border>
+                    <Button Content="⚡ Wizard Concurrente"
+                            Command="{Binding LaunchConcurrentWizardCommand}"
+                            Background="#7C3AED"
+                            BorderBrush="#6D28D9"
+                            Margin="0,0,8,0"
+                            ToolTip="Abre el nuevo Wizard de Scraping Concurrente basándote en Excel" />
                     <Button Content="Refrescar"
                             Command="{Binding LoadAllCommand}"
                             Background="#F59E0B"
@@ -900,6 +914,7 @@
                                             <ColumnDefinition Width="*" />
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Grid.Column="0">
+                                            <CheckBox Content="Utilizar IA" IsChecked="{Binding UseAI}" FontSize="10" ToolTip="Permite activar o desactivar la Inteligencia Artificial durante el proceso" />
                                             <CheckBox Content="Headless" IsChecked="{Binding HeadlessEnabled}" IsEnabled="{Binding ManualLoginEnabled, Converter={StaticResource NegateBool}}" FontSize="10" />
                                             <CheckBox Content="Mantener" IsChecked="{Binding KeepBrowserOpen}" FontSize="10" />
                                         </StackPanel>

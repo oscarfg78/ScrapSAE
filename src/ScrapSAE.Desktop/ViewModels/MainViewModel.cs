@@ -57,6 +57,7 @@ public sealed class MainViewModel : ViewModelBase
     private bool _manualLoginEnabled;
     private bool _headlessEnabled = false;
     private bool _isScraping;
+    private bool _isLiveMonitoringEnabled = true;
     private string _scrapeStatusText = "Idle";
     private int _selectedTabIndex;
     private string _selectorAnalysisResult = string.Empty;
@@ -64,6 +65,7 @@ public sealed class MainViewModel : ViewModelBase
     private bool _isFamiliesMode;
 
     // Nuevas propiedades para consola en tiempo real y opciones avanzadas
+    private bool _useAI = true;
     private bool _keepBrowserOpen;
     private bool _useScreenshotFallback;
     private string _learnedUrlsText = string.Empty;
@@ -265,6 +267,30 @@ public sealed class MainViewModel : ViewModelBase
     {
         get => _siteFormIsActive;
         set => SetField(ref _siteFormIsActive, value);
+    }
+
+    public bool UseAI
+    {
+        get => _useAI;
+        set => SetField(ref _useAI, value);
+    }
+
+    public void PromptAIEfficiencyWarning()
+    {
+        Application.Current?.Dispatcher?.Invoke(() =>
+        {
+            var result = MessageBox.Show(
+                "La Inteligencia Artificial no está aportando información adicional relevante en la extracción de los últimos productos.\n\n¿Desea desactivar el uso de IA durante esta ejecución para optimizar recursos?",
+                "No es necesario que se siga usando IA",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Information);
+
+            if (result == MessageBoxResult.Yes)
+            {
+                UseAI = false;
+                StatusMessage = "Uso de IA desactivado dinámicamente.";
+            }
+        });
     }
 
     public string SiteFormMaxProductsPerScrape
@@ -773,6 +799,31 @@ public sealed class MainViewModel : ViewModelBase
         set => SetField(ref _headlessEnabled, value);
     }
 
+    public bool IsLiveMonitoringEnabled
+    {
+        get => _isLiveMonitoringEnabled;
+        set
+        {
+            if (SetField(ref _isLiveMonitoringEnabled, value))
+            {
+                if (value)
+                {
+                    _statusTimer.Start();
+                    _logTimer.Start();
+                    _liveLogTimer.Start();
+                    StatusMessage = "Monitoreo en tiempo real ACTIVADO.";
+                }
+                else
+                {
+                    _statusTimer.Stop();
+                    _logTimer.Stop();
+                    _liveLogTimer.Stop();
+                    StatusMessage = "Monitoreo en tiempo real DESACTIVADO (Peticiones en segundo plano pausadas).";
+                }
+            }
+        }
+    }
+
     public string ScrapingMode
     {
         get => _scrapingMode;
@@ -1172,6 +1223,81 @@ public sealed class MainViewModel : ViewModelBase
         else
         {
             StatusMessage = "Wizard cancelado.";
+        }
+    }
+
+    // ── Concurrent Scraping Wizard ────────────────────────────────────────────
+
+    private Infrastructure.RelayCommand? _launchConcurrentWizardCommand;
+
+    /// <summary>
+    /// Abre el Concurrent Scraping Wizard (nuevo, no modifica el wizard original).
+    /// Único punto de modificación en archivos existentes para esta feature.
+    /// </summary>
+    public Infrastructure.RelayCommand LaunchConcurrentWizardCommand =>
+        _launchConcurrentWizardCommand ??= new Infrastructure.RelayCommand(LaunchConcurrentWizard);
+
+    private async void LaunchConcurrentWizard()
+    {
+        try
+        {
+            StatusMessage = "Abriendo Wizard de Scraping Concurrente...";
+
+            // Crear servicios
+            var baseUrl       = _apiClient.BaseUrl;
+            var httpClient    = new System.Net.Http.HttpClient();
+            var excelService  = new ScrapSAE.Infrastructure.Services.ExcelIngestionService();
+            var selectorSvc   = new ScrapSAE.Infrastructure.Services.AiSelectorDiscoveryService(httpClient, baseUrl);
+            var consolidator  = new ScrapSAE.Infrastructure.Services.ProductDataConsolidator();
+            var sessionRepo   = new ScrapSAE.Infrastructure.Services.WizardSessionRepository();
+            var engine        = new ScrapSAE.Infrastructure.Services.ConcurrentScrapingEngine(excelService, consolidator, sessionRepo);
+
+            var vm = new ViewModels.ConcurrentWizard.ConcurrentProviderWizardViewModel(
+                excelService, selectorSvc, engine, sessionRepo, _apiClient);
+
+            // Verificar si hay sesiones guardadas y ofrecer resume
+            var savedSessions = await sessionRepo.ListSavedSessionsAsync();
+            if (savedSessions.Count > 0)
+            {
+                var latest = savedSessions[0];
+                var promptMessage = latest.LastCompletedRowIndex < 0
+                    ? $"Se encontró una sesión en configuración previa: \"{latest.Name}\"\n\n¿Deseas reanudar la configuración donde la dejaste?"
+                    : $"Se encontró una sesión guardada: \"{latest.Name}\"\n({latest.LastCompletedRowIndex + 1}/{latest.TotalExcelRows} filas completadas)\n\n¿Deseas continuar la ejecución desde el punto guardado?";
+
+                var resume = System.Windows.MessageBox.Show(
+                    promptMessage,
+                    "Sesión guardada encontrada",
+                    System.Windows.MessageBoxButton.YesNo,
+                    System.Windows.MessageBoxImage.Question);
+
+                if (resume == System.Windows.MessageBoxResult.Yes)
+                {
+                    var (session, results) = await sessionRepo.LoadAsync(latest.SessionId);
+                    if (session != null)
+                        vm.RestoreSession(session, results);
+                }
+            }
+
+            var window = new Views.ConcurrentWizard.ConcurrentProviderWizardWindow(vm);
+            if (System.Windows.Application.Current?.MainWindow != null &&
+                System.Windows.Application.Current.MainWindow != window)
+            {
+                window.Owner = System.Windows.Application.Current.MainWindow;
+            }
+
+            window.ShowDialog();
+
+            StatusMessage = "Wizard Concurrente cerrado.";
+            await engine.DisposeAsync();
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Error al abrir el Wizard Concurrente: {ex.Message}";
+            System.Windows.MessageBox.Show(
+                $"No se pudo abrir el Wizard Concurrente:\n\n{ex.Message}\n\nDetalles:\n{ex}",
+                "Error al abrir Wizard",
+                System.Windows.MessageBoxButton.OK,
+                System.Windows.MessageBoxImage.Error);
         }
     }
 
@@ -2699,6 +2825,7 @@ public sealed class MainViewModel : ViewModelBase
 
     private async Task RefreshLogsAsync()
     {
+        if (!IsLiveMonitoringEnabled) return;
         try
         {
             var logs = await _apiClient.GetSyncLogsAsync();
@@ -2718,6 +2845,7 @@ public sealed class MainViewModel : ViewModelBase
 
     private async Task RefreshScrapeStatusAsync()
     {
+        if (!IsLiveMonitoringEnabled) return;
         try
         {
             if (SelectedSite == null)
@@ -2992,7 +3120,7 @@ public sealed class MainViewModel : ViewModelBase
 
     private async Task RefreshLiveLogsAsync()
     {
-        if (SelectedSite == null) return;
+        if (!IsLiveMonitoringEnabled || SelectedSite == null) return;
         
         var recentlyActive = (DateTime.UtcNow - _lastLogTimestamp).TotalSeconds < 15;
         if (!IsScraping && !recentlyActive) return;

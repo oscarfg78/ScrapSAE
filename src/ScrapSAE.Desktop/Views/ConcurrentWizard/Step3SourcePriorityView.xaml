@@ -1,0 +1,67 @@
+<UserControl x:Class="ScrapSAE.Desktop.Views.ConcurrentWizard.Step3SourcePriorityView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:ScrapSAE.Desktop.Infrastructure"
+             Background="#1E1E2E" Foreground="White" Padding="24">
+
+    <StackPanel MaxWidth="600" HorizontalAlignment="Center">
+        <TextBlock Text="Paso 3: Prioridad de Fuentes" FontSize="20" FontWeight="Bold" Margin="0,0,0,4"/>
+        <TextBlock Text="Indica de cuál fuente se tomará el precio de venta y de cuál las imágenes."
+                   Foreground="#94A3B8" FontSize="13" Margin="0,0,0,32"/>
+
+        <!-- ── Precio de Venta ── -->
+        <Border Background="#2A2A3E" CornerRadius="8" Padding="20" Margin="0,0,0,16" BorderBrush="#3A3A5C" BorderThickness="1">
+            <StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
+                    <TextBlock Text="💰" FontSize="24" Margin="0,0,12,0" VerticalAlignment="Center"/>
+                    <StackPanel>
+                        <TextBlock Text="Fuente del Precio de Venta" FontSize="15" FontWeight="SemiBold"/>
+                        <TextBlock Text="¿De cuál sitio se tomará el precio al público?" Foreground="#94A3B8" FontSize="12"/>
+                    </StackPanel>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal">
+                    <Border Background="{Binding PriceSource, Converter={x:Static local:EnumToAccentConverter.Instance}, ConverterParameter=Target1}"
+                            CornerRadius="6" Padding="20,12" Margin="0,0,12,0" Cursor="Hand">
+                        <StackPanel>
+                            <RadioButton Content="Fuente 1" IsChecked="{Binding PriceSource, Converter={x:Static local:EnumToBoolConverter.Instance}, ConverterParameter=Target1}"
+                                         Foreground="White" FontWeight="SemiBold"/>
+                        </StackPanel>
+                    </Border>
+                    <Border Background="{Binding PriceSource, Converter={x:Static local:EnumToAccentConverter.Instance}, ConverterParameter=Target2}"
+                            CornerRadius="6" Padding="20,12" Cursor="Hand">
+                        <RadioButton Content="Fuente 2" IsChecked="{Binding PriceSource, Converter={x:Static local:EnumToBoolConverter.Instance}, ConverterParameter=Target2}"
+                                     Foreground="White" FontWeight="SemiBold"/>
+                    </Border>
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
+        <!-- ── Imágenes ── -->
+        <Border Background="#2A2A3E" CornerRadius="8" Padding="20" BorderBrush="#3A3A5C" BorderThickness="1">
+            <StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
+                    <TextBlock Text="🖼️" FontSize="24" Margin="0,0,12,0" VerticalAlignment="Center"/>
+                    <StackPanel>
+                        <TextBlock Text="Fuente de las Imágenes" FontSize="15" FontWeight="SemiBold"/>
+                        <TextBlock Text="¿De cuál sitio se tomarán las imágenes del producto?" Foreground="#94A3B8" FontSize="12"/>
+                    </StackPanel>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal">
+                    <Border Background="{Binding ImageSource, Converter={x:Static local:EnumToAccentConverter.Instance}, ConverterParameter=Target1}"
+                            CornerRadius="6" Padding="20,12" Margin="0,0,12,0" Cursor="Hand">
+                        <RadioButton Content="Fuente 1" IsChecked="{Binding ImageSource, Converter={x:Static local:EnumToBoolConverter.Instance}, ConverterParameter=Target1}"
+                                     Foreground="White" FontWeight="SemiBold"/>
+                    </Border>
+                    <Border Background="{Binding ImageSource, Converter={x:Static local:EnumToAccentConverter.Instance}, ConverterParameter=Target2}"
+                            CornerRadius="6" Padding="20,12" Cursor="Hand">
+                        <RadioButton Content="Fuente 2" IsChecked="{Binding ImageSource, Converter={x:Static local:EnumToBoolConverter.Instance}, ConverterParameter=Target2}"
+                                     Foreground="White" FontWeight="SemiBold"/>
+                    </Border>
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
+        <TextBlock Margin="0,20,0,0" Foreground="#94A3B8" FontSize="12" TextWrapping="Wrap"
+                   Text="ℹ️  Pueden ser la misma fuente. Si la fuente designada no encuentra un campo (ej: precio), se intentará en la otra fuente como fallback automático."/>
+    </StackPanel>
+</UserControl>

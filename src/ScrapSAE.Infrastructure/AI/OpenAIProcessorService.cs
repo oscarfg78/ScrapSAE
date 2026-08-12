@@ -126,7 +126,7 @@ public sealed class OpenAIProcessorService : IAIProcessorService
 
     private async Task<JsonDocument> SendRequestAsync(object request, CancellationToken cancellationToken)
     {
-        using var message = new HttpRequestMessage(HttpMethod.Post, "responses");
+        using var message = new HttpRequestMessage(HttpMethod.Post, "chat/completions");
         message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
         message.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         message.Content = new StringContent(JsonSerializer.Serialize(request, JsonOptions), Encoding.UTF8, "application/json");
@@ -147,28 +147,39 @@ public sealed class OpenAIProcessorService : IAIProcessorService
     {
         var root = document.RootElement;
 
+        if (root.TryGetProperty("choices", out var choices) &&
+            choices.ValueKind == JsonValueKind.Array &&
+            choices.GetArrayLength() > 0)
+        {
+            var firstChoice = choices[0];
+            if (firstChoice.TryGetProperty("message", out var message) &&
+                message.TryGetProperty("content", out var content) &&
+                content.ValueKind == JsonValueKind.String)
+            {
+                return content.GetString();
+            }
+        }
+
         if (root.TryGetProperty("output_text", out var outputText) && outputText.ValueKind == JsonValueKind.String)
         {
             return outputText.GetString();
         }
 
-        if (!root.TryGetProperty("output", out var outputItems) || outputItems.ValueKind != JsonValueKind.Array)
+        if (root.TryGetProperty("output", out var outputItems) && outputItems.ValueKind == JsonValueKind.Array)
         {
-            return null;
-        }
-
-        foreach (var item in outputItems.EnumerateArray())
-        {
-            if (!item.TryGetProperty("content", out var content) || content.ValueKind != JsonValueKind.Array)
+            foreach (var item in outputItems.EnumerateArray())
             {
-                continue;
-            }
-
-            foreach (var contentItem in content.EnumerateArray())
-            {
-                if (contentItem.TryGetProperty("text", out var text) && text.ValueKind == JsonValueKind.String)
+                if (!item.TryGetProperty("content", out var content) || content.ValueKind != JsonValueKind.Array)
                 {
-                    return text.GetString();
+                    continue;
+                }
+
+                foreach (var contentItem in content.EnumerateArray())
+                {
+                    if (contentItem.TryGetProperty("text", out var text) && text.ValueKind == JsonValueKind.String)
+                    {
+                        return text.GetString();
+                    }
                 }
             }
         }
@@ -208,28 +219,15 @@ public sealed class OpenAIProcessorService : IAIProcessorService
         {
             model = _model,
             temperature = 0.2,
-            input = new object[]
+            messages = new object[]
             {
-                new
-                {
-                    role = "system",
-                    content = new object[]
-                    {
-                        new { type = "input_text", text = systemPrompt }
-                    }
-                },
-                new
-                {
-                    role = "user",
-                    content = new object[]
-                    {
-                        new { type = "input_text", text = userPrompt }
-                    }
-                }
+                new { role = "system", content = systemPrompt },
+                new { role = "user", content = userPrompt }
             },
-            text = new
+            response_format = new
             {
-                format = new
+                type = "json_schema",
+                json_schema = new
                 {
                     type = "json_schema",
                     name = "processed_product",
@@ -321,29 +319,20 @@ public sealed class OpenAIProcessorService : IAIProcessorService
         {
             model = _visionModel,
             temperature = 0.2,
-            input = new object[]
+            messages = new object[]
             {
-                new
-                {
-                    role = "system",
-                    content = new object[]
+                new { role = "system", content = systemPrompt },
+                new { role = "user", content = new object[]
                     {
-                        new { type = "input_text", text = systemPrompt }
-                    }
-                },
-                new
-                {
-                    role = "user",
-                    content = new object[]
-                    {
-                        new { type = "input_text", text = userPrompt },
-                        new { type = "input_image", source = new { type = "base64", media_type = "image/png", data = screenshotBase64 } }
+                        new { type = "text", text = userPrompt },
+                        new { type = "image_url", image_url = new { url = $"data:image/png;base64,{screenshotBase64}" } }
                     }
                 }
             },
-            text = new
+            response_format = new
             {
-                format = new
+                type = "json_schema",
+                json_schema = new
                 {
                     type = "json_schema",
                     name = "processed_product",
@@ -470,28 +459,15 @@ public sealed class OpenAIProcessorService : IAIProcessorService
         {
             model = _model,
             temperature = 0.3,
-            input = new object[]
+            messages = new object[]
             {
-                new
-                {
-                    role = "system",
-                    content = new object[]
-                    {
-                        new { type = "input_text", text = systemPrompt }
-                    }
-                },
-                new
-                {
-                    role = "user",
-                    content = new object[]
-                    {
-                        new { type = "input_text", text = userPrompt }
-                    }
-                }
+                new { role = "system", content = systemPrompt },
+                new { role = "user", content = userPrompt }
             },
-            text = new
+            response_format = new
             {
-                format = new
+                type = "json_schema",
+                json_schema = new
                 {
                     type = "json_schema",
                     name = "category_suggestion",
@@ -537,14 +513,14 @@ public sealed class OpenAIProcessorService : IAIProcessorService
 
         var content = new List<object>
         {
-            new { type = "input_text", text = userPrompt }
+            new { type = "text", text = userPrompt }
         };
 
         if (request.ImagesBase64 != null && request.ImagesBase64.Any())
         {
             foreach (var imgBase64 in request.ImagesBase64.Take(3))
             {
-                content.Add(new { type = "input_image", source = new { type = "base64", media_type = "image/png", data = imgBase64 } });
+                content.Add(new { type = "image_url", image_url = new { url = $"data:image/png;base64,{imgBase64}" } });
             }
         }
 
@@ -552,25 +528,15 @@ public sealed class OpenAIProcessorService : IAIProcessorService
         {
             model = request.ImagesBase64?.Any() == true ? _visionModel : _model,
             temperature = 0.3,
-            input = new object[]
+            messages = new object[]
             {
-                new
-                {
-                    role = "system",
-                    content = new object[]
-                    {
-                        new { type = "input_text", text = systemPrompt }
-                    }
-                },
-                new
-                {
-                    role = "user",
-                    content = content.ToArray()
-                }
+                new { role = "system", content = systemPrompt },
+                new { role = "user", content = content.ToArray() }
             },
-            text = new
+            response_format = new
             {
-                format = new
+                type = "json_schema",
+                json_schema = new
                 {
                     type = "json_schema",
                     name = "selector_suggestion",

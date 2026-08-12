@@ -34,7 +34,7 @@ public class WizardSiteConfig
 
     // Estrategias habilitadas
     public bool UseDirectStrategy { get; set; } = true;
-    public bool UseListStrategy { get; set; } = false;
+    public bool UseListStrategy { get; set; } = true;
     public bool UseFamiliesStrategy { get; set; } = false;
 
     // Additional Execution Config
@@ -64,6 +64,9 @@ public sealed class ProviderWizardViewModel : ViewModelBase
     private string _productDetailUrl = string.Empty;
     private ObservableCollection<string> _discoveredCandidateUrls = new();
     private string _brandOverride = string.Empty;
+    private ObservableCollection<SiteProfile> _availableBaselineSuppliers = new();
+    private SiteProfile? _selectedBaselineSupplier;
+    private string? _lastGptAnalysisContextText;
 
     // ─── Step 2 ────────────────────────────────────────────────────────────────
     private PageAnalysisResult? _analysisResult;
@@ -113,6 +116,28 @@ public sealed class ProviderWizardViewModel : ViewModelBase
         GoBackToConfigCommand = new RelayCommand(GoBackToConfig);
         SaveProviderCommand = new AsyncCommand(ExecuteSaveProviderAsync, () => !IsBusy && WasSuccessful == false);
         CancelCommand = new AsyncCommand(ExecuteCancelAsync);
+
+        _ = LoadBaselineSuppliersAsync();
+    }
+
+    private async Task LoadBaselineSuppliersAsync()
+    {
+        try
+        {
+            var sites = await _apiClient.GetSitesAsync();
+            if (sites != null)
+            {
+                AvailableBaselineSuppliers.Clear();
+                foreach (var site in sites)
+                {
+                    AvailableBaselineSuppliers.Add(site);
+                }
+            }
+        }
+        catch
+        {
+            // Non-critical background load
+        }
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -205,6 +230,18 @@ public sealed class ProviderWizardViewModel : ViewModelBase
         set => SetField(ref _brandOverride, value);
     }
 
+    public ObservableCollection<SiteProfile> AvailableBaselineSuppliers
+    {
+        get => _availableBaselineSuppliers;
+        private set => SetField(ref _availableBaselineSuppliers, value);
+    }
+
+    public SiteProfile? SelectedBaselineSupplier
+    {
+        get => _selectedBaselineSupplier;
+        set => SetField(ref _selectedBaselineSupplier, value);
+    }
+
     // Step 2
     public PageAnalysisResult? AnalysisResult
     {
@@ -288,7 +325,7 @@ public sealed class ProviderWizardViewModel : ViewModelBase
 
         ErrorMessage = string.Empty;
         IsBusy = true;
-        StatusMessage = "Analizando estructura del catálogo... (esto puede tardar hasta 90 segundos)";
+        StatusMessage = "Realizando validación pre-flight de accesibilidad de la página...";
         CurrentStep = 2;
         AnalysisResult = null;
 
@@ -296,13 +333,47 @@ public sealed class ProviderWizardViewModel : ViewModelBase
 
         try
         {
-            var result = await _apiClient.AnalyzePageAsync(Url, string.IsNullOrWhiteSpace(ProductDetailUrl) ? null : ProductDetailUrl.Trim());
+            // Pre-flight check: Verificar HTTP 404 o falla de conexión antes de llamar a la IA
+            using var httpCheckClient = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+            using var request = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Head, Url);
+            try
+            {
+                var checkResponse = await httpCheckClient.SendAsync(request, _cts.Token);
+                if (checkResponse.StatusCode == System.Net.HttpStatusCode.NotFound)
+                {
+                    ErrorMessage = "La página no fue encontrada (HTTP 404). Verifica la URL antes de analizar con IA.";
+                    CurrentStep = 1;
+                    return;
+                }
+            }
+            catch
+            {
+                // Si la solicitud HEAD no es soportada por la página, continuar resilientemente con el análisis
+            }
+
+            StatusMessage = "Analizando estructura del catálogo con IA... (esto puede tardar hasta 90 segundos)";
+
+            string? baselineSelectorsJson = null;
+            if (SelectedBaselineSupplier?.Selectors != null)
+            {
+                baselineSelectorsJson = JsonSerializer.Serialize(SelectedBaselineSupplier.Selectors);
+            }
+
+            var result = await _apiClient.AnalyzePageAsync(
+                Url, 
+                string.IsNullOrWhiteSpace(ProductDetailUrl) ? null : ProductDetailUrl.Trim(),
+                baselineSelectorsJson,
+                _lastGptAnalysisContextText);
+
             if (result == null)
             {
                 ErrorMessage = "No se pudo analizar la página. Verifica la URL e intenta de nuevo.";
                 CurrentStep = 1;
                 return;
             }
+
+            // Retener el resultado histórico de GPT como contexto para reintentos o pasos posteriores
+            _lastGptAnalysisContextText = JsonSerializer.Serialize(result);
 
             if (result.CandidateUrls != null && result.CandidateUrls.Any())
             {
@@ -349,24 +420,58 @@ public sealed class ProviderWizardViewModel : ViewModelBase
         return Task.CompletedTask;
     }
 
-    private string GetBestSelectorString(DualSelector? descriptor)
+    private static string GetBestSelectorString(DualSelector? descriptor)
     {
         if (descriptor == null) return string.Empty;
-        if (string.IsNullOrWhiteSpace(descriptor.Css) && string.IsNullOrWhiteSpace(descriptor.XPath)) return string.Empty;
-        
-        var parts = new List<string>();
-        
         if (!string.IsNullOrWhiteSpace(descriptor.Css))
         {
-            parts.Add($"css={descriptor.Css}");
+            return descriptor.Css.Trim();
         }
-        
         if (!string.IsNullOrWhiteSpace(descriptor.XPath))
         {
-            parts.Add($"xpath={descriptor.XPath}");
+            var xpath = descriptor.XPath.Trim();
+            return xpath.StartsWith("xpath=", StringComparison.OrdinalIgnoreCase) || xpath.StartsWith("//") || xpath.StartsWith(".//")
+                ? xpath
+                : $"xpath={xpath}";
         }
-        
-        return string.Join(", ", parts);
+        return string.Empty;
+    }
+
+    private static string? CleanSelector(string? rawSelector)
+    {
+        if (string.IsNullOrWhiteSpace(rawSelector)) return null;
+        var strVal = rawSelector.Trim();
+
+        if (strVal.StartsWith("css=", StringComparison.OrdinalIgnoreCase))
+        {
+            var xpathIdx = strVal.IndexOf(", xpath=", StringComparison.OrdinalIgnoreCase);
+            if (xpathIdx >= 0)
+            {
+                var cssPart = strVal.Substring(4, xpathIdx - 4).Trim();
+                if (!string.IsNullOrWhiteSpace(cssPart)) return cssPart;
+            }
+            else
+            {
+                var cssPart = strVal.Substring(4).Trim();
+                if (!string.IsNullOrWhiteSpace(cssPart)) return cssPart;
+            }
+        }
+        else if (strVal.StartsWith("xpath=", StringComparison.OrdinalIgnoreCase))
+        {
+            var cssIdx = strVal.IndexOf(", css=", StringComparison.OrdinalIgnoreCase);
+            if (cssIdx >= 0)
+            {
+                var xpathPart = strVal.Substring(6, cssIdx - 6).Trim();
+                if (!string.IsNullOrWhiteSpace(xpathPart)) return xpathPart;
+            }
+            else
+            {
+                var xpathPart = strVal.Substring(6).Trim();
+                if (!string.IsNullOrWhiteSpace(xpathPart)) return xpathPart;
+            }
+        }
+
+        return strVal;
     }
 
     private void PopulateConfigFromAnalysis(PageAnalysisResult result)
@@ -406,6 +511,11 @@ public sealed class ProviderWizardViewModel : ViewModelBase
                     WizardConfig.UseFamiliesStrategy = true;
                     break;
             }
+        }
+
+        if (!string.IsNullOrWhiteSpace(WizardConfig.ProductContainerSelector) || !string.IsNullOrWhiteSpace(WizardConfig.ProductCardSelector))
+        {
+            WizardConfig.UseListStrategy = true;
         }
 
         ValidateConfig();
@@ -461,6 +571,11 @@ public sealed class ProviderWizardViewModel : ViewModelBase
             return;
         }
 
+        if (!string.IsNullOrWhiteSpace(WizardConfig.ProductContainerSelector) || !string.IsNullOrWhiteSpace(WizardConfig.ProductCardSelector))
+        {
+            WizardConfig.UseListStrategy = true;
+        }
+
         ErrorMessage = string.Empty;
         IsBusy = true;
         StatusMessage = "Ejecutando scrape de prueba...";
@@ -481,6 +596,7 @@ public sealed class ProviderWizardViewModel : ViewModelBase
                 {
                     CatalogUrl = WizardConfig.BaseUrl,
                     DetailUrl = ProductDetailUrl,
+                    StrategyType = WizardConfig.StrategyType,
                     AuthParameters = new Dictionary<string, string>
                     {
                         { "username", WizardConfig.AuthUsername },
@@ -488,14 +604,14 @@ public sealed class ProviderWizardViewModel : ViewModelBase
                     },
                     Selectors = new SiteSelectors
                     {
-                        ProductListSelector = WizardConfig.ProductContainerSelector,
-                        ProductCardClassPrefix = WizardConfig.ProductCardSelector,
-                        ProductLinkSelector = WizardConfig.ProductCardSelector, // Added this mapping
-                        SkuSelector = WizardConfig.SkuSelector,
-                        TitleSelector = WizardConfig.NameSelector,
-                        ImageSelector = WizardConfig.ImageSelector,
-                        PriceSelector = WizardConfig.PriceSelector,
-                        CharacteristicsSelector = WizardConfig.CharacteristicsSelector
+                        ProductListSelector = CleanSelector(WizardConfig.ProductContainerSelector),
+                        ProductCardClassPrefix = CleanSelector(WizardConfig.ProductCardSelector),
+                        ProductLinkSelector = CleanSelector(WizardConfig.ProductCardSelector),
+                        SkuSelector = CleanSelector(WizardConfig.SkuSelector),
+                        TitleSelector = CleanSelector(WizardConfig.NameSelector),
+                        ImageSelector = CleanSelector(WizardConfig.ImageSelector),
+                        PriceSelector = CleanSelector(WizardConfig.PriceSelector),
+                        CharacteristicsSelector = CleanSelector(WizardConfig.CharacteristicsSelector)
                     }
                 }
             };
@@ -648,14 +764,14 @@ public sealed class ProviderWizardViewModel : ViewModelBase
     {
         var siteSelectors = new SiteSelectors
         {
-            ProductListSelector = string.IsNullOrWhiteSpace(WizardConfig.ProductContainerSelector) ? null : WizardConfig.ProductContainerSelector,
-            ProductCardClassPrefix = string.IsNullOrWhiteSpace(WizardConfig.ProductCardSelector) ? null : WizardConfig.ProductCardSelector,
-            ProductLinkSelector = string.IsNullOrWhiteSpace(WizardConfig.ProductCardSelector) ? null : WizardConfig.ProductCardSelector,
-            SkuSelector = string.IsNullOrWhiteSpace(WizardConfig.SkuSelector) ? null : WizardConfig.SkuSelector,
-            TitleSelector = string.IsNullOrWhiteSpace(WizardConfig.NameSelector) ? null : WizardConfig.NameSelector,
-            ImageSelector = string.IsNullOrWhiteSpace(WizardConfig.ImageSelector) ? null : WizardConfig.ImageSelector,
-            PriceSelector = string.IsNullOrWhiteSpace(WizardConfig.PriceSelector) ? null : WizardConfig.PriceSelector,
-            CharacteristicsSelector = string.IsNullOrWhiteSpace(WizardConfig.CharacteristicsSelector) ? null : WizardConfig.CharacteristicsSelector
+            ProductListSelector = CleanSelector(WizardConfig.ProductContainerSelector),
+            ProductCardClassPrefix = CleanSelector(WizardConfig.ProductCardSelector),
+            ProductLinkSelector = CleanSelector(WizardConfig.ProductCardSelector),
+            SkuSelector = CleanSelector(WizardConfig.SkuSelector),
+            TitleSelector = CleanSelector(WizardConfig.NameSelector),
+            ImageSelector = CleanSelector(WizardConfig.ImageSelector),
+            PriceSelector = CleanSelector(WizardConfig.PriceSelector),
+            CharacteristicsSelector = CleanSelector(WizardConfig.CharacteristicsSelector)
         };
 
         var strategies = new List<ScrapingStrategyDefinition>();

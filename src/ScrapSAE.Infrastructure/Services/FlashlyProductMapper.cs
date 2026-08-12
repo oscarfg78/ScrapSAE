@@ -1,25 +1,30 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Text.Json;
 using ScrapSAE.Core.DTOs;
 using ScrapSAE.Core.Entities;
 
 namespace ScrapSAE.Infrastructure.Services;
 
-internal static class FlashlyProductMapper
+public static class FlashlyProductMapper
 {
-    public static FlashlyProductSyncDto ToFlashlyDto(StagingProduct product)
+    public static FlashlyProductSyncPayload ToFlashlyPayload(StagingProduct product)
     {
-        var brandOverride = product.Site?.BrandOverride;
-        var sourceSku = product.SkuSource?.Trim() ?? string.Empty;
+        var sourceSku = (product.SkuSource ?? string.Empty).Trim();
         var name = string.Empty;
         var description = string.Empty;
         var purchasePrice = 0m;
         var currency = "MXN";
         var categories = new List<string>();
-        string? productUrl = product.SourceUrl;
+        string? productUrl = string.IsNullOrWhiteSpace(product.SourceUrl) ? null : product.SourceUrl.Trim();
         var imageUrls = new List<string>();
-        string? supplierName = null;
+        string? supplierName = product.Site?.BrandOverride ?? product.Brand;
         string? specificationsJson = null;
 
+        var specsDict = new Dictionary<string, object?>();
+
+        // 1. Parse AIProcessedJson
         if (!string.IsNullOrWhiteSpace(product.AIProcessedJson))
         {
             try
@@ -32,33 +37,88 @@ internal static class FlashlyProductMapper
                     ReadString(root, "sku", "Sku"),
                     sourceSku) ?? sourceSku;
 
-                name = FirstNonEmpty(ReadString(root, "name", "Name"), name) ?? name;
-                description = FirstNonEmpty(ReadString(root, "description", "Description"), description) ?? description;
+                name = FirstNonEmpty(
+                    ReadString(root, "name", "Name", "title", "Title", "nombre", "titulo"),
+                    name) ?? string.Empty;
+
+                description = FirstNonEmpty(
+                    ReadString(root, "description", "Description", "descripcion", "detalle"),
+                    description) ?? string.Empty;
+
                 purchasePrice = ReadDecimal(root, "purchasePrice", "purchase_price", "price", "Price");
                 currency = FirstNonEmpty(ReadString(root, "currency", "Currency"), currency) ?? currency;
-                categories = ReadStringArray(root, "categories", "Categories");
-                productUrl = FirstNonEmpty(ReadString(root, "productUrl", "product_url", "url", "sourceUrl", "source_url"), productUrl);
-                imageUrls = ReadStringArray(root, "imageUrls", "image_urls", "images", "Images", "imageUrls");
-                supplierName = FirstNonEmpty(ReadString(root, "supplierName", "supplier_name", "supplier", "brand", "Brand"), supplierName);
-                if (!string.IsNullOrWhiteSpace(brandOverride))
+
+                categories = ReadStringArray(root, "categories", "Categories", "category_path", "categoryPath");
+                if (categories.Count == 0)
                 {
-                    supplierName = brandOverride;
+                    var cat = ReadString(root, "category", "Category", "categoria", "Categoria");
+                    if (!string.IsNullOrWhiteSpace(cat)) categories.Add(cat.Trim());
                 }
-                var rawSpecs = ReadRawJson(root, "specifications", "Specifications");
-                specificationsJson = ProcessSpecifications(rawSpecs, brandOverride);
+
+                productUrl = FirstNonEmpty(
+                    ReadString(root, "productUrl", "product_url", "url", "Url", "sourceUrl", "source_url"),
+                    productUrl);
+
+                imageUrls = ReadStringArray(root, "imageUrls", "image_urls", "images", "Images", "primaryImageUrls");
+                if (imageUrls.Count == 0)
+                {
+                    var singleImg = ReadString(root, "imageUrl", "image_url", "ImageUrl", "primaryImageUrl", "thumbnailUrl");
+                    if (!string.IsNullOrWhiteSpace(singleImg)) imageUrls.Add(singleImg.Trim());
+                }
+
+                supplierName = FirstNonEmpty(
+                    supplierName,
+                    ReadString(root, "supplierName", "supplier_name", "supplier", "brand", "Brand"));
+
+                ExtractSpecificationsIntoDict(specsDict, root);
             }
-            catch
-            {
-                // Invalid AIProcessedJson should not block sync/export.
-            }
+            catch { }
         }
 
-        if (productUrl != null && productUrl.Contains("idsupply.com.mx", StringComparison.OrdinalIgnoreCase))
+        // 2. Parse RawData fallback
+        if (!string.IsNullOrWhiteSpace(product.RawData))
         {
-            supplierName = null;
+            try
+            {
+                using var doc = JsonDocument.Parse(product.RawData);
+                var root = doc.RootElement;
+
+                if (string.IsNullOrWhiteSpace(name))
+                    name = FirstNonEmpty(ReadString(root, "title", "Title", "name", "Name", "nombre"), string.Empty) ?? string.Empty;
+
+                if (string.IsNullOrWhiteSpace(description))
+                    description = FirstNonEmpty(ReadString(root, "description", "Description"), string.Empty) ?? string.Empty;
+
+                if (purchasePrice == 0m)
+                    purchasePrice = ReadDecimal(root, "supplierCost", "SupplierCost", "cost", "Costo", "price", "Price");
+
+                if (imageUrls.Count == 0)
+                {
+                    imageUrls = ReadStringArray(root, "imageUrls", "image_urls", "images", "Images");
+                    if (imageUrls.Count == 0)
+                    {
+                        var singleImg = ReadString(root, "imageUrl", "image_url", "ImageUrl", "firstImageUrl");
+                        if (!string.IsNullOrWhiteSpace(singleImg)) imageUrls.Add(singleImg.Trim());
+                    }
+                }
+
+                if (string.IsNullOrWhiteSpace(productUrl))
+                    productUrl = ReadString(root, "sourceUrl", "source_url", "productUrl", "product_url", "url");
+
+                ExtractSpecificationsIntoDict(specsDict, root);
+            }
+            catch { }
         }
 
-        return new FlashlyProductSyncDto
+        // Fallbacks
+        if (string.IsNullOrWhiteSpace(name)) name = sourceSku;
+        if (string.IsNullOrWhiteSpace(description)) description = name;
+        if (specsDict.Count > 0)
+        {
+            specificationsJson = JsonSerializer.Serialize(specsDict, new JsonSerializerOptions { WriteIndented = false });
+        }
+
+        return new FlashlyProductSyncPayload
         {
             SourceSku = sourceSku,
             Name = name,
@@ -66,56 +126,156 @@ internal static class FlashlyProductMapper
             PurchasePrice = purchasePrice,
             Currency = currency,
             Categories = categories,
-            ProductUrl = productUrl,
+            ProductUrl = string.IsNullOrWhiteSpace(productUrl) ? null : productUrl,
             ImageUrls = imageUrls,
             SupplierName = supplierName,
             SpecificationsJson = specificationsJson
         };
     }
 
-    private static string? ProcessSpecifications(string? rawJson, string? brandOverride)
+    public static FlashlyProductSyncPayload ToFlashlyPayload(ConsolidatedProductResult result, string? supplierName = null)
     {
-        if (string.IsNullOrWhiteSpace(rawJson))
-            return rawJson;
+        var sourceSku = (result.Sku ?? string.Empty).Trim();
+        var specsDict = new Dictionary<string, object?>();
 
-        try
+        if (result.OptionalAttributes != null)
         {
-            using var doc = JsonDocument.Parse(rawJson);
-            if (doc.RootElement.ValueKind == JsonValueKind.Object)
+            foreach (var kvp in result.OptionalAttributes)
             {
-                var dict = new Dictionary<string, object?>();
-                foreach (var prop in doc.RootElement.EnumerateObject())
+                if (!string.IsNullOrWhiteSpace(kvp.Key))
                 {
-                    if (prop.Name.Equals("source_url", StringComparison.OrdinalIgnoreCase) ||
-                        prop.Name.Equals("supplier name", StringComparison.OrdinalIgnoreCase))
-                    {
-                        continue;
-                    }
-
-                    if (!string.IsNullOrWhiteSpace(brandOverride) &&
-                        prop.Name.Equals("brand", StringComparison.OrdinalIgnoreCase))
-                    {
-                        dict[prop.Name] = brandOverride;
-                        continue;
-                    }
-
-                    dict[prop.Name] = prop.Value.ValueKind == JsonValueKind.String ? prop.Value.GetString() : prop.Value.Clone();
+                    specsDict[kvp.Key] = kvp.Value;
                 }
-
-                if (!string.IsNullOrWhiteSpace(brandOverride) && !dict.Keys.Any(k => k.Equals("brand", StringComparison.OrdinalIgnoreCase)))
-                {
-                    dict["brand"] = brandOverride;
-                }
-
-                return JsonSerializer.Serialize(dict, new JsonSerializerOptions { WriteIndented = false });
             }
         }
-        catch
+
+        string? name = result.Title;
+        if (string.IsNullOrWhiteSpace(name) && result.OptionalAttributes != null)
         {
-            // Ignored
+            foreach (var key in new[] { "Nombre", "Title", "Name", "Titulo", "NombreProducto", "Producto" })
+            {
+                if (result.OptionalAttributes.TryGetValue(key, out var val) && !string.IsNullOrWhiteSpace(val))
+                {
+                    name = val;
+                    break;
+                }
+            }
+        }
+        if (string.IsNullOrWhiteSpace(name)) name = sourceSku;
+
+        string? description = result.Description;
+        if (string.IsNullOrWhiteSpace(description) && result.OptionalAttributes != null)
+        {
+            foreach (var key in new[] { "Description", "Descripcion", "Detalle" })
+            {
+                if (result.OptionalAttributes.TryGetValue(key, out var val) && !string.IsNullOrWhiteSpace(val))
+                {
+                    description = val;
+                    break;
+                }
+            }
+        }
+        if (string.IsNullOrWhiteSpace(description)) description = name;
+
+        var categories = new List<string>();
+        if (result.OptionalAttributes != null && result.OptionalAttributes.TryGetValue("Categoria", out var cat) && !string.IsNullOrWhiteSpace(cat))
+        {
+            categories.Add(cat.Trim());
         }
 
-        return rawJson;
+        var productUrl = result.SourceDetailUrls?.FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(productUrl) && result.OptionalAttributes != null && result.OptionalAttributes.TryGetValue("UrlOrigen", out var url))
+        {
+            productUrl = url;
+        }
+
+        var imageUrls = result.ImageUrls ?? new List<string>();
+
+        string? finalSupplier = supplierName;
+        if (string.IsNullOrWhiteSpace(finalSupplier) && result.OptionalAttributes != null)
+        {
+            foreach (var key in new[] { "Marca", "Brand", "Proveedor", "Supplier" })
+            {
+                if (result.OptionalAttributes.TryGetValue(key, out var val) && !string.IsNullOrWhiteSpace(val))
+                {
+                    finalSupplier = val;
+                    break;
+                }
+            }
+        }
+
+        string? specsJson = specsDict.Count > 0
+            ? JsonSerializer.Serialize(specsDict, new JsonSerializerOptions { WriteIndented = false })
+            : null;
+
+        return new FlashlyProductSyncPayload
+        {
+            SourceSku = sourceSku,
+            Name = name,
+            Description = description,
+            PurchasePrice = result.SupplierCost,
+            Currency = "MXN",
+            Categories = categories,
+            ProductUrl = string.IsNullOrWhiteSpace(productUrl) ? null : productUrl.Trim(),
+            ImageUrls = imageUrls,
+            SupplierName = finalSupplier,
+            SpecificationsJson = specsJson
+        };
+    }
+
+    public static FlashlyProductSyncDto ToFlashlyDto(StagingProduct product)
+    {
+        var payload = ToFlashlyPayload(product);
+        return new FlashlyProductSyncDto
+        {
+            SourceSku = payload.SourceSku,
+            Name = payload.Name,
+            Description = payload.Description,
+            PurchasePrice = payload.PurchasePrice,
+            Currency = payload.Currency,
+            Categories = payload.Categories,
+            ProductUrl = payload.ProductUrl,
+            ImageUrls = payload.ImageUrls,
+            SupplierName = payload.SupplierName,
+            SpecificationsJson = payload.SpecificationsJson
+        };
+    }
+
+    private static void ExtractSpecificationsIntoDict(Dictionary<string, object?> dict, JsonElement root)
+    {
+        if (TryGetPropertyCaseInsensitive(root, "specifications", out var specsProp) ||
+            TryGetPropertyCaseInsensitive(root, "Attributes", out specsProp) ||
+            TryGetPropertyCaseInsensitive(root, "attributes", out specsProp))
+        {
+            if (specsProp.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var prop in specsProp.EnumerateObject())
+                {
+                    if (!dict.ContainsKey(prop.Name))
+                    {
+                        dict[prop.Name] = prop.Value.ValueKind == JsonValueKind.String ? prop.Value.GetString() : prop.Value.Clone();
+                    }
+                }
+            }
+            else if (specsProp.ValueKind == JsonValueKind.String)
+            {
+                try
+                {
+                    using var subDoc = JsonDocument.Parse(specsProp.GetString()!);
+                    if (subDoc.RootElement.ValueKind == JsonValueKind.Object)
+                    {
+                        foreach (var prop in subDoc.RootElement.EnumerateObject())
+                        {
+                            if (!dict.ContainsKey(prop.Name))
+                            {
+                                dict[prop.Name] = prop.Value.ValueKind == JsonValueKind.String ? prop.Value.GetString() : prop.Value.Clone();
+                            }
+                        }
+                    }
+                }
+                catch { }
+            }
+        }
     }
 
     private static string? ReadString(JsonElement element, params string[] names)
@@ -193,19 +353,6 @@ internal static class FlashlyProductMapper
         }
 
         return new List<string>();
-    }
-
-    private static string? ReadRawJson(JsonElement element, params string[] names)
-    {
-        foreach (var name in names)
-        {
-            if (TryGetPropertyCaseInsensitive(element, name, out var value))
-            {
-                return value.GetRawText();
-            }
-        }
-
-        return null;
     }
 
     private static string? FirstNonEmpty(params string?[] values)

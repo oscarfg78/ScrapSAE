@@ -211,14 +211,25 @@ app.MapPost("/api/sites/analyze", async (
             detail: ex.Message,
             statusCode: StatusCodes.Status408RequestTimeout);
     }
-    catch (InvalidOperationException ex) when (ex.Message.Contains("inaccesible") || ex.Message.Contains("Failed") || ex.Message.Contains("net::"))
+    catch (InvalidOperationException ex) when (ex.Message.Contains("OpenAI") || ex.Message.Contains("401") || ex.Message.Contains("ApiKey"))
+    {
+        Log.Warning("[PageAnalysis] Error de IA/OpenAI al analizar {Url}: {Error}", request.Url, ex.Message);
+        return Results.Problem(
+            title: "Error en servicio de IA (OpenAI)",
+            detail: ex.Message,
+            statusCode: StatusCodes.Status502BadGateway);
+    }
+    catch (InvalidOperationException ex) when (ex.Message.Contains("inaccesible") || ex.Message.Contains("ERR_") || ex.Message.Contains("net::"))
     {
         return Results.UnprocessableEntity(new { error = $"No se pudo acceder a la página: {ex.Message}" });
     }
     catch (Exception ex)
     {
         Log.Error(ex, "[PageAnalysis] Error analizando {Url}", request.Url);
-        return Results.UnprocessableEntity(new { error = ex.Message });
+        return Results.Problem(
+            title: "Error de análisis",
+            detail: ex.Message,
+            statusCode: StatusCodes.Status500InternalServerError);
     }
 }).WithTags("Site");
 
@@ -912,6 +923,63 @@ app.MapPost("/api/online-store/send/{productId:guid}", async (
     }
 });
 
+app.MapPost("/api/online-store/sync-payloads", async (
+    FlashlyProductSyncBatchRequest batchRequest,
+    SettingsStore settingsStore,
+    IConfiguration configuration,
+    IHttpClientFactory httpClientFactory,
+    CancellationToken token) =>
+{
+    var settings = settingsStore.Get();
+    var endpoint = ResolveOnlineStoreEndpoint(settings?.OnlineStoreBaseUrl, configuration["FlashlyApi:BaseUrl"]);
+    var apiKey = FirstNonEmpty(settings?.OnlineStoreApiKey, configuration["FlashlyApi:ApiKey"]);
+
+    if (endpoint == null || string.IsNullOrWhiteSpace(apiKey))
+    {
+        return Results.BadRequest(new { message = "Configuración incompleta de tienda en línea (Base URL / API Key desconfigurados en Ajustes)." });
+    }
+
+    if (batchRequest?.Products == null || batchRequest.Products.Count == 0)
+    {
+        return Results.BadRequest(new { message = "La lista de productos a enviar está vacía." });
+    }
+
+    try
+    {
+        var client = httpClientFactory.CreateClient("OnlineStore");
+        client.DefaultRequestHeaders.Remove("X-API-Key");
+        client.DefaultRequestHeaders.Add("X-API-Key", apiKey);
+
+        var requestPayload = JsonSerializer.Serialize(new { products = batchRequest.Products });
+        using var content = new StringContent(requestPayload, Encoding.UTF8, "application/json");
+        using var response = await client.PostAsync(endpoint, content, token);
+        var upstreamResponseBody = await response.Content.ReadAsStringAsync(token);
+
+        var ok = response.IsSuccessStatusCode;
+        if (ok)
+        {
+            var parsed = TryParseFlashlyResponse(upstreamResponseBody);
+            var error = parsed?.Results?.Errors?.FirstOrDefault();
+            if (error != null && !string.IsNullOrWhiteSpace(error.Error))
+            {
+                var message = BuildOnlineStoreErrorMessage(error.Error, endpoint, requestPayload, (int)response.StatusCode, upstreamResponseBody);
+                return Results.BadRequest(new { message, upstreamResponseBody });
+            }
+
+            return Results.Ok(new { success = true, message = parsed?.Message ?? "Payloads sincronizados con Flashly." });
+        }
+        else
+        {
+            var message = BuildOnlineStoreErrorMessage($"HTTP {(int)response.StatusCode}", endpoint, requestPayload, (int)response.StatusCode, upstreamResponseBody);
+            return Results.BadRequest(new { message, upstreamResponseBody, upstreamStatusCode = (int)response.StatusCode });
+        }
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(title: "Error inesperado al enviar a Flashly.", detail: ex.Message);
+    }
+});
+
 // Extension endpoints (Chrome Extension + Stripe + Layouts)
 app.MapExtensionEndpoints();
 
@@ -1174,41 +1242,27 @@ static bool ValidateOnlineStorePayload(JsonObject payload, out string? error)
 static Uri? ResolveOnlineStoreEndpoint(string? runtimeUrl, string? fallbackBaseUrl)
 {
     const string syncPath = "/api/v1/products/sync";
-    var raw = FirstNonEmpty(runtimeUrl, fallbackBaseUrl);
-    if (string.IsNullOrWhiteSpace(raw))
+    var candidates = new[] { runtimeUrl, fallbackBaseUrl };
+    foreach (var raw in candidates)
     {
-        return null;
-    }
+        if (string.IsNullOrWhiteSpace(raw)) continue;
 
-    if (!Uri.TryCreate(raw, UriKind.Absolute, out var uri))
-    {
-        return null;
-    }
+        if (!Uri.TryCreate(raw.Trim(), UriKind.Absolute, out var uri))
+            continue;
 
-    if (!string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) &&
-        !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
-    {
-        return null;
-    }
+        if (!string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+            continue;
 
-    if (string.Equals(uri.AbsolutePath, syncPath, StringComparison.OrdinalIgnoreCase))
-    {
-        var normalized = new UriBuilder(uri)
+        var builder = new UriBuilder(uri)
         {
             Path = syncPath,
             Query = string.Empty
         };
-        return normalized.Uri;
+        return builder.Uri;
     }
 
-    // The integration contract requires posting to /api/v1/products/sync.
-    // Normalize any base/admin URL to the required endpoint to avoid 404.
-    var builder = new UriBuilder(uri)
-    {
-        Path = syncPath,
-        Query = string.Empty
-    };
-    return builder.Uri;
+    return null;
 }
 
 static string? FirstNonEmpty(params string?[] values)

@@ -236,6 +236,16 @@
                         Opcional. Ej: Festo, Autonics, Siemens. Se asignará a todos los productos de este proveedor.
                     </TextBlock>
 
+                    <!-- Baseline Supplier Dropdown -->
+                    <TextBlock Style="{StaticResource FieldLabel}" Text="Proveedor Base / Plantilla de Referencia" Margin="0,16,0,4"/>
+                    <ComboBox ItemsSource="{Binding AvailableBaselineSuppliers}"
+                              SelectedItem="{Binding SelectedBaselineSupplier}"
+                              DisplayMemberPath="Name"
+                              FontSize="13" Padding="8,6"/>
+                    <TextBlock Margin="0,4,0,0" FontSize="12" Foreground="#9CA3AF" TextWrapping="Wrap">
+                        Opcional. Selecciona un proveedor existente (ej. Festo) para pre-probar y clonar sus selectores si la estructura del sitio coincide, optimizando recursos de IA.
+                    </TextBlock>
+
                     <Border Background="#FEF2F2" BorderBrush="#DC2626" BorderThickness="1"
                             CornerRadius="6" Padding="12,8" Margin="0,16,0,0"
                             Visibility="{Binding HasError, Converter={StaticResource BoolToVisibility}}">
